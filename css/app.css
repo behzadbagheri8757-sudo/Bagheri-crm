@@ -2455,3 +2455,204 @@ a.dash-tile:active .dash-ico{
   .dash-activity .ledger-row{min-height:52px;padding-block:9px;}
   .action-urgency{width:28px;height:28px;min-width:28px;}
 }
+
+/* ============================================================
+   BAQERI DASHBOARD — FINAL UI POLISH (presentation only)
+   No business logic, ranking, filtering, signal or KPI calculations.
+   ============================================================ */
+.dashboard-shell > .dashboard-block:first-of-type{
+  margin-top:2px;
+}
+.dashboard-shell > .dashboard-block:first-of-type .dashboard-block-head{
+  margin-bottom:10px;
+}
+.dashboard-shell > .dashboard-block:first-of-type .dash-section-label{
+  font-size:.84rem;
+  font-weight:850;
+  color:#172331;
+}
+.dashboard-shell > .dashboard-block:first-of-type .dash-section-ico{
+  width:27px;
+  height:27px;
+  flex-basis:27px;
+  border-color:#DDDAD2;
+  background:#F8F6F1;
+}
+
+/* Action queue: calm white cards, stronger hierarchy, subtle severity rail. */
+.dash-action-queue{
+  padding:3px 11px 4px;
+  border-color:#E2E0DA;
+  box-shadow:0 3px 10px rgba(26,38,52,.035);
+}
+.action-row{
+  position:relative;
+  align-items:flex-start !important;
+  gap:10px !important;
+  padding:11px 2px !important;
+  min-height:0 !important;
+  border-bottom-color:#ECEAE5;
+  transition:background-color .12s ease;
+}
+.action-row::after{
+  content:"";
+  position:absolute;
+  right:-11px;
+  top:9px;
+  bottom:9px;
+  width:2px;
+  border-radius:2px;
+  background:#E1DFD9;
+}
+.action-row-critical::after{background:#C96A64;}
+.action-row-high::after{background:#C79655;}
+.action-row-medium::after{background:#B5A14D;}
+.action-row-low::after{background:#B9B7B0;}
+.action-row:active{background:#FBFAF7;}
+.action-content{
+  display:flex !important;
+  flex-direction:column;
+  min-width:0 !important;
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  line-height:1.35 !important;
+  padding-top:1px;
+}
+.action-person{
+  display:inline;
+  color:#172331;
+  font-size:.83rem;
+  font-weight:850;
+  line-height:1.3;
+}
+.action-badge{
+  display:inline-flex;
+  align-items:center;
+  vertical-align:1px;
+  margin-inline-start:4px;
+  padding:2px 6px;
+  border:1px solid #E4E1D9;
+  border-radius:999px;
+  background:#F7F5F0;
+  color:#6F767C;
+  font-size:.58rem;
+  font-weight:750;
+  line-height:1.25;
+  white-space:nowrap;
+}
+.action-main{
+  display:block;
+  margin-top:5px;
+  color:#1F2429;
+  font-size:.77rem;
+  font-weight:800;
+  line-height:1.45;
+}
+.action-why,
+.action-why-now{
+  display:block;
+  margin-top:3px;
+  color:#70767A;
+  font-size:.64rem;
+  font-weight:550;
+  line-height:1.4;
+}
+.action-why-now{
+  color:#646B70;
+  font-weight:650;
+}
+.action-meta-label{
+  color:#858A8D;
+  font-weight:750;
+}
+.action-urgency{
+  position:relative;
+  flex:0 0 32px;
+  width:32px !important;
+  min-width:32px !important;
+  height:32px !important;
+  border-radius:10px !important;
+  margin-top:0;
+  box-shadow:none !important;
+}
+.action-urgency svg{
+  width:16px !important;
+  height:16px !important;
+  stroke-width:1.8;
+}
+.action-urgency-critical{color:#9F3934;background:#F9E9E7;border-color:#EBCFCD;}
+.action-urgency-high{color:#9A652A;background:#FAF0E1;border-color:#EBD8B9;}
+.action-urgency-medium{color:#806F22;background:#F5F0DC;border-color:#E6DCB9;}
+.action-urgency-low{color:#747775;background:#F2F1ED;border-color:#E2E0DA;}
+
+/* KPI cards: slightly clearer numeric hierarchy without increasing visual noise. */
+.dash-kpis{gap:9px;margin-bottom:16px;}
+.dash-kpi{
+  border-color:#E4E2DC;
+  border-radius:15px;
+  padding:12px 13px 11px;
+  box-shadow:0 3px 10px rgba(26,38,52,.035);
+}
+.dash-kpi::before{width:3px;top:11px;bottom:11px;}
+.dash-kpi-label{font-size:.67rem;margin-bottom:6px;letter-spacing:-.05px;}
+.dash-kpi-value{font-size:1.15rem;line-height:1.18;}
+.dash-kpi-sub{font-size:.62rem;margin-top:5px;line-height:1.35;}
+.kpi-delta{padding:2px 5px;}
+
+/* Section rhythm: enough separation to scan, without adding page length. */
+.dashboard-block{margin-bottom:16px;}
+.dashboard-block-head{margin-bottom:9px;}
+.dash-section-label{gap:7px;font-size:.79rem;font-weight:800;}
+.dash-section-ico{width:24px;height:24px;flex-basis:24px;border-radius:8px;}
+.dash-section-ico svg{width:13px;height:13px;}
+
+/* Quick access: quieter tiles and stronger icon/title grouping. */
+a.dash-tile{
+  min-height:94px;
+  padding:11px 5px 9px;
+  border-color:#E5E3DD;
+  border-radius:15px;
+  box-shadow:0 3px 10px rgba(26,38,52,.035);
+}
+a.dash-tile .dash-ico{
+  width:40px;height:40px;border-radius:13px;margin-bottom:7px;
+  background:#F8F6F1;
+  border-color:#E1DED6;
+  box-shadow:0 2px 7px rgba(26,38,52,.055), inset 0 1px 0 rgba(255,255,255,.95);
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+a.dash-tile .dash-ico svg{width:19px;height:19px;stroke-width:1.6;}
+a.dash-tile .dash-title{font-size:.68rem;line-height:1.28;min-height:2.56em;}
+a.dash-tile .dash-sub{font-size:.58rem;margin-top:2px;}
+
+/* Monthly target stays visually secondary to today's queue. */
+.dash-target-block{margin-bottom:14px;}
+.dash-monthly-target{box-shadow:0 5px 16px rgba(23,35,49,.12);}
+
+@media (max-width:419px){
+  .action-row{padding-block:10px !important;}
+  .action-person{font-size:.8rem;}
+  .action-main{font-size:.74rem;margin-top:4px;}
+  .action-why,.action-why-now{font-size:.62rem;}
+  .action-urgency{flex-basis:30px;width:30px !important;min-width:30px !important;height:30px !important;}
+  .dash-kpi{padding:10px 10px 9px;}
+  .dash-kpi-value{font-size:1rem;}
+  a.dash-tile{min-height:88px;padding:9px 3px 8px;}
+  a.dash-tile .dash-ico{width:37px;height:37px;border-radius:12px;margin-bottom:6px;}
+  a.dash-tile .dash-ico svg{width:18px;height:18px;}
+  a.dash-tile .dash-title{font-size:.62rem;}
+}
+
+@media (max-width:380px){
+  .dash-action-queue{padding-inline:9px;}
+  .action-row::after{right:-9px;}
+  .action-row{gap:8px !important;padding-block:9px !important;}
+  .action-person{font-size:.77rem;}
+  .action-main{font-size:.71rem;}
+  .action-why,.action-why-now{font-size:.60rem;}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .action-row,a.dash-tile{transition:none;}
+}
