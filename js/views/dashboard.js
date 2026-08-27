@@ -67,19 +67,45 @@
      looks up the customer's name (read-only) and renders the existing
      dashboard-block/ledger-row markup used elsewhere on this page. */
   function todaysActionsHtml() {
-    if (typeof calculateAllCustomerActions !== 'function') return '';
-    let items;
-    try { items = (calculateAllCustomerActions() || []).filter(function (a) { return a && a.actionType !== 'no_action'; }); }
-    catch (e) { return ''; }
+    // Prefer unified queue; fall back to legacy customer-only actions.
+    let items = [];
+    try {
+      if (typeof calculateAllActions === 'function') {
+        items = (calculateAllActions() || []).filter(function (a) {
+          return a && a.actionType !== 'no_action';
+        });
+      } else if (typeof calculateAllCustomerActions === 'function') {
+        items = (calculateAllCustomerActions() || []).filter(function (a) {
+          return a && a.actionType !== 'no_action';
+        });
+      }
+    } catch (e) { return ''; }
     if (!items.length) return '';
 
+    // Max Top 5 by unifiedScore (already sorted by calculateAllActions)
+    items = items.slice(0, 5);
+
     const rows = items.map(function (a) {
-      const cust = (data.customers || []).find(function (c) { return c.id === a.customerId; });
-      const name = cust ? cust.name : '—';
+      const isProspect = a.type === 'prospect';
+      const name = a.name || (function () {
+        if (a.customerId && typeof data !== 'undefined') {
+          const cust = (data.customers || []).find(function (c) { return c.id === a.customerId; });
+          return cust ? cust.name : '—';
+        }
+        return '—';
+      })();
+      const badge = isProspect ? 'پتانسیل' : 'مشتری';
       const icon = ACTION_URGENCY_ICON[a.urgency] || '⚪';
-      const subParts = [a.action, a.reason].filter(Boolean);
-      return '<a class="ledger-row" href="#/customer?id=' + encodeURIComponent(a.customerId) + '">' +
-        '<span class="name">' + esc(name) + '<span class="sub">' + esc(subParts.join(' — ')) + '</span></span>' +
+      const why = a.reason || '';
+      const whyNow = a.whyNow || '';
+      const subParts = [a.action, why, whyNow ? ('الان: ' + whyNow) : ''].filter(Boolean);
+      const href = isProspect
+        ? ('#/prospect?id=' + encodeURIComponent(a.prospectId || ''))
+        : ('#/customer?id=' + encodeURIComponent(a.customerId || ''));
+      return '<a class="ledger-row" href="' + href + '">' +
+        '<span class="name">' + esc(name) +
+          ' <span class="sub" style="display:inline;opacity:.75;">[' + esc(badge) + ']</span>' +
+          '<span class="sub">' + esc(subParts.join(' — ')) + '</span></span>' +
         '<span class="filler"></span>' +
         '<span class="amount action-urgency action-urgency-' + esc(a.urgency || 'low') + '" aria-label="اولویت ' + esc(a.urgency || 'low') + '">' + icon + '</span>' +
       '</a>';
