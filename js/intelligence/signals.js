@@ -214,6 +214,8 @@
      8: LONG_NO_VISIT
      --------------------------------------------------------- */
   function _longNoVisitSignal(cid, b, out) {
+    // Fallback only when visit cadence is unavailable.
+    if (typeof visitCadence === 'function' && visitCadence(cid)) return;
     if (!b.lastVisit) return;
     if (b.invoiceCount < 2) return;
 
@@ -230,6 +232,72 @@
       unit: 'days',
       reason: _fa(days) + ' روز است که مشتری ویزیت نشده است',
       confidence: 0.85,
+    }));
+  }
+
+  /* ---------------------------------------------------------
+     VISIT_OVERDUE — cadence-based (when cadence exists).
+     Buffer = min(7, cadence * 0.5). Does not replace LONG_NO_VISIT
+     fallback for customers without cadence.
+     --------------------------------------------------------- */
+  function _visitOverdueSignal(cid, b, out) {
+    if (typeof visitCadence !== 'function') return;
+    const cadence = visitCadence(cid);
+    if (!cadence) return;
+
+    let daysSince = null;
+    if (b && b.lastVisit && b.lastVisit.date) {
+      daysSince = (typeof daysAgo === 'function') ? daysAgo(b.lastVisit.date) : null;
+    }
+    if (daysSince == null || !isFinite(daysSince)) {
+      if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
+        const cust = data.customers.find(function (c) { return c && c.id === cid; });
+        const visits = (cust && Array.isArray(cust.visits)) ? cust.visits.slice() : [];
+        if (visits.length) {
+          visits.sort(function (a, b2) {
+            return String(b2.date || '').localeCompare(String(a.date || ''));
+          });
+          if (visits[0] && visits[0].date) {
+            daysSince = (typeof daysAgo === 'function') ? daysAgo(visits[0].date) : null;
+          }
+        }
+      }
+    }
+    if (daysSince == null || !isFinite(daysSince)) return;
+
+    const buffer = Math.min(7, cadence * 0.5);
+    if (daysSince <= cadence + buffer) return;
+
+    const overdue = Math.max(0, daysSince - cadence);
+    const severity = overdue > (2 * cadence) ? 'high' : 'medium';
+
+    out.push(_mkSignal(cid, 'VISIT_OVERDUE', {
+      type: 'risk',
+      severity: severity,
+      value: overdue,
+      unit: 'days',
+      reason: 'ویزیت ' + _fa(overdue) + ' روز از الگوی معمول عقب افتاده است',
+      confidence: 0.8,
+    }));
+  }
+
+  /* ---------------------------------------------------------
+     VISIT_CONVERSION_LOW — low-severity; does not override stronger signals.
+     visitCount >= 3 and conversionRate < 0.5
+     --------------------------------------------------------- */
+  function _visitConversionLowSignal(cid, b, out) {
+    if (!b) return;
+    if (!(b.visitCount >= 3)) return;
+    if (!(typeof b.conversionRate === 'number' && b.conversionRate < 0.5)) return;
+    if (out.some(function (s) { return s && s.category === 'VISIT_CONVERSION_LOW'; })) return;
+
+    out.push(_mkSignal(cid, 'VISIT_CONVERSION_LOW', {
+      type: 'risk',
+      severity: 'low',
+      value: _round((b.conversionRate || 0) * 100, 0),
+      unit: '%',
+      reason: 'ویزیت‌های اخیر به سفارش تبدیل نشده‌اند — بررسی کنید',
+      confidence: 0.75,
     }));
   }
 
@@ -298,7 +366,9 @@
     _consecutiveNoOrderSignal(cid, b, out);
     _basketShrinkSignal(cid, b, out);
     _keyProductLostSignal(cid, b, out);
+    _visitOverdueSignal(cid, b, out);
     _longNoVisitSignal(cid, b, out);
+    _visitConversionLowSignal(cid, b, out);
 
     // openingBalance is intentionally never inspected here — signals are
     // based only on actual recorded behavior (invoices/visits/checks),
