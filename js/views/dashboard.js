@@ -115,26 +115,25 @@
         ? ('#/prospect?id=' + encodeURIComponent(a.prospectId || ''))
         : ('#/customer?id=' + encodeURIComponent(a.customerId || ''));
       const lines = [];
-      lines.push('<span style="font-weight:700;color:#1F2429;">' + esc(name) +
-        '</span> <span class="sub" style="display:inline;font-weight:600;opacity:.9;color:#6F767C;">' +
-        esc(badge) + '</span>');
+      lines.push('<span class="action-person">' + esc(name) +
+        '</span> <span class="action-badge">' + esc(badge) + '</span>');
       if (actionText) {
-        lines.push('<span class="sub" style="margin-top:3px;color:#1F2429;opacity:.92;">' + esc(actionText) + '</span>');
+        lines.push('<span class="action-main">' + esc(actionText) + '</span>');
       }
       if (why) {
-        lines.push('<span class="sub" style="margin-top:2px;opacity:.78;">' + esc(why) + '</span>');
+        lines.push('<span class="action-why"><span class="action-meta-label">چرا:</span> ' + esc(why) + '</span>');
       }
       if (whyNow) {
-        lines.push('<span class="sub" style="margin-top:2px;opacity:.72;font-weight:600;">الان: ' + esc(whyNow) + '</span>');
+        lines.push('<span class="action-why-now"><span class="action-meta-label">الان:</span> ' + esc(whyNow) + '</span>');
       }
-      return '<a class="ledger-row" href="' + href + '">' +
+      return '<a class="ledger-row action-row action-row-' + esc(urgency) + '" href="' + href + '">' +
         '<span class="amount action-urgency action-urgency-' + esc(urgency) + '" aria-label="اولویت ' + esc(urgency) + '">' + icon + '</span>' +
-        '<span class="name" style="min-width:0;">' + lines.join('') + '</span>' +
+        '<span class="name action-content">' + lines.join('') + '</span>' +
         '<span class="filler"></span>' +
       '</a>';
     }).join('');
 
-    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') + '<div class="dash-activity">' + rows + '</div></div>';
+    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') + '<div class="dash-activity dash-action-queue">' + rows + '</div></div>';
   }
 
   function recentInvoicesHtml() {
@@ -245,8 +244,8 @@
       '<div class="dashboard-shell">' +
       '<h2 class="section-title">داشبورد</h2>' +
       '<div class="dashboard-eyebrow">مرکز فرماندهی روزانه</div>' +
-      targetHtml(metrics) +
       todaysActionsHtml() +
+      targetHtml(metrics) +
       '<div class="dashboard-block">' + dashSectionHead(ICO.summary, 'خلاصه وضعیت', '', '') +
       '<div class="dash-kpis">' +
       '<div class="dash-kpi sales"><div class="dash-kpi-label">فروش این ماه</div><div class="dash-kpi-value sales">' + money(metrics.mtdSales) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.salesDeltaPct) + '</div></div>' +
