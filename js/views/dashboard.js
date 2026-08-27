@@ -35,11 +35,13 @@
     return '<div class="dashboard-block-head"><div class="dash-section-label"><span class="dash-section-ico" aria-hidden="true">' + ico + '</span><span>' + title + '</span></div>' + (href ? '<a class="section-action" href="' + href + '">' + action + '</a>' : '') + '</div>';
   }
 
+  /* Urgency icons: Tabler-style, priority semantics only (not growth/decline).
+     stroke ~1.7 matches existing ICO.* set on this page. */
   const ACTION_URGENCY_ICON = {
-    critical: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17v.01"/><path d="M10.29 3.86l-8.82 15a2 2 0 0 0 1.72 3h17.62a2 2 0 0 0 1.72 -3l-8.82 -15a2 2 0 0 0 -3.42 0z"/></svg>',
-    high: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v-16"/><path d="M6 10l6 -6l6 6"/></svg>',
-    medium: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="M8 8l4 -4l4 4"/><path d="M8 16l4 4l4 -4"/></svg>',
-    low: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="M8 16l4 4l4 -4"/></svg>'
+    critical: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/></svg>',
+    high: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.075 -3.826 -1.5 -4.5c.25 1.53.25 2.5 -1 3.5"/></svg>',
+    medium: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 7v5l3 3"/></svg>',
+    low: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/></svg>'
   };
 
   function normalizeDigits(v) {
@@ -95,7 +97,8 @@
         return '—';
       })();
       const badge = isProspect ? 'پتانسیل' : 'مشتری';
-      const icon = ACTION_URGENCY_ICON[a.urgency] || '⚪';
+      const urgency = a.urgency || 'low';
+      const icon = ACTION_URGENCY_ICON[urgency] || ACTION_URGENCY_ICON.low;
       const why = a.reason || '';
       const whyNow = a.whyNow || '';
       const subParts = [a.action, why, whyNow ? ('الان: ' + whyNow) : ''].filter(Boolean);
@@ -103,11 +106,11 @@
         ? ('#/prospect?id=' + encodeURIComponent(a.prospectId || ''))
         : ('#/customer?id=' + encodeURIComponent(a.customerId || ''));
       return '<a class="ledger-row" href="' + href + '">' +
+        '<span class="amount action-urgency action-urgency-' + esc(urgency) + '" aria-label="اولویت ' + esc(urgency) + '">' + icon + '</span>' +
         '<span class="name">' + esc(name) +
           ' <span class="sub" style="display:inline;opacity:.75;">[' + esc(badge) + ']</span>' +
           '<span class="sub">' + esc(subParts.join(' — ')) + '</span></span>' +
         '<span class="filler"></span>' +
-        '<span class="amount action-urgency action-urgency-' + esc(a.urgency || 'low') + '" aria-label="اولویت ' + esc(a.urgency || 'low') + '">' + icon + '</span>' +
       '</a>';
     }).join('');
 
