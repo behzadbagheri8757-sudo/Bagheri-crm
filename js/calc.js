@@ -411,6 +411,76 @@ function _behaviorISODaysAgo(n){
 }
 
 /**
+ * Visit cadence (days) from consecutive customer visit gaps.
+ * <2 visits → null. Median gap, clamped to 1..90. Read-only.
+ */
+function visitCadence(cid){
+  if(!cid || typeof data === 'undefined' || !Array.isArray(data.customers)) return null;
+  const cust = data.customers.find(function(c){ return c && c.id === cid; });
+  const visits = (cust && Array.isArray(cust.visits)) ? cust.visits : [];
+  if(visits.length < 2) return null;
+
+  const sorted = visits.slice().sort(function(a, b){
+    return String(a.date || '').localeCompare(String(b.date || '')) ||
+      String(a.time || '').localeCompare(String(b.time || ''));
+  });
+
+  const gaps = [];
+  for(let i = 1; i < sorted.length; i++){
+    const d0 = sorted[i - 1].date;
+    const d1 = sorted[i].date;
+    if(!d0 || !d1) continue;
+    let days = null;
+    const p0 = (typeof parseISODateParts === 'function') ? parseISODateParts(String(d0).slice(0, 10)) : null;
+    const p1 = (typeof parseISODateParts === 'function') ? parseISODateParts(String(d1).slice(0, 10)) : null;
+    if(p0 && p1){
+      const t0 = new Date(p0.y, p0.m - 1, p0.d).getTime();
+      const t1 = new Date(p1.y, p1.m - 1, p1.d).getTime();
+      if(!isNaN(t0) && !isNaN(t1)) days = Math.round((t1 - t0) / 86400000);
+    } else {
+      const t0 = new Date(d0).getTime();
+      const t1 = new Date(d1).getTime();
+      if(!isNaN(t0) && !isNaN(t1)) days = Math.round((t1 - t0) / 86400000);
+    }
+    if(days != null && isFinite(days) && days >= 0) gaps.push(days);
+  }
+  if(!gaps.length) return null;
+
+  gaps.sort(function(a, b){ return a - b; });
+  const mid = Math.floor(gaps.length / 2);
+  let median;
+  if(gaps.length % 2 === 1) median = gaps[mid];
+  else median = Math.round((gaps[mid - 1] + gaps[mid]) / 2);
+
+  if(!isFinite(median) || median < 1) return 1;
+  if(median > 90) return 90;
+  return median;
+}
+
+/**
+ * Days the customer is overdue relative to their visit cadence.
+ * No cadence → 0. Read-only.
+ */
+function visitOverdueDays(cid){
+  const cadence = visitCadence(cid);
+  if(!cadence) return 0;
+  if(!cid || typeof data === 'undefined' || !Array.isArray(data.customers)) return 0;
+  const cust = data.customers.find(function(c){ return c && c.id === cid; });
+  const visits = (cust && Array.isArray(cust.visits)) ? cust.visits : [];
+  if(!visits.length) return 0;
+
+  const sorted = visits.slice().sort(function(a, b){
+    return String(b.date || '').localeCompare(String(a.date || '')) ||
+      String(b.time || '').localeCompare(String(a.time || ''));
+  });
+  const lastDate = sorted[0] && sorted[0].date;
+  if(!lastDate) return 0;
+  const daysSince = (typeof daysAgo === 'function') ? daysAgo(lastDate) : null;
+  if(daysSince == null || !isFinite(daysSince)) return 0;
+  return Math.max(0, daysSince - cadence);
+}
+
+/**
  * Runtime derived behavior profile for sales decisions.
  * Purchase truth = invoices minus sales-returns (payments method==='return').
  * Visits = observation only. Returns null when data is insufficient. Never mutates data.
