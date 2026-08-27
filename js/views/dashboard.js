@@ -82,7 +82,16 @@
         });
       }
     } catch (e) { return ''; }
-    if (!items.length) return '';
+    if (!items.length) {
+      return '<div class="dashboard-block">' +
+        dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') +
+        '<div class="dash-activity">' +
+          '<div class="empty" style="padding:18px 8px;text-align:center;">' +
+            '<div style="font-weight:700;color:#1F2429;margin-bottom:4px;">امروز کار ضروری نداری</div>' +
+            '<div class="sub" style="opacity:.85;">وضعیت مشتری‌ها و پتانسیل‌ها تحت کنترل است.</div>' +
+          '</div>' +
+        '</div></div>';
+    }
 
     // Max Top 5 by unifiedScore (already sorted by calculateAllActions)
     items = items.slice(0, 5);
@@ -99,17 +108,28 @@
       const badge = isProspect ? 'پتانسیل' : 'مشتری';
       const urgency = a.urgency || 'low';
       const icon = ACTION_URGENCY_ICON[urgency] || ACTION_URGENCY_ICON.low;
+      const actionText = a.action || '';
       const why = a.reason || '';
       const whyNow = a.whyNow || '';
-      const subParts = [a.action, why, whyNow ? ('الان: ' + whyNow) : ''].filter(Boolean);
       const href = isProspect
         ? ('#/prospect?id=' + encodeURIComponent(a.prospectId || ''))
         : ('#/customer?id=' + encodeURIComponent(a.customerId || ''));
+      const lines = [];
+      lines.push('<span style="font-weight:700;color:#1F2429;">' + esc(name) +
+        '</span> <span class="sub" style="display:inline;font-weight:600;opacity:.9;color:#6F767C;">' +
+        esc(badge) + '</span>');
+      if (actionText) {
+        lines.push('<span class="sub" style="margin-top:3px;color:#1F2429;opacity:.92;">' + esc(actionText) + '</span>');
+      }
+      if (why) {
+        lines.push('<span class="sub" style="margin-top:2px;opacity:.78;">' + esc(why) + '</span>');
+      }
+      if (whyNow) {
+        lines.push('<span class="sub" style="margin-top:2px;opacity:.72;font-weight:600;">الان: ' + esc(whyNow) + '</span>');
+      }
       return '<a class="ledger-row" href="' + href + '">' +
         '<span class="amount action-urgency action-urgency-' + esc(urgency) + '" aria-label="اولویت ' + esc(urgency) + '">' + icon + '</span>' +
-        '<span class="name">' + esc(name) +
-          ' <span class="sub" style="display:inline;opacity:.75;">[' + esc(badge) + ']</span>' +
-          '<span class="sub">' + esc(subParts.join(' — ')) + '</span></span>' +
+        '<span class="name" style="min-width:0;">' + lines.join('') + '</span>' +
         '<span class="filler"></span>' +
       '</a>';
     }).join('');
