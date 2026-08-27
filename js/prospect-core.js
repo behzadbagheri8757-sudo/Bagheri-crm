@@ -29,6 +29,24 @@ function prospectNeighborhoodName(routeId, neighborhoodId){
   return n ? n.name : '—';
 }
 
+/** Days since the shop's latest evaluation visit. Missing/invalid → null. Read-only. */
+function daysSinceLastEvaluation(shopId){
+  if(!shopId || typeof prospectState === 'undefined' || !Array.isArray(prospectState.shops)) return null;
+  const shop = prospectState.shops.find(function(s){ return s && s.id === shopId; });
+  if(!shop || !Array.isArray(shop.visits) || !shop.visits.length) return null;
+  let latest = null;
+  for(let i = 0; i < shop.visits.length; i++){
+    const d = shop.visits[i] && shop.visits[i].date;
+    if(!d) continue;
+    if(latest == null || String(d) > String(latest)) latest = d;
+  }
+  if(!latest) return null;
+  if(typeof daysAgo !== 'function') return null;
+  const n = daysAgo(latest);
+  if(n == null || !isFinite(n) || n === Infinity) return null;
+  return n;
+}
+
 async function persistProspectShop(shop){
   shop.updatedAt = prospectNowISO();
   await prospectDbPut('shops', shop);
