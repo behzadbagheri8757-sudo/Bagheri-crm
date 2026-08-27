@@ -2448,7 +2448,7 @@ a.dash-tile:active .dash-ico{
 .action-urgency-critical{color:#A13131;background:#FBEFEE;border-color:#F0D7D5;}
 .action-urgency-high{color:#A76A24;background:#FBF3E5;border-color:#EEDDBE;}
 .action-urgency-medium{color:#8A741F;background:#F7F2DD;border-color:#E9DFC0;}
-.action-urgency-low{color:#2F6B45;background:#EAF4ED;border-color:#D4E7D9;}
+.action-urgency-low{color:#6F767C;background:#F3F1ED;border-color:#E6E4DF;}
 @media (max-width:380px){
   .dashboard-block{margin-bottom:14px;}
   .dash-activity{padding-inline:8px;}
