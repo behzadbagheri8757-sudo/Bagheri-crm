@@ -7,8 +7,8 @@
  */
 'use strict';
 
-/* CHANGED: v22 -> v23 (iOS UI polish — route transition, input zoom, FAB z-index) */
-const CACHE_NAME = 'baqeri-shell-v23';
+/* CHANGED: v23 -> v24 (iOS native fix — keyboard sheet, notch, route transition timing) */
+const CACHE_NAME = 'baqeri-shell-v24';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
