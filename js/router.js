@@ -76,6 +76,9 @@
       try {
         if (main) {
           main.setAttribute('aria-busy', 'true');
+          /* Restart enter animation: remove then re-add so CSS keyframes re-fire */
+          main.classList.remove('route-transition');
+          void main.offsetWidth;
           main.classList.add('route-transition');
         }
         const result = handler(params);
@@ -91,10 +94,11 @@
       } finally {
         if (main) {
           main.removeAttribute('aria-busy');
-          // FIX: Delay removal of route-transition so CSS animation paints
-          requestAnimationFrame(function () {
-            main.classList.remove('route-transition');
-          });
+          /* Keep class for full CSS duration (~280–320ms); rAF alone removed it too early */
+          clearTimeout(resolve._transitionTimer);
+          resolve._transitionTimer = setTimeout(function () {
+            try { main.classList.remove('route-transition'); } catch (e) {}
+          }, 320);
         }
         const saved = scrollPositions.get(hash);
         requestAnimationFrame(function () {

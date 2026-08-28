@@ -577,9 +577,11 @@ function setupVisualViewportKeyboardGuard() {
         const vv = window.visualViewport;
         const keyboardHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
         const isOpen = keyboardHeight > 80;
-        
+
         document.body.classList.toggle('keyboard-open', isOpen);
         document.body.style.setProperty('--keyboard-height', keyboardHeight + 'px');
+        document.body.style.setProperty('--vv-height', Math.round(vv.height) + 'px');
+        if (typeof pinBottomNav === 'function') pinBottomNav();
       }
     } catch (e) {}
   }
@@ -590,5 +592,18 @@ function setupVisualViewportKeyboardGuard() {
     window.visualViewport.addEventListener('resize', update, { passive: true });
     window.visualViewport.addEventListener('scroll', update, { passive: true });
   }
+  document.addEventListener('focusin', function (e) {
+    var t = e.target;
+    if (!t || !t.tagName) return;
+    var tag = t.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) {
+      setTimeout(update, 50);
+      setTimeout(update, 300);
+    }
+  }, true);
+  document.addEventListener('focusout', function () {
+    setTimeout(update, 50);
+    setTimeout(update, 300);
+  }, true);
   update();
 }

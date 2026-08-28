@@ -472,6 +472,7 @@ function showToast(msg){
 function closeModal(){
   const root = document.getElementById('modalRoot');
   root.innerHTML = '';
+  try{ document.body.classList.remove('modal-open'); }catch(_e){}
   if(window.scrollX) window.scrollTo(0, window.scrollY);
 }
 
@@ -488,6 +489,7 @@ function openSheet(html){
         ${html}
       </div>
     </div>`;
+  try{ document.body.classList.add('modal-open'); }catch(_e){}
   document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
   document.getElementById('closeX').addEventListener('click', closeModal);
 }
