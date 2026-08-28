@@ -468,11 +468,18 @@ function showToast(msg){
 }
 
 
-// ---------- body scroll lock (real iOS fix: `overflow:hidden` on body alone
-// does not reliably stop background touch-scroll on iOS Safari; the robust
-// technique is to pin body via position:fixed at the current scroll offset
-// and restore it on unlock). Shared by modal/sheet (this file) and the
-// More menu (nav.js) so both use one consistent, reference-counted lock. ----------
+// ---------- body scroll lock (position:fixed technique) ----------
+// NOTE: this is used ONLY by the More Menu (nav.js), which has no text
+// inputs/keyboard interaction. It must NOT be used by openSheet/closeModal
+// below: sheets like "New Invoice" contain real inputs, and pinning body
+// via position:fixed breaks iOS's native "scroll focused input above the
+// keyboard" behavior plus the existing body.keyboard-open/--keyboard-height
+// mechanism (setupVisualViewportKeyboardGuard in nav.js), causing the sheet
+// to be cut off under the keyboard and the layout to jitter as visualViewport
+// events fight the frozen body. Modal/Sheet uses the simpler class-based
+// lock further below instead (body.modal-open{overflow:hidden} in app.css) —
+// it doesn't fully stop background touch-scroll but does not conflict with
+// the keyboard, so it's the correct trade-off for forms with inputs.
 (function(){
   let lockCount = 0;
   let savedScrollY = 0;
@@ -510,7 +517,6 @@ function closeModal(){
   const root = document.getElementById('modalRoot');
   root.innerHTML = '';
   try{ document.body.classList.remove('modal-open'); }catch(_e){}
-  try{ window.__scrollLock && window.__scrollLock.unlock(); }catch(_e){}
   if(window.scrollX) window.scrollTo(0, window.scrollY);
 }
 
@@ -528,8 +534,6 @@ function openSheet(html){
       </div>
     </div>`;
   try{ document.body.classList.add('modal-open'); }catch(_e){}
-  // closeModal() above already unlocked if a previous sheet was open; lock fresh for this one.
-  try{ window.__scrollLock && window.__scrollLock.lock(); }catch(_e){}
   document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
   document.getElementById('closeX').addEventListener('click', closeModal);
 }
