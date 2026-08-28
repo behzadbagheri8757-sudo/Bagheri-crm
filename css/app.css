@@ -3298,3 +3298,41 @@ body.modal-open .fab{
     background: rgba(23, 35, 49, 0.98) !important;
   }
 }
+
+/* ============================================================
+   iOS Fix Pack v26 — Status Bar navy continuity only
+   Problem: under black-translucent, html/body cream bg shows as a
+   white band in the Status Bar / overscroll when header moves.
+   Keep top chrome navy so Safe Area + Header stay one continuous block.
+   ============================================================ */
+
+/* Canvas behind everything: navy so overscroll / gaps are never white */
+html{
+  background-color: #172331 !important;
+}
+
+/* Page surface stays cream; does not paint the status-bar zone */
+body{
+  background-color: var(--color-bg) !important;
+}
+
+/* Fixed navy strip locked to the viewport top (Status Bar / Notch / Island) */
+html::before{
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  min-height: env(safe-area-inset-top, 0px);
+  background: #172331;
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* Header matches strip — solid navy (no translucency washing to white content) */
+header{
+  background: #172331 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
