@@ -31,8 +31,8 @@
   ICO.invoiceSection = ICO.invoice;
   ICO.visitSection = ICO.map;
 
-  function dashSectionHead(ico, title, href, action) {
-    return '<div class="dashboard-block-head"><div class="dash-section-label"><span class="dash-section-ico" aria-hidden="true">' + ico + '</span><span>' + title + '</span></div>' + (href ? '<a class="section-action" href="' + href + '">' + action + '</a>' : '') + '</div>';
+  function dashSectionHead(ico, title, href, action, badge) {
+    return '<div class="dashboard-block-head"><div class="dash-section-label"><span class="dash-section-ico" aria-hidden="true">' + ico + '</span><span>' + title + '</span>' + (badge || '') + '</div>' + (href ? '<a class="section-action" href="' + href + '">' + action + '</a>' : '') + '</div>';
   }
 
   /* Urgency icons: Tabler-style, priority semantics only (not growth/decline).
@@ -60,6 +60,58 @@
 
   function dashTile(href, ico, title, sub) {
     return '<a class="dash-tile" href="' + href + '"><span class="dash-ico">' + ico + '</span><span class="dash-title">' + title + '</span>' + (sub ? '<span class="dash-sub">' + sub + '</span>' : '') + '</a>';
+  }
+
+  /* Quick Actions: opens a tiny customer picker, then delegates to the existing
+     global add-* functions (openAddInvoice/openAddTransaction/openAddVisit).
+     No new business logic — same pattern as invoices.js's openNewInvoicePicker. */
+  function quickActionPickCustomer(title, fn) {
+    if (!data.customers || !data.customers.length) {
+      if (typeof openSheet === 'function') {
+        openSheet('<h3>مشتری ندارید</h3><div class="empty">اول از بخش مشتریان، یک مشتری ثبت کنید.</div>' +
+          '<div class="btn-row"><a class="btn secondary" href="#/customers">رفتن به مشتریان</a></div>');
+      }
+      return;
+    }
+    const opts = data.customers.slice().sort(function (a, b) { return (a.name || '').localeCompare(b.name || '', 'fa'); })
+      .map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('');
+    openSheet(
+      '<h3>' + esc(title) + '</h3>' +
+      '<div class="field"><label>مشتری</label><select id="qa-pick-customer">' + opts + '</select></div>' +
+      '<div class="btn-row"><button class="btn" id="qa-pick-go">ادامه</button></div>'
+    );
+    const goBtn = document.getElementById('qa-pick-go');
+    if (goBtn) goBtn.onclick = function () {
+      const cid = document.getElementById('qa-pick-customer').value;
+      closeModal();
+      if (typeof fn === 'function') fn(cid);
+    };
+  }
+
+  function quickActionsHtml() {
+    const gameShortcut = '<a class="section-action" href="#/game">Sales Game ←</a>';
+    return '<div class="dashboard-block">' +
+      '<div class="dashboard-block-head"><div class="dash-section-label"><span class="dash-section-ico" aria-hidden="true">' + ICO.quick + '</span><span>اقدام سریع</span></div>' + gameShortcut + '</div>' +
+      '<div class="dash-quick-actions">' +
+        '<button type="button" class="dash-qa-btn" data-qa="invoice"><span class="dash-qa-ico" aria-hidden="true">' + ICO.invoice + '</span><span class="dash-qa-label">فاکتور جدید</span></button>' +
+        '<button type="button" class="dash-qa-btn" data-qa="payment"><span class="dash-qa-ico" aria-hidden="true">' + ICO.card + '</span><span class="dash-qa-label">ثبت دریافت</span></button>' +
+        '<button type="button" class="dash-qa-btn" data-qa="visit"><span class="dash-qa-ico" aria-hidden="true">' + ICO.map + '</span><span class="dash-qa-label">ثبت ویزیت</span></button>' +
+        '<a class="dash-qa-btn" href="#/evaluation"><span class="dash-qa-ico" aria-hidden="true">' + ICO.shop + '</span><span class="dash-qa-label">ارزیابی مغازه</span></a>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function bindQuickActions(root) {
+    const wrap = root.querySelector('.dash-quick-actions');
+    if (!wrap) return;
+    wrap.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-qa]');
+      if (!btn) return;
+      const kind = btn.getAttribute('data-qa');
+      if (kind === 'invoice') quickActionPickCustomer('فاکتور جدید — انتخاب مشتری', function (cid) { if (typeof openAddInvoice === 'function') openAddInvoice(cid); });
+      else if (kind === 'payment') quickActionPickCustomer('ثبت دریافت — انتخاب مشتری', function (cid) { if (typeof openAddTransaction === 'function') openAddTransaction(cid); });
+      else if (kind === 'visit') quickActionPickCustomer('ثبت ویزیت — انتخاب مشتری', function (cid) { if (typeof openAddVisit === 'function') openAddVisit(cid); });
+    });
   }
 
 
@@ -127,7 +179,7 @@
         lines.push('<span class="action-why"><span class="action-meta-label">چرا:</span> ' + esc(why) + '</span>');
       }
       if (whyNow) {
-        lines.push('<span class="action-why-now"><span class="action-meta-label">الان:</span> ' + esc(whyNow) + '</span>');
+        lines.push('<span class="action-why-now"><span class="action-meta-label-now">الان:</span> ' + esc(whyNow) + '</span>');
       }
       return '<a class="ledger-row action-row action-row-' + esc(urgency) + '" href="' + href + '">' +
         '<span class="amount action-urgency action-urgency-' + esc(urgency) + '" aria-label="اولویت ' + esc(urgency) + '">' + icon + '</span>' +
@@ -148,7 +200,14 @@
         '</button>';
     }
 
-    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') + '<div class="dash-activity dash-action-queue">' + visibleRows + hiddenBlock + '</div></div>';
+    const riskCount = items.filter(function (a) {
+      return a && (a.urgency === 'critical' || a.urgency === 'high');
+    }).length;
+    const riskBadge = riskCount > 0
+      ? '<span class="dash-risk-badge" title="تعداد موارد بحرانی/پراهمیت در همین لیست">' + riskCount + ' مورد مهم</span>'
+      : '';
+
+    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '', riskBadge) + '<div class="dash-activity dash-action-queue">' + visibleRows + hiddenBlock + '</div></div>';
   }
 
   /* Toggles the collapsed remainder of the Action Queue (items 3-5).
@@ -207,6 +266,45 @@
     const pct = target > 0 ? Math.round((sales / target) * 100) : 0;
     const capped = Math.min(100, Math.max(0, pct));
     const done = target > 0 && sales >= target;
+
+    // Figures + pace/status line: derived only from existing commandCenterMetrics
+    // (jy/jm/jd) and the existing jalaliMonthLength() helper. No new data source.
+    let figuresHtml = '';
+    let statusRowHtml = '';
+    if (target > 0) {
+      figuresHtml = '<div class="dmt-figures"><span class="dmt-figures-num">' + toman(sales) + '</span>' +
+        ' <span class="dmt-figures-sep">از</span> ' +
+        '<span class="dmt-figures-num">' + toman(target) + '</span>' +
+        ' <span class="dmt-figures-unit">تومان</span></div>';
+
+      if (!done) {
+        const monthLen = (metrics.jy && metrics.jm && typeof jalaliMonthLength === 'function')
+          ? jalaliMonthLength(metrics.jy, metrics.jm) : null;
+        const remaining = Math.max(0, target - sales);
+        let paceHtml = '';
+        let statusMeta = null;
+        if (monthLen) {
+          const daysLeft = Math.max(0, monthLen - (metrics.jd || 0));
+          const expectedFraction = Math.min(1, (metrics.jd || 0) / monthLen);
+          const expectedSales = target * expectedFraction;
+          if (sales >= expectedSales * 1.05) statusMeta = { cls: 'ahead', icon: '↑', text: 'جلوتر از برنامه' };
+          else if (sales <= expectedSales * 0.95) statusMeta = { cls: 'behind', icon: '⚠', text: 'عقب‌تر از برنامه' };
+          else statusMeta = { cls: 'ontrack', icon: '✓', text: 'روی برنامه' };
+          if (daysLeft > 0) {
+            const requiredDaily = Math.round(remaining / daysLeft);
+            paceHtml = '<span class="dmt-pace">نیاز روزانه ' + toman(requiredDaily) + ' ت' +
+              ' <span class="dmt-pace-days">(' + daysLeft + ' روز مانده)</span></span>';
+          }
+        }
+        if (statusMeta) {
+          statusRowHtml = '<div class="dmt-status-row">' +
+            '<span class="dmt-status-chip dmt-status-' + statusMeta.cls + '">' + statusMeta.icon + ' ' + statusMeta.text + '</span>' +
+            paceHtml +
+            '</div>';
+        }
+      }
+    }
+
     return (
       '<div class="dash-target-block">' +
         '<div class="dash-target-fab-row">' +
@@ -221,10 +319,12 @@
               '<span class="dmt-title">هدف فروش این ماه</span>' +
             '</div>' +
           '</div>' +
+          figuresHtml +
           '<div class="dmt-row">' +
             '<div class="dmt-progress"><div class="dmt-bar"><span style="width:' + capped + '%"></span></div></div>' +
             '<span class="dmt-pct">' + (target > 0 ? pct + '٪' : '—') + '</span>' +
           '</div>' +
+          statusRowHtml +
         '</div>' +
       '</div>'
     );
@@ -272,11 +372,6 @@
     const metrics = typeof commandCenterMetrics === 'function' ? commandCenterMetrics(new Date()) : { mtdSales: globalTotals().monthSales, mtdProfit: 0, salesDeltaPct: null, profitDeltaPct: null };
     const g = globalTotals();
     const invVal = inventoryValue();
-    const custN = (data.customers || []).length;
-    const prodN = (data.products || []).length;
-    const invN = (data.invoices || []).length;
-    const payN = (data.payments || []).length;
-    const chkN = (data.checks || []).length;
     if (typeof isStale === 'function' && isStale()) return;
 
     root.innerHTML =
@@ -287,31 +382,18 @@
       todaysActionsHtml() +
       '<div class="dashboard-block">' + dashSectionHead(ICO.summary, 'خلاصه وضعیت', '', '') +
       '<div class="dash-kpis">' +
-      '<div class="dash-kpi sales"><div class="dash-kpi-label">فروش این ماه</div><div class="dash-kpi-value sales">' + money(metrics.mtdSales) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.salesDeltaPct) + '</div></div>' +
+      '<a class="dash-kpi sales dash-kpi-link" href="#/reports"><div class="dash-kpi-label">فروش این ماه</div><div class="dash-kpi-value sales">' + money(metrics.mtdSales) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.salesDeltaPct) + '</div><span class="dash-kpi-chevron" aria-hidden="true">‹</span></a>' +
       '<div class="dash-kpi profit"><div class="dash-kpi-label">سود این ماه</div><div class="dash-kpi-value profit">' + money(metrics.mtdProfit) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.profitDeltaPct) + '</div></div>' +
       '<div class="dash-kpi inventory"><div class="dash-kpi-label">ارزش موجودی انبار</div><div class="dash-kpi-value">' + money(invVal) + '</div><div class="dash-kpi-sub">ارزش فعلی موجودی</div></div>' +
-      '<div class="dash-kpi debt"><div class="dash-kpi-label">بدهی مشتریان</div><div class="dash-kpi-value debt">' + money(g.customerDebt) + '</div><div class="dash-kpi-sub">' + debtorList(9999).length + ' بدهکار فعال</div></div>' +
+      '<a class="dash-kpi debt dash-kpi-link" href="#/customers?filter=debt"><div class="dash-kpi-label">بدهی مشتریان</div><div class="dash-kpi-value debt">' + money(g.customerDebt) + '</div><div class="dash-kpi-sub">' + debtorList(9999).length + ' بدهکار فعال</div><span class="dash-kpi-chevron" aria-hidden="true">‹</span></a>' +
       '</div></div>' +
-      '<div class="dashboard-block">' + dashSectionHead(ICO.quick, 'دسترسی سریع', '', '') +
-      '<div class="dash-grid">' +
-      dashTile('#/game', ICO.game, 'Sales Game', '') +
-      dashTile('#/prospects', ICO.shop, 'ارزیابی مغازه‌ها', '') +
-      dashTile('#/visits', ICO.map, 'ویزیت مشتریان', '') +
-      dashTile('#/reports', ICO.chart, 'گزارش‌ها', '') +
-      dashTile('#/settings', ICO.gear, 'تنظیمات و بکاپ', '') +
-      dashTile('#/invoices', ICO.invoice, 'فاکتورها', invN + ' فاکتور') +
-      dashTile('#/customers', ICO.users, 'مشتریان', custN + ' نفر') +
-      dashTile('#/payments', ICO.card, 'پرداخت‌ها', payN + ' مورد') +
-      dashTile('#/products', ICO.box, 'اجناس', prodN + ' قلم') +
-      dashTile('#/suppliers', ICO.truck, 'تامین‌کنندگان', (data.suppliers || []).length + ' نفر') +
-      dashTile('#/checks', ICO.bank, 'چک‌ها', chkN + ' فقره') +
-      dashTile('#/inventory', ICO.warehouse, 'انبار', money(invVal)) +
-      '</div></div>' +
+      quickActionsHtml() +
       recentInvoicesHtml() + recentVisitsHtml() +
       '</div>';
 
     bindMonthlyTarget(root, function () { renderInto(root, isStale); });
     bindActionQueueToggle(root);
+    bindQuickActions(root);
   }
 
   function mount(root, params) {

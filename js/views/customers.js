@@ -194,7 +194,7 @@
     if (nav) nav.style.display = '';
 
     custQuery = '';
-    custFilter = 'all';
+    custFilter = (params && ['debt', 'settled', 'credit'].indexOf(params.filter) !== -1) ? params.filter : 'all';
     custSortByDebt = false;
     drawCustomersPage(root);
 
