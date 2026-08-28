@@ -60,7 +60,8 @@ const PRECACHE_URLS = [
   './icons/icon-120.png',
   './icons/icon-152.png',
   './icons/icon-167.png',
-  './logo-export.png'
+  './logo-export.png',
+  './fonts/Vazirmatn[wght].woff2'
 ];
 
 /** Critical SPA shell/assets that must exist for install to be considered successful. */
