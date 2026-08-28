@@ -1,5 +1,5 @@
 /* ============================================================
-   حبوبات و خشکبار باقری — Design System
+   حبوبات و خشکبار باقری — Design System (Mimimalist Refined)
    Navy + Green + White | Mobile-First | CSS only
    Compatible with all existing HTML class names
    ============================================================ */
@@ -1717,7 +1717,8 @@ h2.section-title::after{border-color:#E4E4E0;}
 .dmt-progress{flex:1;min-width:0;}
 .dmt-pct{font-size:1.12rem;font-weight:900;color:#E8C56A;line-height:1;flex:none;min-width:2.5em;text-align:left;}
 .dmt-bar{height:8px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden;position:relative;}
-.dmt-bar>span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#C89B3C,#E8C56A);min-width:0;}
+/* ====== CHANGE 1: Progress bar changed from Gold to White for clean minimal look ====== */
+.dmt-bar>span{display:block;height:100%;border-radius:999px;background:#FFFFFF;min-width:0;}
 .dmt-head,.dmt-edit,.dmt-main,.dmt-status,.dmt-compact,.dmt-current,.dmt-nums,.dmt-foot,.dmt-target-btn{display:none;}
 
 /* Goal Card enrichment: current/target figures + status+pace row.
@@ -2511,10 +2512,11 @@ a.dash-tile:active .dash-ico{
 .dash-activity .ledger-row .amount{width:30px;min-width:30px;display:flex;align-items:center;justify-content:center;}
 .action-urgency{height:30px;width:30px;border-radius:9px;border:1px solid #E8E6E1;background:#FBF9F5;}
 .action-urgency svg{width:16px;height:16px;display:block;}
-.action-urgency-critical{color:#A13131;background:#FBEFEE;border-color:#F0D7D5;}
-.action-urgency-high{color:#A76A24;background:#FBF3E5;border-color:#EEDDBE;}
-.action-urgency-medium{color:#8A741F;background:#F7F2DD;border-color:#E9DFC0;}
-.action-urgency-low{color:#6F767C;background:#F3F1ED;border-color:#E6E4DF;}
+/* ====== CHANGE 2: Removed loud backgrounds, kept soft borders and text colors for urgency ====== */
+.action-urgency-critical{color:#A13131;background:transparent;border-color:#E0B6B3;}
+.action-urgency-high{color:#A76A24;background:transparent;border-color:#EAD0B0;}
+.action-urgency-medium{color:#8A741F;background:transparent;border-color:#E3DCC5;}
+.action-urgency-low{color:#6F767C;background:transparent;border-color:#E0DFDA;}
 @media (max-width:380px){
   .dashboard-block{margin-bottom:14px;}
   .dash-activity{padding-inline:8px;}
@@ -2570,10 +2572,11 @@ a.dash-tile:active .dash-ico{
   border-radius:2px;
   background:#D9D6CF;
 }
-.action-row-critical::after{width:3px;background:#A13F3A;}
-.action-row-high::after{width:3px;background:#9C7534;}
-.action-row-medium::after{background:#8F8451;}
-.action-row-low::after{background:#C4C2BB;}
+/* ====== CHANGE 3: Softened side rail colors ====== */
+.action-row-critical::after{width:3px;background:#E0B6B3;}
+.action-row-high::after{width:3px;background:#EAD0B0;}
+.action-row-medium::after{background:#E3DCC5;}
+.action-row-low::after{background:#E0DFDA;}
 .action-row:active{background:#FBFAF7;}
 .action-content{
   display:flex !important;
