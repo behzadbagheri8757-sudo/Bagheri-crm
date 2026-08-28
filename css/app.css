@@ -3211,144 +3211,90 @@ main {
   .btn:active, .ledger-row:active, .card:active { transform: none; }
 }
 /* ============================================================
-   iOS Native Fix Pack (2026-08-28) — presentation only
-   Fixes: keyboard/sheet conflict, notch header, route transition,
-   chrome under keyboard, sheet handle, cascade wins.
+   iOS Native Fix Pack v25 — presentation only
+   Targets (real device screenshots):
+   1) FAB clearance above Bottom Tab Bar
+   2) Softer hairline separator on Tab Bar
+   3) Sticky glass header so content never enters Status Bar/Notch
    ============================================================ */
 
+/* --- 3) Header: sticky + glass so scroll never exposes content under status bar ---
+   Root cause: apple-mobile-web-app-status-bar-style=black-translucent +
+   header{position:relative} → header scrolls away → main content enters notch zone.
+   Fix: sticky header keeps safe-area chrome under the status bar at all times. */
 header{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 30 !important;
   padding-top: calc(14px + var(--safe-top)) !important;
-  padding-bottom: 12px;
+  padding-bottom: 12px !important;
+  padding-inline: 16px;
   background: rgba(23, 35, 49, 0.94) !important;
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  /* Isolate from page overscroll paint */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
-body{
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* Top chip nav: keep original sticky behavior only when visible;
+   SPA shell primarily uses bottom-nav so this rarely matters.
+   Offset below sticky header (~header content 44px + safe-top handled by flow). */
+nav#nav{
+  z-index: 20;
 }
 
-.sheet{
-  position: relative;
-  max-height: min(90vh, 100dvh - 16px);
-  padding-top: 28px !important;
-  padding-bottom: calc(28px + var(--safe-bottom)) !important;
-  border-radius: 20px 20px 0 0 !important;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+/* --- 2) Bottom Tab Bar separator: native iOS hairline (not heavy 1px + strong shadow) --- */
+.bottom-nav{
+  background: rgba(255, 255, 255, 0.86) !important;
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  /* iOS hairline ≈ 0.5px at ~18% of system gray */
+  border-top: 0.5px solid rgba(60, 60, 67, 0.18) !important;
+  /* Soft lift only — no thick dark line */
+  box-shadow: 0 -0.5px 0 rgba(0, 0, 0, 0.04), 0 -6px 20px rgba(26, 38, 52, 0.05) !important;
+  padding-top: 6px !important;
+  padding-bottom: calc(6px + var(--safe-bottom)) !important;
+  min-height: calc(52px + var(--safe-bottom)) !important;
 }
 
-.sheet::before{
-  content: '';
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 36px;
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(60, 60, 67, 0.28);
-  pointer-events: none;
-  z-index: 2;
+/* --- 1) FAB: clear gap above Tab Bar + Home Indicator ---
+   Tab bar visual height ≈ 52px + safe-bottom.
+   FAB size 56px; need ≥16–20px gap above tab bar top.
+   bottom = tabBarContent(~52) + gap(~20) + safe-bottom = ~72 was marginal on device;
+   use 88 so circle never intersects tab items. */
+.fab{
+  bottom: calc(88px + var(--safe-bottom)) !important;
+  z-index: 41 !important;
+  left: 16px;
+  right: auto;
+}
+.toast{
+  bottom: calc(94px + var(--safe-bottom)) !important;
 }
 
-/* Sheet is flex child of .overlay — bottom: is ineffective; use padding + max-height */
-body.keyboard-open .sheet{
-  bottom: auto !important;
-  max-height: calc(100dvh - var(--keyboard-height, 0px) - 12px) !important;
+/* Keep main clearance consistent with taller FAB sit */
+main{
+  padding-bottom: calc(108px + var(--safe-bottom)) !important;
 }
 
-body.keyboard-open .overlay{
-  padding-bottom: var(--keyboard-height, 0px);
-  box-sizing: border-box;
-  align-items: flex-end;
-}
-
+/* Keyboard / modal: hide chrome (presentation only) */
 body.keyboard-open .bottom-nav,
 body.keyboard-open .fab{
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
 }
-
-body.keyboard-open .toast{
-  bottom: calc(16px + var(--keyboard-height, 0px)) !important;
-}
-
-body.modal-open{
-  overflow: hidden;
-  touch-action: none;
-}
-
-main{
-  padding-bottom: calc(96px + var(--safe-bottom)) !important;
-}
-
-.bottom-nav{
-  background: rgba(255, 255, 255, 0.86) !important;
-  backdrop-filter: saturate(180%) blur(16px);
-  -webkit-backdrop-filter: saturate(180%) blur(16px);
-  border-top: 0.5px solid rgba(60, 60, 67, 0.18);
-  box-shadow: 0 -1px 0 rgba(26, 38, 52, 0.04), 0 -6px 20px rgba(26, 38, 52, 0.05);
-  padding-top: 6px;
-  padding-bottom: calc(6px + var(--safe-bottom)) !important;
-  min-height: calc(52px + var(--safe-bottom));
-}
-
-.bottom-nav-item:active{
-  transform: scale(0.94);
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 12px;
-}
-
-.fab{
-  bottom: calc(68px + var(--safe-bottom)) !important;
-}
-.toast{
-  bottom: calc(74px + var(--safe-bottom)) !important;
-}
-
-.ledger-row{
-  border-bottom: 0.5px solid rgba(60, 60, 67, 0.14);
-}
-.ledger-row:last-child{
-  border-bottom: none;
-}
-
-.field input,
-.field select,
-.field textarea,
-main input,
-main select{
-  font-size: 16px !important;
-}
-
-.overlay{
-  z-index: 60;
-}
-
-/* Route enter — class kept ~320ms by router.js */
-#main.route-transition{
-  animation: baqeriIOSPush 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
-}
-@keyframes baqeriIOSPush{
-  from{ opacity: 0.55; transform: translateX(-12px); }
-  to{ opacity: 1; transform: translateX(0); }
+body.modal-open .bottom-nav,
+body.modal-open .fab{
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce){
-  #main.route-transition,
-  .overlay,
-  .sheet,
-  .bottom-nav-item:active{
-    animation: none !important;
-    transition: none !important;
-    transform: none !important;
-  }
-  body.keyboard-open .bottom-nav,
-  body.keyboard-open .fab{
-    transition: none;
+  header{
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(23, 35, 49, 0.98) !important;
   }
 }
