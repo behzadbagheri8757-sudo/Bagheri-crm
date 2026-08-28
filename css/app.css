@@ -4,6 +4,14 @@
    Compatible with all existing HTML class names
    ============================================================ */
 
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('./fonts/Vazirmatn[wght].woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root{
   /* Core palette (Option 3 reference) */
   --color-primary:#15273C;
@@ -42,7 +50,7 @@
   --touch:44px;
   --safe-top:env(safe-area-inset-top,0px);
   --safe-bottom:env(safe-area-inset-bottom,0px);
-  --font:-apple-system,BlinkMacSystemFont,'Vazirmatn','Segoe UI',Tahoma,sans-serif;
+  --font:'Vazirmatn',-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,sans-serif;
 
   /* Legacy aliases — do not remove */
   --primary:var(--color-primary);
