@@ -3210,3 +3210,145 @@ main {
 @media (prefers-reduced-motion: reduce) {
   .btn:active, .ledger-row:active, .card:active { transform: none; }
 }
+/* ============================================================
+   iOS Native Fix Pack (2026-08-28) — presentation only
+   Fixes: keyboard/sheet conflict, notch header, route transition,
+   chrome under keyboard, sheet handle, cascade wins.
+   ============================================================ */
+
+header{
+  padding-top: calc(14px + var(--safe-top)) !important;
+  padding-bottom: 12px;
+  background: rgba(23, 35, 49, 0.94) !important;
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+body{
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.sheet{
+  position: relative;
+  max-height: min(90vh, 100dvh - 16px);
+  padding-top: 28px !important;
+  padding-bottom: calc(28px + var(--safe-bottom)) !important;
+  border-radius: 20px 20px 0 0 !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.sheet::before{
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(60, 60, 67, 0.28);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Sheet is flex child of .overlay — bottom: is ineffective; use padding + max-height */
+body.keyboard-open .sheet{
+  bottom: auto !important;
+  max-height: calc(100dvh - var(--keyboard-height, 0px) - 12px) !important;
+}
+
+body.keyboard-open .overlay{
+  padding-bottom: var(--keyboard-height, 0px);
+  box-sizing: border-box;
+  align-items: flex-end;
+}
+
+body.keyboard-open .bottom-nav,
+body.keyboard-open .fab{
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+body.keyboard-open .toast{
+  bottom: calc(16px + var(--keyboard-height, 0px)) !important;
+}
+
+body.modal-open{
+  overflow: hidden;
+  touch-action: none;
+}
+
+main{
+  padding-bottom: calc(96px + var(--safe-bottom)) !important;
+}
+
+.bottom-nav{
+  background: rgba(255, 255, 255, 0.86) !important;
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border-top: 0.5px solid rgba(60, 60, 67, 0.18);
+  box-shadow: 0 -1px 0 rgba(26, 38, 52, 0.04), 0 -6px 20px rgba(26, 38, 52, 0.05);
+  padding-top: 6px;
+  padding-bottom: calc(6px + var(--safe-bottom)) !important;
+  min-height: calc(52px + var(--safe-bottom));
+}
+
+.bottom-nav-item:active{
+  transform: scale(0.94);
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 12px;
+}
+
+.fab{
+  bottom: calc(68px + var(--safe-bottom)) !important;
+}
+.toast{
+  bottom: calc(74px + var(--safe-bottom)) !important;
+}
+
+.ledger-row{
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.14);
+}
+.ledger-row:last-child{
+  border-bottom: none;
+}
+
+.field input,
+.field select,
+.field textarea,
+main input,
+main select{
+  font-size: 16px !important;
+}
+
+.overlay{
+  z-index: 60;
+}
+
+/* Route enter — class kept ~320ms by router.js */
+#main.route-transition{
+  animation: baqeriIOSPush 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes baqeriIOSPush{
+  from{ opacity: 0.55; transform: translateX(-12px); }
+  to{ opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce){
+  #main.route-transition,
+  .overlay,
+  .sheet,
+  .bottom-nav-item:active{
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  body.keyboard-open .bottom-nav,
+  body.keyboard-open .fab{
+    transition: none;
+  }
+}
