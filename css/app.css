@@ -6,9 +6,9 @@
 
 :root{
   /* Core palette (Option 3 reference) */
-  --color-primary:#172331;
-  --color-primary-dark:#0D151D;
-  --color-primary-soft:#293847;
+  --color-primary:#15273C;
+  --color-primary-dark:#0C1722;
+  --color-primary-soft:#203B55;
   --color-accent:#C89B3C;
   --color-accent-dark:#A77A24;
   --color-accent-soft:#F0EDE8;
@@ -1116,7 +1116,8 @@ body.page-dashboard #nav{
   width:100%;
   margin-top:4px;
 }
-body.more-open{
+body.more-open,
+body.modal-open{
   overflow:hidden;
 }
 
@@ -1635,7 +1636,7 @@ button.app-back .app-back-txt{
    ============================================================ */
 body{background:#FCFCFA;color:#1F2429;}
 main{padding-top:16px;}
-header{background:#172331;color:#fff;border-bottom-color:rgba(255,255,255,.10);}
+header{background:#15273C;color:#fff;border-bottom-color:rgba(255,255,255,.10);}
 header h1{font-size:1.12rem;letter-spacing:-.15px;}
 header .header-date{color:rgba(255,255,255,.78);}
 h2.section-title{color:#172331;font-size:1.12rem;margin:2px 0 16px;}
@@ -1686,7 +1687,7 @@ h2.section-title::after{border-color:#E4E4E0;}
 .dash-target-fab:active{transform:scale(.92);}
 .dash-monthly-target{
   display:block;position:relative;overflow:hidden;text-decoration:none;color:#fff;
-  background:linear-gradient(145deg,#172331 0%,#233342 55%,#2A3A49 100%);
+  background:linear-gradient(145deg,#15273C 0%,#1C344A 55%,#223E59 100%);
   border-radius:16px;
   padding:11px 14px 12px;
   margin:0;
@@ -1778,7 +1779,7 @@ h2.section-title::after{border-color:#E4E4E0;}
 /* KPI cards */
 .dash-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;}
 .dash-kpi{position:relative;background:#fff;border:1px solid #E8E6E1;border-radius:16px;padding:13px 13px 12px;box-shadow:0 4px 12px rgba(26,38,52,.05);min-width:0;}
-.dash-kpi::before{content:"";position:absolute;right:0;top:12px;bottom:12px;width:3px;border-radius:3px 0 0 3px;background:#172331;}
+.dash-kpi::before{content:"";position:absolute;right:0;top:12px;bottom:12px;width:3px;border-radius:3px 0 0 3px;background:#15273C;}
 .dash-kpi.sales::before{background:#C89B3C;}.dash-kpi.profit::before{background:#2F6B45;}.dash-kpi.inventory::before{background:#1A2634;}.dash-kpi.debt::before{background:#A13131;}
 .dash-kpi-label{font-size:.68rem;color:#6F767C;font-weight:700;margin-bottom:7px;}
 .dash-kpi-value{font-size:1.13rem;font-weight:900;line-height:1.15;color:#1F2429;letter-spacing:-.35px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -2821,8 +2822,9 @@ a.dash-tile .dash-sub{font-size:.58rem;margin-top:2px;}
   width:34px;height:34px;
   border-radius:11px;
   display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(160deg,#FBF3E1 0%,#F5E7C8 100%);
-  border:1px solid rgba(184,134,44,.22);
+  background:linear-gradient(160deg,rgba(200,155,60,.16) 0%,rgba(200,155,60,.09) 100%);
+  border:1px solid rgba(184,134,44,.12);
+  box-shadow:0 2px 5px rgba(168,122,36,.14);
   color:#A77A24;
 }
 .dash-qa-ico svg{width:17px;height:17px;stroke-width:1.7;display:block;}
@@ -3308,7 +3310,7 @@ body.modal-open .fab{
 
 /* Canvas behind everything: navy so overscroll / gaps are never white */
 html{
-  background-color: #172331 !important;
+  background-color: #15273C !important;
 }
 
 /* Page surface stays cream; does not paint the status-bar zone */
@@ -3325,14 +3327,14 @@ html::before{
   right: 0;
   height: env(safe-area-inset-top, 0px);
   min-height: env(safe-area-inset-top, 0px);
-  background: #172331;
+  background: #15273C;
   z-index: 100;
   pointer-events: none;
 }
 
 /* Header matches strip — solid navy (no translucency washing to white content) */
 header{
-  background: #172331 !important;
+  background: #15273C !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
