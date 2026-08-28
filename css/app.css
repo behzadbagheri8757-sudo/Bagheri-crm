@@ -2839,3 +2839,206 @@ a.dash-tile .dash-sub{font-size:.58rem;margin-top:2px;}
 @media (prefers-reduced-motion:reduce){
   .dash-qa-btn{transition:none;}
 }
+/* ============================================================
+   FINAL UI POLISH v22 — Density, Spacing, Hierarchy, iOS feel
+   Structure, order, colors, logic untouched. Presentation only.
+   ============================================================ */
+
+/* 1. Breathing room after monthly target → clearer Above-the-Fold */
+.dash-target-block{
+  margin-bottom: 18px !important;
+}
+.dashboard-shell > .dashboard-block:first-of-type{
+  margin-top: 4px;
+}
+
+/* 2. Action cards: slightly tighter vertical rhythm + better scan */
+.dash-action-queue{
+  padding: 4px 12px 6px;
+  box-shadow: 0 2px 8px rgba(26,38,52,.03);
+}
+.action-row{
+  padding: 10px 2px !important;
+  gap: 9px !important;
+}
+.action-person{
+  font-size: .81rem;
+  font-weight: 800;
+}
+.action-main{
+  font-size: .74rem;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.action-why,
+.action-why-now{
+  font-size: .61rem;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+.action-why-now{
+  font-size: .63rem;
+}
+.action-urgency{
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  border-radius: 9px !important;
+}
+.action-urgency svg{
+  width: 14px !important;
+  height: 14px !important;
+  stroke-width: 1.65;
+}
+
+/* 3. Section heads: stronger but still calm */
+.dashboard-block-head{
+  margin-bottom: 8px;
+}
+.dash-section-label{
+  font-size: .78rem;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+.dash-section-ico{
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+  border-radius: 7px;
+}
+.dash-section-ico svg{
+  width: 13px;
+  height: 13px;
+}
+
+/* 4. KPI cards: refined numeric hierarchy + softer shadow */
+.dash-kpis{
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.dash-kpi{
+  padding: 11px 12px 10px;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(26,38,52,.03);
+  border-color: #E6E4DF;
+}
+.dash-kpi-label{
+  font-size: .65rem;
+  margin-bottom: 5px;
+  letter-spacing: .01em;
+}
+.dash-kpi-value{
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+}
+.dash-kpi-sub{
+  font-size: .6rem;
+  margin-top: 4px;
+  opacity: .9;
+}
+
+/* 5. Quick actions: tighter, clearer touch targets */
+.dash-quick-actions{
+  gap: 8px;
+}
+.dash-qa-btn{
+  padding: 10px 11px;
+  border-radius: 13px;
+  box-shadow: 0 2px 7px rgba(26,38,52,.03);
+}
+.dash-qa-ico{
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+.dash-qa-ico svg{
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.65;
+}
+.dash-qa-label{
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+/* 6. Activity lists (invoices / visits): calmer density */
+.dash-activity{
+  padding: 2px 11px 5px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(26,38,52,.03);
+}
+.dash-activity .ledger-row{
+  min-height: 50px;
+  padding: 9px 2px;
+}
+
+/* 7. Bottom nav: subtler, more iOS-native feel */
+.bottom-nav{
+  box-shadow: 0 -1px 0 rgba(26,38,52,.04), 0 -4px 16px rgba(26,38,52,.04);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  background: rgba(255,255,255,.92);
+}
+.bottom-nav-item{
+  padding: 6px 0 5px;
+}
+.bottom-nav-item .bn-ico svg{
+  stroke-width: 1.55;
+}
+.bottom-nav-item .bn-label{
+  font-size: .62rem;
+  font-weight: 650;
+  margin-top: 2px;
+  letter-spacing: -.01em;
+}
+.bottom-nav-item.active .bn-label{
+  font-weight: 750;
+}
+.bottom-nav-item.active .bn-ico{
+  color: var(--color-primary);
+}
+
+/* 8. Global dashboard rhythm */
+.dashboard-block{
+  margin-bottom: 14px;
+}
+.dashboard-eyebrow{
+  margin: 0 0 10px;
+  font-size: .68rem;
+  letter-spacing: .02em;
+}
+
+/* 9. Toggle button for more actions — quieter */
+.dash-action-toggle{
+  padding: 8px 6px;
+  font-size: .7rem;
+  border-color: #E4E1D9;
+  color: #8A6A2C;
+  margin-top: 4px;
+}
+
+/* 10. Mobile fine-tune (iPhone 13 Pro Max friendly) */
+@media (max-width: 430px){
+  .dash-target-block{ margin-bottom: 16px !important; }
+  .action-row{ padding-block: 9px !important; }
+  .action-person{ font-size: .79rem; }
+  .action-main{ font-size: .72rem; }
+  .dash-kpi-value{ font-size: 1.06rem; }
+  .dash-qa-btn{ padding: 9px 10px; }
+}
+
+@media (max-width: 380px){
+  .action-urgency{
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+  }
+  .action-urgency svg{
+    width: 13px !important;
+    height: 13px !important;
+  }
+  .dash-kpi{ padding: 10px 10px 9px; }
+  .dash-kpi-value{ font-size: 1.0rem; }
+}
