@@ -123,7 +123,36 @@ function ensureBottomNavDOM(){
     document.body.appendChild(root);
     document.getElementById('more-overlay').addEventListener('click', closeMoreSheet);
     document.getElementById('more-sheet-close').addEventListener('click', closeMoreSheet);
+    bindMoreSheetDragToDismiss();
   }
+}
+
+// Native-feel swipe-down-to-dismiss, started from the sheet's drag handle only
+// (keeps list-item taps below untouched). Presentation-only; just calls the
+// existing closeMoreSheet().
+function bindMoreSheetDragToDismiss(){
+  const sheet = document.getElementById('more-sheet');
+  const handle = sheet && sheet.querySelector('.more-sheet-handle');
+  if(!sheet || !handle) return;
+  let startY = 0, deltaY = 0, dragging = false;
+  handle.addEventListener('touchstart', function(e){
+    dragging = true;
+    startY = e.touches[0].clientY;
+    sheet.style.transition = 'none';
+  }, {passive:true});
+  handle.addEventListener('touchmove', function(e){
+    if(!dragging) return;
+    deltaY = e.touches[0].clientY - startY;
+    if(deltaY > 0) sheet.style.transform = 'translateY(' + deltaY + 'px)';
+  }, {passive:true});
+  handle.addEventListener('touchend', function(){
+    if(!dragging) return;
+    dragging = false;
+    sheet.style.transition = '';
+    sheet.style.transform = '';
+    if(deltaY > 60) closeMoreSheet();
+    deltaY = 0;
+  });
 }
 
 function isMoreSectionActive(activeId){
@@ -258,6 +287,7 @@ function openMoreSheet(activeId){
     sheet.classList.add('show');
   });
   document.body.classList.add('more-open');
+  try{ window.__scrollLock && window.__scrollLock.lock(); }catch(_e){}
 }
 
 function closeMoreSheet(){
@@ -266,6 +296,7 @@ function closeMoreSheet(){
   if(overlay){ overlay.classList.remove('show'); }
   if(sheet){ sheet.classList.remove('show'); }
   document.body.classList.remove('more-open');
+  try{ window.__scrollLock && window.__scrollLock.unlock(); }catch(_e){}
   setTimeout(() => {
     if(overlay) overlay.hidden = true;
     if(sheet) sheet.hidden = true;

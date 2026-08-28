@@ -468,11 +468,49 @@ function showToast(msg){
 }
 
 
+// ---------- body scroll lock (real iOS fix: `overflow:hidden` on body alone
+// does not reliably stop background touch-scroll on iOS Safari; the robust
+// technique is to pin body via position:fixed at the current scroll offset
+// and restore it on unlock). Shared by modal/sheet (this file) and the
+// More menu (nav.js) so both use one consistent, reference-counted lock. ----------
+(function(){
+  let lockCount = 0;
+  let savedScrollY = 0;
+  window.__scrollLock = {
+    lock(){
+      if(lockCount === 0){
+        savedScrollY = window.scrollY || window.pageYOffset || 0;
+        const b = document.body.style;
+        b.position = 'fixed';
+        b.top = (-savedScrollY) + 'px';
+        b.left = '0';
+        b.right = '0';
+        b.width = '100%';
+      }
+      lockCount++;
+    },
+    unlock(){
+      if(lockCount === 0) return;
+      lockCount--;
+      if(lockCount === 0){
+        const b = document.body.style;
+        b.position = '';
+        b.top = '';
+        b.left = '';
+        b.right = '';
+        b.width = '';
+        window.scrollTo(0, savedScrollY);
+      }
+    }
+  };
+})();
+
 // ---------- modals ----------
 function closeModal(){
   const root = document.getElementById('modalRoot');
   root.innerHTML = '';
   try{ document.body.classList.remove('modal-open'); }catch(_e){}
+  try{ window.__scrollLock && window.__scrollLock.unlock(); }catch(_e){}
   if(window.scrollX) window.scrollTo(0, window.scrollY);
 }
 
@@ -490,6 +528,8 @@ function openSheet(html){
       </div>
     </div>`;
   try{ document.body.classList.add('modal-open'); }catch(_e){}
+  // closeModal() above already unlocked if a previous sheet was open; lock fresh for this one.
+  try{ window.__scrollLock && window.__scrollLock.lock(); }catch(_e){}
   document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
   document.getElementById('closeX').addEventListener('click', closeModal);
 }
