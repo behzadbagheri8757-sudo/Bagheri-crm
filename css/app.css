@@ -1719,6 +1719,54 @@ h2.section-title::after{border-color:#E4E4E0;}
 .dmt-bar{height:8px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden;position:relative;}
 .dmt-bar>span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#C89B3C,#E8C56A);min-width:0;}
 .dmt-head,.dmt-edit,.dmt-main,.dmt-status,.dmt-compact,.dmt-current,.dmt-nums,.dmt-foot,.dmt-target-btn{display:none;}
+
+/* Goal Card enrichment: current/target figures + status+pace row.
+   Both sit below the percentage in visual weight — pct stays the star. */
+.dmt-figures{
+  margin:0 0 9px;
+  font-size:.71rem;
+  font-weight:600;
+  color:rgba(247,235,203,.62);
+  line-height:1.3;
+  position:relative;z-index:1;
+}
+.dmt-figures-num{color:#E4E9EE;font-weight:750;}
+.dmt-figures-sep{margin:0 2px;opacity:.75;}
+.dmt-figures-unit{margin-inline-start:3px;opacity:.75;}
+.dmt-status-row{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:7px;
+  margin-top:9px;
+  position:relative;z-index:1;
+}
+.dmt-status-chip{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:.65rem;
+  font-weight:800;
+  line-height:1.3;
+  white-space:nowrap;
+  background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.12);
+  color:#E4E9EE;
+}
+.dmt-status-behind{color:#F3B7AE;background:rgba(216,92,74,.16);border-color:rgba(216,92,74,.32);}
+.dmt-status-ontrack{color:#EAD9A0;background:rgba(232,197,106,.12);border-color:rgba(232,197,106,.28);}
+.dmt-status-ahead{color:#AFE0BB;background:rgba(90,180,110,.16);border-color:rgba(90,180,110,.32);}
+.dmt-pace{
+  font-size:.66rem;
+  font-weight:600;
+  color:rgba(247,235,203,.68);
+  line-height:1.3;
+}
+.dmt-pace-days{opacity:.75;font-weight:500;}
+@media (max-width:360px){
+  .dmt-figures{font-size:.67rem;}
+  .dmt-status-chip,.dmt-pace{font-size:.62rem;}
+}
 .dashboard-eyebrow{margin:2px 0 14px;font-size:.7rem;color:#6F767C;font-weight:700;}
 .dashboard-shell > .section-title{margin:2px 0 6px;}
 
@@ -1734,6 +1782,24 @@ h2.section-title::after{border-color:#E4E4E0;}
 .kpi-delta{display:inline-flex;align-items:center;gap:3px;font-weight:800;padding:2px 6px;border-radius:999px;background:#F0EDE8;}
 .kpi-delta.up{color:#2F6B45;background:#E8F3EC;}.kpi-delta.down{color:#A13131;background:#FBEFEE;}.kpi-delta.flat{color:#6F767C;}
 .kpi-count{color:#6F767C;}
+.dash-kpi-link{
+  text-decoration:none;
+  display:block;
+  color:inherit;
+  padding-left:24px;
+  transition:transform .1s ease, box-shadow .1s ease;
+}
+.dash-kpi-link:active{transform:scale(.98);box-shadow:0 2px 8px rgba(26,38,52,.05);}
+.dash-kpi-chevron{
+  position:absolute;
+  left:11px;
+  top:50%;
+  transform:translateY(-50%);
+  font-size:.85rem;
+  color:#C7C4BC;
+  line-height:1;
+  pointer-events:none;
+}
 
 /* Quick actions — glass floating icon frames; fixed icon row so 2-line titles don't shift icons */
 .dash-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:18px;}
@@ -2553,18 +2619,23 @@ a.dash-tile:active .dash-ico{
 .action-why-now{
   display:block;
   margin-top:3px;
-  color:#70767A;
-  font-size:.64rem;
-  font-weight:550;
+  color:#80858A;
+  font-size:.63rem;
+  font-weight:500;
   line-height:1.4;
 }
 .action-why-now{
-  color:#646B70;
-  font-weight:650;
+  color:#8A6A2C;
+  font-weight:700;
+  font-size:.66rem;
 }
 .action-meta-label{
-  color:#858A8D;
+  color:#92979A;
   font-weight:750;
+}
+.action-meta-label-now{
+  color:#A77A24;
+  font-weight:800;
 }
 .action-urgency{
   position:relative;
@@ -2648,6 +2719,19 @@ a.dash-tile:active .dash-ico{
 .dash-section-label{gap:7px;font-size:.79rem;font-weight:800;}
 .dash-section-ico{width:24px;height:24px;flex-basis:24px;border-radius:8px;}
 .dash-section-ico svg{width:13px;height:13px;}
+.dash-risk-badge{
+  display:inline-flex;
+  align-items:center;
+  margin-inline-start:2px;
+  padding:2px 7px;
+  border-radius:999px;
+  font-size:.62rem;
+  font-weight:800;
+  white-space:nowrap;
+  color:#9F3934;
+  background:#F9E9E7;
+  border:1px solid #EBCFCD;
+}
 
 /* Quick access: quieter tiles and stronger icon/title grouping. */
 a.dash-tile{
@@ -2697,4 +2781,58 @@ a.dash-tile .dash-sub{font-size:.58rem;margin-top:2px;}
 
 @media (prefers-reduced-motion:reduce){
   .action-row,a.dash-tile{transition:none;}
+}
+
+/* Quick Actions: compact real-action buttons (not navigation tiles).
+   Deliberately smaller/denser than the old dash-grid tiles, and visually
+   distinct via the warm icon-frame, so they read as "do a thing" not "go somewhere". */
+.dash-quick-actions{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:9px;
+}
+.dash-qa-btn{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:11px 12px;
+  background:#fff;
+  border:1px solid #E8E6E1;
+  border-radius:14px;
+  box-shadow:0 3px 10px rgba(26,38,52,.035);
+  text-decoration:none;
+  color:#1F2429;
+  font-family:inherit;
+  text-align:right;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .1s ease, background-color .1s ease;
+}
+.dash-qa-btn:active{transform:scale(.97);background:#FBFAF7;}
+.dash-qa-ico{
+  flex:none;
+  width:34px;height:34px;
+  border-radius:11px;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(160deg,#FBF3E1 0%,#F5E7C8 100%);
+  border:1px solid rgba(184,134,44,.22);
+  color:#A77A24;
+}
+.dash-qa-ico svg{width:17px;height:17px;stroke-width:1.7;display:block;}
+.dash-qa-label{
+  font-size:.74rem;
+  font-weight:750;
+  color:#1F2429;
+  line-height:1.3;
+  min-width:0;
+}
+@media (max-width:380px){
+  .dash-quick-actions{gap:7px;}
+  .dash-qa-btn{padding:9px 10px;gap:8px;}
+  .dash-qa-ico{width:31px;height:31px;border-radius:10px;}
+  .dash-qa-ico svg{width:15px;height:15px;}
+  .dash-qa-label{font-size:.69rem;}
+}
+@media (prefers-reduced-motion:reduce){
+  .dash-qa-btn{transition:none;}
 }
