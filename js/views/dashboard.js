@@ -96,7 +96,10 @@
     // Max Top 5 by unifiedScore (already sorted by calculateAllActions)
     items = items.slice(0, 5);
 
-    const rows = items.map(function (a) {
+    const visibleItems = items.slice(0, 2);
+    const hiddenItems = items.slice(2);
+
+    function renderRow(a) {
       const isProspect = a.type === 'prospect';
       const name = a.name || (function () {
         if (a.customerId && typeof data !== 'undefined') {
@@ -131,9 +134,45 @@
         '<span class="name action-content">' + lines.join('') + '</span>' +
         '<span class="filler"></span>' +
       '</a>';
-    }).join('');
+    }
 
-    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') + '<div class="dash-activity dash-action-queue">' + rows + '</div></div>';
+    const visibleRows = visibleItems.map(renderRow).join('');
+    let hiddenBlock = '';
+    if (hiddenItems.length) {
+      const hiddenRows = hiddenItems.map(renderRow).join('');
+      hiddenBlock =
+        '<div class="dash-action-more" data-action-more hidden>' + hiddenRows + '</div>' +
+        '<button type="button" class="dash-action-toggle" data-action-toggle aria-expanded="false">' +
+          '<span data-action-toggle-label>نمایش ' + hiddenItems.length + ' کار دیگر</span>' +
+          '<span class="dash-action-toggle-ico" aria-hidden="true">›</span>' +
+        '</button>';
+    }
+
+    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') + '<div class="dash-activity dash-action-queue">' + visibleRows + hiddenBlock + '</div></div>';
+  }
+
+  /* Toggles the collapsed remainder of the Action Queue (items 3-5).
+     Presentation-only: does not alter which actions exist, their order, or count. */
+  function bindActionQueueToggle(root) {
+    const btn = root.querySelector('[data-action-toggle]');
+    const more = root.querySelector('[data-action-more]');
+    const label = root.querySelector('[data-action-toggle-label]');
+    if (!btn || !more) return;
+    const hiddenCount = more.querySelectorAll('.action-row').length;
+    btn.addEventListener('click', function () {
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      if (expanded) {
+        more.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+        btn.classList.remove('is-open');
+        if (label) label.textContent = 'نمایش ' + hiddenCount + ' کار دیگر';
+      } else {
+        more.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        btn.classList.add('is-open');
+        if (label) label.textContent = 'نمایش کمتر';
+      }
+    });
   }
 
   function recentInvoicesHtml() {
@@ -244,8 +283,8 @@
       '<div class="dashboard-shell">' +
       '<h2 class="section-title">داشبورد</h2>' +
       '<div class="dashboard-eyebrow">مرکز فرماندهی روزانه</div>' +
-      todaysActionsHtml() +
       targetHtml(metrics) +
+      todaysActionsHtml() +
       '<div class="dashboard-block">' + dashSectionHead(ICO.summary, 'خلاصه وضعیت', '', '') +
       '<div class="dash-kpis">' +
       '<div class="dash-kpi sales"><div class="dash-kpi-label">فروش این ماه</div><div class="dash-kpi-value sales">' + money(metrics.mtdSales) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.salesDeltaPct) + '</div></div>' +
@@ -272,6 +311,7 @@
       '</div>';
 
     bindMonthlyTarget(root, function () { renderInto(root, isStale); });
+    bindActionQueueToggle(root);
   }
 
   function mount(root, params) {
