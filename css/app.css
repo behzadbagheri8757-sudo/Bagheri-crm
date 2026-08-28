@@ -87,7 +87,7 @@ body{
   background:var(--color-bg);
   color:var(--color-text);
   min-height:100vh;
-  font-size:15px;
+  font-size:16px;
   line-height:1.55;
   font-variant-numeric:tabular-nums;
   -webkit-font-smoothing:antialiased;
@@ -307,7 +307,11 @@ a.ledger-row:active{
   box-shadow:0 3px 12px rgba(47,107,69,.22);
   transition:transform .1s, opacity .1s;
 }
-.btn:active{opacity:.9;transform:scale(.98);}
+.btn:active{
+  opacity:.9;
+  transform:scale(.98) translateY(1px);
+  box-shadow:0 1px 4px rgba(0,0,0,0.1);
+}
 .btn.secondary{
   background:var(--color-surface);
   color:var(--color-primary);
@@ -377,7 +381,7 @@ a.ledger-row:active{
   border:none;
   box-shadow:0 8px 22px rgba(47,107,69,.32);
   cursor:pointer;
-  z-index:20;
+  z-index:41;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -558,7 +562,7 @@ main select,
   border:1.5px solid var(--color-border);
   border-radius:var(--radius-sm);
   font-family:inherit;
-  font-size:15px;
+  font-size:16px;
   background:var(--color-surface);
   color:var(--color-text);
   min-height:44px;
@@ -1119,7 +1123,7 @@ body.more-open{
 /* FAB above bottom nav */
 .fab{
   bottom: calc(72px + var(--safe-bottom)) !important;
-  z-index: 35;
+  z-index: 41;
 }
 .toast{
   bottom: calc(78px + var(--safe-bottom)) !important;
@@ -1338,7 +1342,7 @@ a.dash-target.is-done{
   border:1.5px solid var(--color-border);
   border-radius:var(--radius-sm);
   font-family:inherit;
-  font-size:15px;
+  font-size:16px;
   background:var(--color-surface);
   color:var(--color-text);
   min-height:44px;
@@ -1449,7 +1453,7 @@ button.app-back{
   position:absolute;
   top:calc(50% + var(--safe-top) * 0.15);
   inset-inline-start: 8px;
-  transform: translateY(-50%);
+  transform:translateY(-50%);
   display:inline-flex;
   align-items:center;
   justify-content:center;
