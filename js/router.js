@@ -91,7 +91,10 @@
       } finally {
         if (main) {
           main.removeAttribute('aria-busy');
-          main.classList.remove('route-transition');
+          // FIX: Delay removal of route-transition so CSS animation paints
+          requestAnimationFrame(function () {
+            main.classList.remove('route-transition');
+          });
         }
         const saved = scrollPositions.get(hash);
         requestAnimationFrame(function () {
