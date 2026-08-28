@@ -130,14 +130,6 @@ function isMoreSectionActive(activeId){
   return MORE_NAV_ITEMS.some(t => t.id === activeId);
 }
 
-
-/**
- * Keep #bottom-nav pinned to the visible bottom of the screen.
- * On mobile browsers the visual viewport moves when the URL bar shows/hides;
- * position:fixed alone then appears to float mid-page. Adjust `bottom` by the
- * gap between layout viewport bottom and visual viewport bottom.
- * Presentation only — does not touch CRM data or navigation destinations.
- */
 function pinBottomNav(){
   const el = document.getElementById('bottom-nav');
   if(!el) return;
@@ -172,7 +164,6 @@ function ensureBottomNavPinned(){
     window.visualViewport.addEventListener('resize', schedule, {passive:true});
     window.visualViewport.addEventListener('scroll', schedule, {passive:true});
   }
-  // orientation / pageshow after bfcache
   window.addEventListener('pageshow', schedule, {passive:true});
   window.addEventListener('orientationchange', function(){
     setTimeout(schedule, 50);
@@ -224,7 +215,6 @@ function renderBottomNav(activeId){
     });
   }
 
-  // Fill more sheet list
   fillMoreSheetList(activeId);
 
   ensureBottomNavPinned();
@@ -282,8 +272,6 @@ function closeMoreSheet(){
   }, 200);
 }
 
-
-/** In-app Back: history.back when same-origin referrer, else Dashboard. Navigation only. */
 function canAppHistoryBack(){
   try{
     const ref = document.referrer || '';
@@ -297,7 +285,6 @@ function canAppHistoryBack(){
 
 function goAppBack(e){
   if(e && typeof e.preventDefault === 'function') e.preventDefault();
-  // Never submit forms / never write data — pure navigation
   if(canAppHistoryBack() && window.history.length > 1){
     window.history.back();
     return;
@@ -306,11 +293,6 @@ function goAppBack(e){
   else location.hash = '#/dashboard';
 }
 
-/**
- * Shamsi/Jalali date in header — reuses ui.js helpers (todayISO, isoToJalali,
- * SHAMSI_MONTH_NAMES, enToFaDigits). No parallel date system.
- * Refreshed on every nav render so the label never goes stale across midnight.
- */
 function ensureHeaderDate(){
   const el = document.getElementById('header-date');
   if(!el) return;
@@ -326,7 +308,6 @@ function ensureHeaderDate(){
     const monthName = (typeof SHAMSI_MONTH_NAMES !== 'undefined' && SHAMSI_MONTH_NAMES[jm - 1])
       ? SHAMSI_MONTH_NAMES[jm - 1]
       : String(jm);
-    // Weekday of the local civil day (same day as Shamsi «امروز»)
     const FA_WEEKDAYS = ['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'];
     const now = new Date();
     const weekday = FA_WEEKDAYS[now.getDay()] || '';
@@ -340,10 +321,6 @@ function ensureHeaderDate(){
   }
 }
 
-/**
- * Inject a compact Back control into <header> on internal pages.
- * Skipped on dashboard (index).
- */
 function ensureAppBackButton(activeId){
   const header = document.querySelector('header');
   if(!header) return;
@@ -362,7 +339,6 @@ function ensureAppBackButton(activeId){
   }
 
   if(existing){
-    // already bound once
     return;
   }
 
@@ -384,7 +360,6 @@ function getQueryParam(name){
   }
 }
 
-/** Load IndexedDB data, draw shared + bottom nav, then run page callback. */
 async function bootPage(activeId, afterLoad){
   try{
     /* PIN gate (minimal): unlock before any CRM render. Does not touch data/FIFO. */
@@ -405,6 +380,10 @@ async function bootPage(activeId, afterLoad){
       document.body.innerHTML = '<div style="padding:24px;text-align:center;font-family:sans-serif;direction:rtl;">خطا در قفل PIN. صفحه را دوباره باز کنید.</div>';
       return;
     }
+    
+    // iOS Foundation: Setup Keyboard Guard
+    setupVisualViewportKeyboardGuard();
+
     await loadData();
     renderSharedNav(activeId);
     renderBottomNav(activeId);
@@ -433,11 +412,6 @@ function pageShellNote(title, detail){
   `;
 }
 
-/**
- * Load-error gate for SPA shell: blocks CRM mount until loadData succeeds.
- * Empty IndexedDB (no record) is NOT an error — only thrown failures from loadData.
- * Does not write emptyData to IndexedDB. Retry only re-runs loadData.
- */
 function waitForCrmDataLoad() {
   return new Promise(function (resolve) {
     var retrying = false;
@@ -479,12 +453,6 @@ function waitForCrmDataLoad() {
   });
 }
 
-/**
- * SPA shell boot (Phase 2). PIN → loadData once → nav → router.start().
- * Does not replace bootPage for MPA pages.
- * loadData is called exactly once here on success path; SPA route changes must not call it again.
- * On loadData failure: CRM is NOT started with emptyData; Load Error + Retry is shown instead.
- */
 async function bootSpaShell() {
   try {
     try {
@@ -509,6 +477,9 @@ async function bootSpaShell() {
       return;
     }
 
+    // iOS Foundation: Setup Keyboard Guard
+    setupVisualViewportKeyboardGuard();
+
     try {
       await loadData();
       if (typeof hydrateMonthlySalesTarget === 'function') await hydrateMonthlySalesTarget();
@@ -517,7 +488,6 @@ async function bootSpaShell() {
       await waitForCrmDataLoad();
     }
 
-    // Load ProspectScout data once (soft-fail: does not block CRM shell)
     if (typeof loadProspectData === 'function') {
       try {
         await loadProspectData();
@@ -594,4 +564,31 @@ async function bootSpaShell() {
       main.innerHTML = '<div class="empty">خطا در بارگذاری اطلاعات. صفحه را دوباره باز کنید.</div>';
     }
   }
+}
+
+/* Setup Visual Viewport Keyboard Guard (iOS) */
+function setupVisualViewportKeyboardGuard() {
+  if (setupVisualViewportKeyboardGuard._bound) return;
+  setupVisualViewportKeyboardGuard._bound = true;
+
+  function update() {
+    try {
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        const keyboardHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        const isOpen = keyboardHeight > 80;
+        
+        document.body.classList.toggle('keyboard-open', isOpen);
+        document.body.style.setProperty('--keyboard-height', keyboardHeight + 'px');
+      }
+    } catch (e) {}
+  }
+
+  window.addEventListener('resize', update, { passive: true });
+  window.addEventListener('scroll', update, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', update, { passive: true });
+    window.visualViewport.addEventListener('scroll', update, { passive: true });
+  }
+  update();
 }
