@@ -2502,12 +2502,12 @@ a.dash-tile:active .dash-ico{
   bottom:9px;
   width:2px;
   border-radius:2px;
-  background:#E1DFD9;
+  background:#D9D6CF;
 }
-.action-row-critical::after{background:#C96A64;}
-.action-row-high::after{background:#C79655;}
-.action-row-medium::after{background:#B5A14D;}
-.action-row-low::after{background:#B9B7B0;}
+.action-row-critical::after{width:3px;background:#A13F3A;}
+.action-row-high::after{width:3px;background:#9C7534;}
+.action-row-medium::after{background:#8F8451;}
+.action-row-low::after{background:#C4C2BB;}
 .action-row:active{background:#FBFAF7;}
 .action-content{
   display:flex !important;
@@ -2581,10 +2581,52 @@ a.dash-tile:active .dash-ico{
   height:16px !important;
   stroke-width:1.8;
 }
-.action-urgency-critical{color:#9F3934;background:#F9E9E7;border-color:#EBCFCD;}
-.action-urgency-high{color:#9A652A;background:#FAF0E1;border-color:#EBD8B9;}
-.action-urgency-medium{color:#806F22;background:#F5F0DC;border-color:#E6DCB9;}
-.action-urgency-low{color:#747775;background:#F2F1ED;border-color:#E2E0DA;}
+.action-urgency-critical{color:#8F2E2A;background:#F7E4E1;border-color:#E4C0BC;border-width:1.5px;font-weight:700;}
+.action-urgency-high{color:#8A5A22;background:#F8EBD8;border-color:#E3D0AC;}
+.action-urgency-medium{color:#726326;background:#F2ECD9;border-color:#DFD4AE;}
+.action-urgency-low{color:#83878A;background:#F1F0EC;border-color:#DFDDD6;}
+
+/* Action queue progressive disclosure: 2 open, remainder behind an explicit toggle. */
+.dash-action-more{
+  display:block;
+}
+.dash-action-more[hidden]{
+  display:none;
+}
+.dash-action-toggle{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  width:100%;
+  margin-top:2px;
+  padding:9px 6px;
+  border:1px dashed #DEDBD3;
+  border-radius:10px;
+  background:transparent;
+  color:#8A6A2C;
+  font-size:.72rem;
+  font-weight:750;
+  cursor:pointer;
+  transition:background-color .12s ease, border-color .12s ease;
+}
+.dash-action-toggle:active{
+  background:#FAF7F0;
+  border-color:#D3CFC4;
+}
+.dash-action-toggle-ico{
+  display:inline-block;
+  font-size:.9em;
+  line-height:1;
+  transform:rotate(90deg);
+  transition:transform .15s ease;
+}
+.dash-action-toggle.is-open .dash-action-toggle-ico{
+  transform:rotate(-90deg);
+}
+@media (max-width:380px){
+  .dash-action-toggle{font-size:.68rem;padding:8px 6px;}
+}
 
 /* KPI cards: slightly clearer numeric hierarchy without increasing visual noise. */
 .dash-kpis{gap:9px;margin-bottom:16px;}
