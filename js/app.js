@@ -2691,8 +2691,6 @@ function openSupplierDetail(sid){
 
   // --- inject hidden button + panel ---
   function ensureQAUI(){
-    // iPhone/Safari access: expose the existing Developer QA button directly.
-    // QA operations remain isolated in-memory by the QA DATA ISOLATION PATCH.
     if(document.getElementById('qa-dev-btn')) return;
 
     const style = document.createElement('style');
@@ -2728,7 +2726,7 @@ function openSupplierDetail(sid){
     btn.addEventListener('click', openQAPanel);
     document.body.appendChild(btn);
 
-    // Developer-only shortcut: 5 rapid clicks on header title also opens QA
+    // secret: 5 rapid clicks on header title also opens QA
     const h1 = document.querySelector('header h1');
     if(h1){
       let clicks = 0, t = 0;
@@ -2840,24 +2838,6 @@ function openSupplierDetail(sid){
   }
 
   // ---------- suite ----------
-  // QA persistence is deliberately in-memory only. It must never call the
-  // Production IndexedDB writer, even indirectly.
-  let qaEphemeralStore = null;
-  let qaEphemeralBackupTick = 0;
-
-  async function qaSaveData(){
-    qaEphemeralStore = deepClone(data);
-  }
-
-  async function qaLoadData(){
-    if(qaEphemeralStore) data = deepClone(qaEphemeralStore);
-  }
-
-  async function qaAutoBackupTick(){
-    qaEphemeralBackupTick++;
-    return qaEphemeralBackupTick;
-  }
-
   async function runFullQASuite(){
     qaRunning = true;
     const t0 = qaNow();
@@ -2876,16 +2856,18 @@ function openSupplierDetail(sid){
     window.confirm = function(){ return true; };
     window.alert = function(m){ log.push('ALERT: '+m); };
 
-    let productionData = null;
-    let qaData = null;
+    let snapshot = null;
     try{
-      // Keep the live Production object untouched. All QA mutations happen on
-      // a disposable clone, and QA persistence is redirected to memory.
-      productionData = data;
-      window.__QA_ISOLATION__ = true;
-      qaData = deepClone(productionData);
-      data = qaData;
-      log.push('Production data isolated. customers='+data.customers.length
+      // Crash-safe isolation: all subsequent dbPut/dbDelete/dbGet hit an
+      // in-memory store only — Production IndexedDB is never written during QA.
+      // Seed RECORD_KEY so saveData→loadData round-trips inside the suite.
+      if(typeof enableQaDbIsolation === 'function'){
+        const seed = {};
+        seed[RECORD_KEY] = JSON.stringify(data);
+        enableQaDbIsolation(seed);
+      }
+      snapshot = deepClone(data);
+      log.push('Snapshot taken. customers='+data.customers.length
         +' products='+data.products.length
         +' invoices='+data.invoices.length
         +' suppliers='+data.suppliers.length);
@@ -2947,7 +2929,7 @@ function openSupplierDetail(sid){
         suppliers.push(s);
       }
       rec(assert(suppliers.length===5, 'Generate 5 suppliers'));
-      await qaSaveData();
+      await saveData();
 
       // ---- Phase B: purchases (stock in) ----
       for(let i=0;i<20;i++){
@@ -2962,7 +2944,7 @@ function openSupplierDetail(sid){
         s.purchases.push(purchase);
         applyPurchaseStockEffects(purchase, s.name);
       }
-      await qaSaveData();
+      await saveData();
       rec(assert(true, 'Generate 20 purchases with stock increase'));
       qaAssertFifoHealthy(rec, products, 'after purchases');
 
@@ -3023,7 +3005,7 @@ function openSupplierDetail(sid){
         pushInvoicePayments(c.id, inv, cashPaid, cardPaid, transferPaid, checkAmount, todayISO(), null);
         createdInvoices.push(inv);
       }
-      await qaSaveData();
+      await saveData();
       rec(assert(createdInvoices.length===40, 'Generate 40 invoices with stock/payment effects'));
 
       // verify each invoice total & customer balance consistency
@@ -3092,7 +3074,7 @@ function openSupplierDetail(sid){
         data.payments.push(payment);
         applyReturnStockEffects(payment.returnItems, payment.date, payment);
       }
-      await qaSaveData();
+      await saveData();
       rec(assert(true, 'Standalone payments, checks, and one sales-return applied'));
 
       for(const c of customers){
@@ -3125,7 +3107,7 @@ function openSupplierDetail(sid){
           }
         }
       }
-      await qaSaveData();
+      await saveData();
       rec(assert(true, 'Supplier payments and one purchase-return applied'));
 
       for(const s of suppliers){
@@ -3174,7 +3156,7 @@ function openSupplierDetail(sid){
         pushInvoicePayments(cid, inv, cashPaid, cardPaid, transferPaid, checkAmount, todayISO(), null);
         inv.editHistory = inv.editHistory||[];
         inv.editHistory.push({id:uid(), editedAt:new Date().toISOString(), before:{total:createdInvoices[0].total}, after:{total}});
-        await qaSaveData();
+        await saveData();
 
         const afterBal = customerTotals(cid).balance;
         rec(assert(typeof afterBal==='number', 'Edit invoice: customer balance still finite', 'bal='+afterBal+' before='+beforeBal));
@@ -3191,7 +3173,7 @@ function openSupplierDetail(sid){
         revertInvoiceStockEffects(inv);
         revertInvoicePayments(inv);
         data.invoices = data.invoices.filter(x=>x.id!==invId);
-        await qaSaveData();
+        await saveData();
         rec(assert(!data.invoices.find(x=>x.id===invId), 'Delete invoice removed from data'));
         const t = customerTotals(cid);
         const expected = (data.customers.find(x=>x.id===cid).openingBalance||0) + t.invTotal - t.payTotal - t.checkTotal;
@@ -3244,10 +3226,10 @@ function openSupplierDetail(sid){
           const beforeImport = deepClone(data);
           // replace data with a tiny mutation then restore from midSnapshot (manual, same as undo)
           data.customers = data.customers.slice(0, Math.max(0, data.customers.length-1));
-          await qaSaveData();
+          await saveData();
           // restore mid
           data = deepClone(midSnapshot);
-          await qaSaveData();
+          await saveData();
           rec(assert(data.customers.length === midSnapshot.customers.length, 'Manual restore cycle restored customer count'));
           // restore original mid is still QA data; fine
           void beforeImport;
@@ -3257,7 +3239,7 @@ function openSupplierDetail(sid){
 
         // call getAutoBackupList / autoBackupTick safely
         try{
-          await qaAutoBackupTick();
+          await autoBackupTick();
           const list = await getAutoBackupList();
           rec(assert(Array.isArray(list), 'getAutoBackupList returns array', 'len='+(list&&list.length)));
         }catch(e){
@@ -3270,7 +3252,7 @@ function openSupplierDetail(sid){
         const c = customers[1];
         c.visits = c.visits||[];
         c.visits.push({id:uid(), date:todayISO(), time:nowHHMM(), result:VISIT_RESULTS[0]});
-        await qaSaveData();
+        await saveData();
         rec(assert(c.visits.length>=1, 'Visit recorded on customer'));
       }
 
@@ -3295,20 +3277,21 @@ function openSupplierDetail(sid){
       rec(assert(false, 'Unhandled suite exception', String(e&&e.stack||e.message||e)));
       console.error(e);
     }finally{
-      // Reattach the original Production object. It was never mutated by QA.
+      // restore original in-memory data (Production IDB was never written while isolation was on)
       try{
-        if(productionData){
-          data = productionData;
-          window.__QA_ISOLATION__ = false;
+        if(snapshot){
+          data = deepClone(snapshot);
+          await saveData(); // still isolated → memory only
           render();
-          log.push('Production data reattached unchanged. customers='+data.customers.length
+          log.push('Original data restored. customers='+data.customers.length
             +' products='+data.products.length
             +' invoices='+data.invoices.length);
-          rec(assert(true, 'Production data remained isolated during QA'));
+          rec(assert(true, 'Original data restored after QA'));
         }
       }catch(e){
         rec(assert(false, 'Failed to restore original data', String(e&&e.message||e)));
       }
+      if(typeof disableQaDbIsolation === 'function') disableQaDbIsolation();
       window.confirm = origConfirm;
       window.alert = origAlert;
       qaRunning = false;
@@ -3531,7 +3514,7 @@ function openSupplierDetail(sid){
   async function qaPersistenceCheck(rec, tag){
     try{
       const before={c:data.customers.length,p:data.products.length,i:data.invoices.length,s:data.suppliers.length};
-      await qaSaveData(); await qaLoadData();
+      await saveData(); await loadData();
       const after={c:data.customers.length,p:data.products.length,i:data.invoices.length,s:data.suppliers.length};
       rec(assert(JSON.stringify(before)===JSON.stringify(after),
         'Persistence save/load preserves counts ['+tag+']', JSON.stringify(before)+' vs '+JSON.stringify(after)));
@@ -3545,12 +3528,15 @@ function openSupplierDetail(sid){
     const origConfirm=window.confirm, origAlert=window.alert;
     window.confirm=function(){return true;}; window.alert=function(m){log.push('ALERT: '+m);};
     const counters={opsCount:0, invoicesCreated:0, paymentsCount:0, returnsCount:0, editsCount:0, deletesCount:0, backupsCount:0, repeats:0};
-    const phaseTimes={}; let productionData=null; let masterSnapshot=null; const runSummaries=[];
+    const phaseTimes={}; let masterSnapshot=null; const runSummaries=[];
     try{
-      productionData=data;
-      window.__QA_ISOLATION__ = true;
-      masterSnapshot=deepClone(productionData);
-      data=deepClone(masterSnapshot);
+      // Crash-safe isolation: Stress Test saveData/loadData never touch Production IDB.
+      if(typeof enableQaDbIsolation === 'function'){
+        const seed = {};
+        seed[RECORD_KEY] = JSON.stringify(data);
+        enableQaDbIsolation(seed);
+      }
+      masterSnapshot=deepClone(data);
       const REPEATS=10;
       for(let round=0; round<REPEATS; round++){
         const tRound0=qaNow();
@@ -3563,11 +3549,11 @@ function openSupplierDetail(sid){
         for(let i=0;i<2100;i++){ ent.invoices.push(qaCreateInvoice(ent, i)); counters.invoicesCreated++;
           if(i%300===0) qaCheckInvariants(rec, 'duringInvoices_r'+round+'#'+i, false); }
         phaseTimes['invoices_r'+round]=qaNow()-tA;
-        await qaSaveData();
+        await saveData();
         qaCheckInvariants(rec, 'afterInvoices_r'+round, true);
 
         tA=qaNow(); qaRandomOps(ent, rec, counters, 300); phaseTimes['randomOps_r'+round]=qaNow()-tA;
-        await qaSaveData();
+        await saveData();
         qaCheckInvariants(rec, 'afterRandomOps_r'+round, true);
 
         tA=qaNow();
@@ -3592,9 +3578,10 @@ function openSupplierDetail(sid){
       console.error(e);
     }finally{
       try{
-        if(productionData){ data=productionData; window.__QA_ISOLATION__ = false; render();
-          rec(assert(true, 'Production data remained isolated during stress suite')); }
-      }catch(e){ rec(assert(false, 'Failed to reattach Production data after stress suite', String(e&&e.message||e))); }
+        if(masterSnapshot){ data=deepClone(masterSnapshot); await saveData(); render();
+          rec(assert(true, 'Original data restored after stress suite')); }
+      }catch(e){ rec(assert(false, 'Failed to restore original data after stress', String(e&&e.message||e))); }
+      if(typeof disableQaDbIsolation === 'function') disableQaDbIsolation();
       window.confirm=origConfirm; window.alert=origAlert; qaRunning=false;
     }
     const passed=results.filter(r=>r.ok).length, failed=results.filter(r=>!r.ok).length, ms=qaNow()-t0;

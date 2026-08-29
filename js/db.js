@@ -22,7 +22,41 @@ async function getDB(){
   if(!dbInstance) dbInstance = await openDB();
   return dbInstance;
 }
+
+// ---------- QA data isolation (crash-safe) ----------
+// When active, dbGet/dbPut/dbDelete never touch Production IndexedDB.
+// All writes live in an in-memory Map only. Crash / kill / tab close
+// during QA therefore cannot leave QA data in Production baqeriDB.
+// Production behavior is unchanged when isolation is inactive.
+var _qaIsoActive = false;
+var _qaIsoStore = null; // Map: key -> {key, value} (same shape as IDB records)
+
+/**
+ * Enable QA isolation. Optional seedEntries: { [key]: value } preloaded into
+ * the memory store (e.g. RECORD_KEY → JSON.stringify(data)) so loadData()
+ * round-trips inside QA without reading Production.
+ */
+function enableQaDbIsolation(seedEntries){
+  _qaIsoActive = true;
+  _qaIsoStore = new Map();
+  if(seedEntries && typeof seedEntries === 'object'){
+    Object.keys(seedEntries).forEach(function(k){
+      _qaIsoStore.set(k, { key: k, value: seedEntries[k] });
+    });
+  }
+}
+function disableQaDbIsolation(){
+  _qaIsoActive = false;
+  _qaIsoStore = null;
+}
+function isQaDbIsolationActive(){
+  return !!_qaIsoActive;
+}
+
 async function dbGet(key){
+  if(_qaIsoActive && _qaIsoStore){
+    return _qaIsoStore.has(key) ? _qaIsoStore.get(key) : undefined;
+  }
   const db = await getDB();
   return new Promise((resolve,reject)=>{
     const tx = db.transaction(STORE,'readonly');
@@ -32,6 +66,10 @@ async function dbGet(key){
   });
 }
 async function dbPut(key, value){
+  if(_qaIsoActive && _qaIsoStore){
+    _qaIsoStore.set(key, { key: key, value: value });
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve,reject)=>{
     const tx = db.transaction(STORE,'readwrite');
@@ -41,6 +79,10 @@ async function dbPut(key, value){
   });
 }
 async function dbDelete(key){
+  if(_qaIsoActive && _qaIsoStore){
+    _qaIsoStore.delete(key);
+    return;
+  }
   const db = await getDB();
   return new Promise((resolve,reject)=>{
     const tx = db.transaction(STORE,'readwrite');
@@ -489,8 +531,6 @@ async function loadData(){
 }
 
 async function saveData(){
-  // Developer QA isolation: never persist QA mutations into Production IndexedDB.
-  if(window.__QA_ISOLATION__ === true) return;
   try{
     data.schemaVersion = CURRENT_SCHEMA_VERSION;
     await dbPut(RECORD_KEY, JSON.stringify(data));
