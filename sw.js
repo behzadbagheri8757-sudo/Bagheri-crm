@@ -7,8 +7,8 @@
  */
 'use strict';
 
-/* CHANGED: v22 -> v23 (iOS UI polish — route transition, input zoom, FAB z-index) */
-const CACHE_NAME = 'baqeri-shell-v29';
+/* CHANGED: v29 -> v30 (theme system: CSS variables, Settings picker, FOUC-safe boot) */
+const CACHE_NAME = 'baqeri-shell-v30';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [

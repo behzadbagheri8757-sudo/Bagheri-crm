@@ -2,6 +2,18 @@
 <html lang="fa" dir="rtl" data-spa-shell="1">
 <head>
 <meta charset="UTF-8">
+<script>
+/* Apply saved theme before first paint (prevents flash of wrong/default theme).
+   Reads the same key/logic as the picker in js/views/settings.js. */
+(function(){
+  try{
+    var t = localStorage.getItem('baqeri_theme_v1');
+    if(t && t !== 'default'){
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  }catch(e){}
+})();
+</script>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
