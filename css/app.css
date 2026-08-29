@@ -6,7 +6,7 @@
 
 @font-face {
   font-family: 'Vazirmatn';
-  src: url('./fonts/Vazirmatn[wght].woff2') format('woff2');
+  src: url('../fonts/Vazirmatn[wght].woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -3091,9 +3091,11 @@ a.dash-tile .dash-sub{font-size:.58rem;margin-top:2px;}
 }
 
 /* 5. Keyboard Handling */
-body.keyboard-open .sheet {
+body.keyboard-open .overlay {
   bottom: var(--keyboard-height, 0px);
-  max-height: calc(100vh - var(--keyboard-height, 0px) - 20px);
+}
+body.keyboard-open .sheet {
+  max-height: calc(var(--vv-height, 100vh) - 20px);
 }
 
 /* 6. Gesture Handle for Sheets */
@@ -3252,6 +3254,8 @@ header{
    SPA shell primarily uses bottom-nav so this rarely matters.
    Offset below sticky header (~header content 44px + safe-top handled by flow). */
 nav#nav{
+  position: relative !important;
+  top: auto !important;
   z-index: 20;
 }
 
