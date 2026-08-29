@@ -66,16 +66,17 @@
     }
   }
 
-  function navigateToProspect(id) {
+  function navigateToProspect(id, opts) {
+    const justCreated = !!(opts && opts.justCreated);
     if (
       typeof isSpaShell === 'function' &&
       isSpaShell() &&
       typeof AppRouter !== 'undefined' &&
       AppRouter.navigate
     ) {
-      AppRouter.navigate('/prospect', { id: id });
+      AppRouter.navigate('/prospect', justCreated ? { id: id, justCreated: '1' } : { id: id });
     } else {
-      location.href = '#/prospect?id=' + encodeURIComponent(id);
+      location.href = '#/prospect?id=' + encodeURIComponent(id) + (justCreated ? '&justCreated=1' : '');
     }
   }
 
@@ -261,7 +262,7 @@
               queueProspectTargetMilestoneMessage(prospectState.dailyTarget);
             }
             showToast('مغازه ثبت شد');
-            navigateToProspect(shop.id);
+            navigateToProspect(shop.id, { justCreated: true });
           }
         } catch (e) {
           console.error(e);

@@ -10,6 +10,11 @@
 (function (global) {
   let currentProspectId = null;
   let rootEl = null;
+  // True only immediately after this shop was just created from the New-Evaluation
+  // flow (Evaluation → Result). Used solely to redirect the "ثبت ویزیت / ارزیابی
+  // جدید" action to a fresh evaluation instead of re-opening this same shop.
+  // Does not affect the normal "re-evaluate an existing prospect" path.
+  let cameFromNewEvaluation = false;
   function rankPill(rank) {
     const info = PROSPECT_RANK_INFO[rank] || PROSPECT_RANK_INFO['D'];
     return `<span class="rank-pill" style="background:${info.color}">${esc(rank)}</span>`;
@@ -37,7 +42,7 @@
     ) {
       AppRouter.navigate('/evaluation', { shopId: shopId });
     } else {
-      location.href = '#/evaluation?shopId=' + encodeURIComponent(shopId);
+      location.href = shopId ? ('#/evaluation?shopId=' + encodeURIComponent(shopId)) : '#/evaluation';
     }
   }
 
@@ -173,7 +178,11 @@
     const addVisitBtn = document.getElementById('btn-add-visit');
     if (addVisitBtn) {
       addVisitBtn.onclick = function () {
-        navigateToEvaluation(shop.id);
+        if (cameFromNewEvaluation) {
+          navigateToEvaluation(); // start a genuinely new evaluation; Working Location is preserved by evaluation.js
+        } else {
+          navigateToEvaluation(shop.id);
+        }
       };
     }
 
@@ -226,6 +235,7 @@
     if (nav) nav.style.display = '';
 
     currentProspectId = params && params.id ? params.id : null;
+    cameFromNewEvaluation = !!(params && (params.justCreated === '1' || params.justCreated === true));
 drawProspectDetail(root);
 
     refreshToken = ViewHost.setRefresh(()=>drawProspectDetail(rootEl));
@@ -234,6 +244,7 @@ drawProspectDetail(root);
       ViewHost.clearRefresh(refreshToken);
       refreshToken = null;
       currentProspectId = null;
+      cameFromNewEvaluation = false;
       root.innerHTML = '';
       rootEl = null;
     };
