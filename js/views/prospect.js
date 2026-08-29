@@ -103,12 +103,14 @@
         <div style="font-size:.88rem;margin-top:6px;line-height:1.7;">
           <div>مسیر: ${esc(prospectRouteName(shop.routeId))}</div>
           <div>محله: ${esc(prospectNeighborhoodName(shop.routeId, shop.neighborhoodId))}</div>
+          <div>موقعیت: ${esc(getLocationDisplayString(shop.locationId))}</div>
           <div style="margin-top:8px;">امتیاز: <b>${shop.latestScore}</b> ${rankPill(shop.latestRank)}</div>
           <div class="sub" style="margin-top:4px;">${esc(info.desc)}</div>
         </div>
       </div>
       <div class="btn-row" style="margin-bottom:14px;">
         <button type="button" class="btn small" id="btn-add-visit">ثبت ویزیت / ارزیابی جدید</button>
+        <button type="button" class="btn small secondary" id="btn-assign-location">اختصاص موقعیت</button>
         ${shop.status !== 'converted'
           ? `<button type="button" class="btn small secondary" id="btn-convert">تبدیل به مشتری</button>`
           : (shop.linkedCustomerId
@@ -124,6 +126,21 @@
     if (addVisitBtn) {
       addVisitBtn.onclick = function () {
         navigateToEvaluation(shop.id);
+      };
+    }
+
+    const assignLocBtn = document.getElementById('btn-assign-location');
+    if (assignLocBtn) {
+      assignLocBtn.onclick = function () {
+        openLocationAssignSheet({
+          title: 'اختصاص موقعیت — ' + shop.name,
+          currentLocationId: shop.locationId || null,
+          onSave: async function (locationId) {
+            await setProspectLocation(shop.id, locationId);
+            showToast('موقعیت ذخیره شد');
+            drawProspectDetail(root);
+          },
+        });
       };
     }
 

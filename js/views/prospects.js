@@ -11,6 +11,7 @@
   let pQuery = '';
   let pFilter = 'all'; // all | active | converted | A+ | A | B
   let pSort = 'score_desc'; // score_desc | score_asc | name | newest
+  let pLocFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
 
   let searchHandler = null;
   let chipHandlers = [];
@@ -105,6 +106,20 @@
     else if (pFilter === 'converted') rows = rows.filter(s => s.status === 'converted');
     else if (['A+', 'A', 'B', 'C', 'D'].includes(pFilter)) rows = rows.filter(s => s.latestRank === pFilter);
 
+    if (pLocFilter.unassigned) {
+      rows = rows.filter(s => !s.locationId);
+    } else if (pLocFilter.neighborhoodId) {
+      rows = rows.filter(s => s.locationId === pLocFilter.neighborhoodId);
+    } else if (pLocFilter.routeId) {
+      const neighIds = listNeighborhoods(pLocFilter.routeId).map(n => n.id);
+      rows = rows.filter(s => s.locationId && neighIds.indexOf(s.locationId) !== -1);
+    } else if (pLocFilter.regionId) {
+      const routeIds = listRoutes(pLocFilter.regionId).map(r => r.id);
+      let neighIds = [];
+      routeIds.forEach(rid => { neighIds = neighIds.concat(listNeighborhoods(rid).map(n => n.id)); });
+      rows = rows.filter(s => s.locationId && neighIds.indexOf(s.locationId) !== -1);
+    }
+
     if (pSort === 'score_asc') rows.sort((a,b) => a.latestScore - b.latestScore);
     else if (pSort === 'name') rows.sort((a,b) => (a.name || '').localeCompare(b.name || '', 'fa'));
     else if (pSort === 'newest') rows.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -126,6 +141,22 @@
         <span class="amount">${s.latestScore} ${rankPill(s.latestRank)}</span>
       </a>`).join('');
     // Click listener is bound once in drawProspectsPage (not on every list re-render).
+  }
+
+  function renderProspectLocFilterOptionsHTML() {
+    const regions = listRegions();
+    const routes = pLocFilter.regionId ? listRoutes(pLocFilter.regionId) : [];
+    const neighs = pLocFilter.routeId ? listNeighborhoods(pLocFilter.routeId) : [];
+    const opt = function (list, selId) {
+      return '<option value="">— همه —</option>' + list.map(function (x) {
+        return '<option value="' + esc(x.id) + '" ' + (x.id === selId ? 'selected' : '') + '>' + esc(x.name) + '</option>';
+      }).join('');
+    };
+    return (
+      '<div class="field"><label>منطقه</label><select id="p-loc-filter-region">' + opt(regions, pLocFilter.regionId) + '</select></div>' +
+      '<div class="field"><label>مسیر</label><select id="p-loc-filter-route" ' + (!pLocFilter.regionId ? 'disabled' : '') + '>' + opt(routes, pLocFilter.routeId) + '</select></div>' +
+      '<div class="field"><label>محله</label><select id="p-loc-filter-neigh" ' + (!pLocFilter.routeId ? 'disabled' : '') + '>' + opt(neighs, pLocFilter.neighborhoodId) + '</select></div>'
+    );
   }
 
   function drawProspectsPage(root) {
@@ -157,6 +188,10 @@
         </select>
       </div>
       <div id="prospect-summary" class="cards" style="margin-bottom:10px;"></div>
+      <div id="p-loc-filter-row">${renderProspectLocFilterOptionsHTML()}</div>
+      <div class="chip-row" style="margin-bottom:8px;">
+        <button type="button" class="chip ${pLocFilter.unassigned ? 'active' : ''}" id="p-loc-filter-unassigned">بدون موقعیت</button>
+      </div>
       <div id="prospect-list"></div>
     `;
 
@@ -186,6 +221,58 @@
       renderProspectListOnly();
     };
     sortEl.addEventListener('change', sortHandler);
+
+    function wireProspectLocFilterSelects() {
+      const regionSel = document.getElementById('p-loc-filter-region');
+      const routeSel = document.getElementById('p-loc-filter-route');
+      const neighSel = document.getElementById('p-loc-filter-neigh');
+      const unassignedBtn = document.getElementById('p-loc-filter-unassigned');
+      if (regionSel) regionSel.addEventListener('change', function () {
+        pLocFilter.regionId = regionSel.value;
+        pLocFilter.routeId = '';
+        pLocFilter.neighborhoodId = '';
+        pLocFilter.unassigned = false;
+        const row = document.getElementById('p-loc-filter-row');
+        row.innerHTML = renderProspectLocFilterOptionsHTML();
+        wireProspectLocFilterSelects();
+        if (unassignedBtn) unassignedBtn.classList.remove('active');
+        renderProspectListOnly();
+      });
+      if (routeSel) routeSel.addEventListener('change', function () {
+        pLocFilter.routeId = routeSel.value;
+        pLocFilter.neighborhoodId = '';
+        pLocFilter.unassigned = false;
+        const row = document.getElementById('p-loc-filter-row');
+        row.innerHTML = renderProspectLocFilterOptionsHTML();
+        wireProspectLocFilterSelects();
+        if (unassignedBtn) unassignedBtn.classList.remove('active');
+        renderProspectListOnly();
+      });
+      if (neighSel) neighSel.addEventListener('change', function () {
+        pLocFilter.neighborhoodId = neighSel.value;
+        pLocFilter.unassigned = false;
+        if (unassignedBtn) unassignedBtn.classList.remove('active');
+        renderProspectListOnly();
+      });
+    }
+    wireProspectLocFilterSelects();
+
+    const pUnassignedBtn = document.getElementById('p-loc-filter-unassigned');
+    if (pUnassignedBtn) {
+      pUnassignedBtn.addEventListener('click', function () {
+        pLocFilter.unassigned = !pLocFilter.unassigned;
+        if (pLocFilter.unassigned) {
+          pLocFilter.regionId = '';
+          pLocFilter.routeId = '';
+          pLocFilter.neighborhoodId = '';
+          const row = document.getElementById('p-loc-filter-row');
+          row.innerHTML = renderProspectLocFilterOptionsHTML();
+          wireProspectLocFilterSelects();
+        }
+        pUnassignedBtn.classList.toggle('active', pLocFilter.unassigned);
+        renderProspectListOnly();
+      });
+    }
 
     // Navigation buttons
     root.querySelector('[data-nav-evaluation]').addEventListener('click', function (e) {
@@ -238,6 +325,7 @@
     pQuery = '';
     pFilter = 'all';
     pSort = 'score_desc';
+    pLocFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
     drawProspectsPage(root);
 
     refreshToken = ViewHost.setRefresh(renderProspectListOnly);

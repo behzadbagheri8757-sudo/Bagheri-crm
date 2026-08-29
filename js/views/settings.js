@@ -110,6 +110,16 @@
       </div>
 
       <div class="settings-section">
+        <h3>موقعیت مکانی</h3>
+        <div class="sub" style="margin-bottom:8px;font-size:.8rem;line-height:1.5;">
+          مدیریت ساختار منطقه › مسیر › محله، مشترک بین مشتریان و مغازه‌های بالقوه.
+        </div>
+        <div class="btn-row">
+          <a class="btn small secondary" href="#/locations">مدیریت موقعیت مکانی</a>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h3>آمار دادهٔ فعلی</h3>
         <div class="cards">
           <div class="card"><div class="label">مشتریان</div><div class="value">${(data.customers || []).length}</div></div>

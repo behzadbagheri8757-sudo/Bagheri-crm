@@ -446,8 +446,10 @@
       '<div style="font-size:.88rem;line-height:1.85;color:var(--ink);">' +
       (c.ownerName ? '<div>صاحب: ' + esc(c.ownerName) + '</div>' : '') +
       (c.phone ? '<div>تلفن: ' + esc(c.phone) + '</div>' : '') +
-      (c.region ? '<div>منطقه: ' + esc(c.region) + '</div>' : '') +
-      (c.route ? '<div>مسیر: ' + esc(c.route) + '</div>' : '') +
+      (c.locationId
+        ? '<div>موقعیت: ' + esc(getLocationDisplayString(c.locationId)) + '</div>'
+        : ((c.region ? '<div>منطقه: ' + esc(c.region) + '</div>' : '') +
+           (c.route ? '<div>مسیر: ' + esc(c.route) + '</div>' : ''))) +
       (c.address ? '<div>آدرس: ' + esc(c.address) + '</div>' : '') +
       (c.note ? '<div>یادداشت: ' + esc(c.note) + '</div>' : '') +
       '</div>' +
@@ -486,6 +488,7 @@
       '<button type="button" class="btn small secondary" id="act-visit">ثبت ویزیت</button>' +
       '<button type="button" class="btn small secondary" id="act-check">ثبت چک</button>' +
       '<button type="button" class="btn small secondary" id="act-edit">ویرایش مشتری</button>' +
+      '<button type="button" class="btn small secondary" id="act-location">اختصاص موقعیت</button>' +
       '</div>' +
       '<h3 class="sub-title">فاکتورها (' +
       invs.length +
@@ -527,6 +530,17 @@
     };
     document.getElementById('act-edit').onclick = function () {
       openAddCustomer(c.id);
+    };
+    document.getElementById('act-location').onclick = function () {
+      openLocationAssignSheet({
+        title: 'اختصاص موقعیت — ' + c.name,
+        currentLocationId: c.locationId || null,
+        onSave: async function (locationId) {
+          await setCustomerLocation(c.id, locationId);
+          showToast('موقعیت ذخیره شد');
+          render();
+        },
+      });
     };
   }
 

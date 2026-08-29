@@ -8,11 +8,14 @@
   let custQuery = '';
   let custFilter = 'all'; // all | debt | settled | credit
   let custSortByDebt = false;
+  let locFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
 
   let searchHandler = null;
   let sortHandler = null;
   let chipHandlers = [];
   let listClickHandler = null;
+  let locFilterHandler = null;
+  let locUnassignedHandler = null;
   function customerHref(cid) {
     return typeof isSpaShell === 'function' && isSpaShell()
       ? '#/customer?id=' + encodeURIComponent(cid)
@@ -57,6 +60,20 @@
     if (custFilter === 'debt') rows = rows.filter(function (x) { return x.t.balance > 0; });
     else if (custFilter === 'settled') rows = rows.filter(function (x) { return x.t.balance === 0; });
     else if (custFilter === 'credit') rows = rows.filter(function (x) { return x.t.balance < 0; });
+
+    if (locFilter.unassigned) {
+      rows = rows.filter(function (x) { return !x.c.locationId; });
+    } else if (locFilter.neighborhoodId) {
+      rows = rows.filter(function (x) { return x.c.locationId === locFilter.neighborhoodId; });
+    } else if (locFilter.routeId) {
+      const neighIds = listNeighborhoods(locFilter.routeId).map(function (n) { return n.id; });
+      rows = rows.filter(function (x) { return x.c.locationId && neighIds.indexOf(x.c.locationId) !== -1; });
+    } else if (locFilter.regionId) {
+      const routeIds = listRoutes(locFilter.regionId).map(function (r) { return r.id; });
+      let neighIds = [];
+      routeIds.forEach(function (rid) { neighIds = neighIds.concat(listNeighborhoods(rid).map(function (n) { return n.id; })); });
+      rows = rows.filter(function (x) { return x.c.locationId && neighIds.indexOf(x.c.locationId) !== -1; });
+    }
 
     if (custSortByDebt) {
       rows.sort(function (a, b) { return b.t.balance - a.t.balance; });
@@ -107,6 +124,22 @@
       .join('');
   }
 
+  function renderLocFilterOptionsHTML() {
+    const regions = listRegions();
+    const routes = locFilter.regionId ? listRoutes(locFilter.regionId) : [];
+    const neighs = locFilter.routeId ? listNeighborhoods(locFilter.routeId) : [];
+    const opt = function (list, selId) {
+      return '<option value="">— همه —</option>' + list.map(function (x) {
+        return '<option value="' + esc(x.id) + '" ' + (x.id === selId ? 'selected' : '') + '>' + esc(x.name) + '</option>';
+      }).join('');
+    };
+    return (
+      '<div class="field"><label>منطقه</label><select id="loc-filter-region">' + opt(regions, locFilter.regionId) + '</select></div>' +
+      '<div class="field"><label>مسیر</label><select id="loc-filter-route" ' + (!locFilter.regionId ? 'disabled' : '') + '>' + opt(routes, locFilter.routeId) + '</select></div>' +
+      '<div class="field"><label>محله</label><select id="loc-filter-neigh" ' + (!locFilter.routeId ? 'disabled' : '') + '>' + opt(neighs, locFilter.neighborhoodId) + '</select></div>'
+    );
+  }
+
   function drawCustomersPage(root) {
     const chip = function (id, label) {
       return (
@@ -134,6 +167,10 @@
       '<button type="button" class="btn small secondary" id="sort-debt">' +
       (custSortByDebt ? '✓ ' : '') +
       'مرتب‌سازی بر اساس بدهی</button>' +
+      '</div>' +
+      '<div id="loc-filter-row">' + renderLocFilterOptionsHTML() + '</div>' +
+      '<div class="chip-row" style="margin-bottom:8px;">' +
+      '<button type="button" class="chip ' + (locFilter.unassigned ? 'active' : '') + '" id="loc-filter-unassigned">بدون موقعیت</button>' +
       '</div>' +
       '<div id="customer-list"></div>';
 
@@ -164,6 +201,57 @@
       renderCustomerListOnly();
     };
     sortBtn.addEventListener('click', sortHandler);
+
+    function wireLocFilterSelects() {
+      const regionSel = document.getElementById('loc-filter-region');
+      const routeSel = document.getElementById('loc-filter-route');
+      const neighSel = document.getElementById('loc-filter-neigh');
+      if (regionSel) regionSel.addEventListener('change', function () {
+        locFilter.regionId = regionSel.value;
+        locFilter.routeId = '';
+        locFilter.neighborhoodId = '';
+        locFilter.unassigned = false;
+        const row = document.getElementById('loc-filter-row');
+        row.innerHTML = renderLocFilterOptionsHTML();
+        wireLocFilterSelects();
+        document.getElementById('loc-filter-unassigned').classList.remove('active');
+        renderCustomerListOnly();
+      });
+      if (routeSel) routeSel.addEventListener('change', function () {
+        locFilter.routeId = routeSel.value;
+        locFilter.neighborhoodId = '';
+        locFilter.unassigned = false;
+        const row = document.getElementById('loc-filter-row');
+        row.innerHTML = renderLocFilterOptionsHTML();
+        wireLocFilterSelects();
+        document.getElementById('loc-filter-unassigned').classList.remove('active');
+        renderCustomerListOnly();
+      });
+      if (neighSel) neighSel.addEventListener('change', function () {
+        locFilter.neighborhoodId = neighSel.value;
+        locFilter.unassigned = false;
+        document.getElementById('loc-filter-unassigned').classList.remove('active');
+        renderCustomerListOnly();
+      });
+    }
+    locFilterHandler = wireLocFilterSelects;
+    wireLocFilterSelects();
+
+    const unassignedBtn = document.getElementById('loc-filter-unassigned');
+    locUnassignedHandler = function () {
+      locFilter.unassigned = !locFilter.unassigned;
+      if (locFilter.unassigned) {
+        locFilter.regionId = '';
+        locFilter.routeId = '';
+        locFilter.neighborhoodId = '';
+        const row = document.getElementById('loc-filter-row');
+        row.innerHTML = renderLocFilterOptionsHTML();
+        wireLocFilterSelects();
+      }
+      unassignedBtn.classList.toggle('active', locFilter.unassigned);
+      renderCustomerListOnly();
+    };
+    unassignedBtn.addEventListener('click', locUnassignedHandler);
 
     const list = document.getElementById('customer-list');
     listClickHandler = function (e) {
@@ -196,6 +284,7 @@
     custQuery = '';
     custFilter = (params && ['debt', 'settled', 'credit'].indexOf(params.filter) !== -1) ? params.filter : 'all';
     custSortByDebt = false;
+    locFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
     drawCustomersPage(root);
 
     refreshToken = ViewHost.setRefresh(renderCustomerListOnly);
