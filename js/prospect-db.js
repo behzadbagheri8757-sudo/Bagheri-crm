@@ -60,6 +60,10 @@ function normalizeProspectShop(raw){
     name: raw.name || '(بدون نام)',
     routeId: raw.routeId || null,
     neighborhoodId: raw.neighborhoodId || null,
+    // Shared Location System reference (js/location.js) — separate from the
+    // legacy routeId/neighborhoodId above, which keep managing ProspectScout's
+    // own route/neighborhood list untouched.
+    locationId: raw.locationId!==undefined ? raw.locationId : null,
     status: raw.status==='converted' ? 'converted' : 'active',
     linkedCustomerId: raw.linkedCustomerId || null,
     createdAt: raw.createdAt || prospectNowISO(),

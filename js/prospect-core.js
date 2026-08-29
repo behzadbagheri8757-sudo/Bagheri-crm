@@ -317,6 +317,8 @@ async function convertProspectToCustomer(shopId){
     phone: '',
     region: region !== '—' ? region : '',
     route: route !== '—' ? route : '',
+    // carry the shared Location System reference over as-is; stays null if unset
+    locationId: shop.locationId || null,
     address: '',
     note: noteParts.join(' — '),
     openingBalance: 0,

@@ -356,6 +356,9 @@ function normalizeData(parsed){
     address: c.address||'',
     region: c.region||'',
     route: c.route||'',
+    // generic Location System reference (js/location.js); legacy region/route
+    // strings above are untouched and never auto-converted into this.
+    locationId: c.locationId!==undefined ? c.locationId : null,
     note: c.note||'',
     openingBalance: c.openingBalance||0,
     visits: c.visits||[],
@@ -401,6 +404,12 @@ function normalizeData(parsed){
     })),
     payments:s.payments||[],
   }));
+  // shared Location System (regions/routes/neighborhoods) — additive, empty
+  // arrays for old backups that don't have them yet. No fuzzy matching, no
+  // automatic assignment; ids simply carry over unchanged.
+  d.regions = (parsed.regions||[]).map(r=>({ id: r.id||uid(), name: r.name||'' }));
+  d.routes = (parsed.routes||[]).map(r=>({ id: r.id||uid(), regionId: r.regionId||null, name: r.name||'' }));
+  d.neighborhoods = (parsed.neighborhoods||[]).map(n=>({ id: n.id||uid(), routeId: n.routeId||null, name: n.name||'' }));
   // inventory layers (FIFO)
   // schema < 3 or missing/empty layers → build from real purchases (never claim empty=[] is migration)
   if(inputSchemaVersion >= 3 && Array.isArray(parsed.inventoryLayers) && parsed.inventoryLayers.length){
