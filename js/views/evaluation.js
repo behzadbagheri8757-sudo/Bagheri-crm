@@ -23,6 +23,36 @@
   let questionHandlers = [];
   let tagHandlers = [];
   let saveHandler = null;
+
+  // Working context for NEW evaluations only. This is UI/session preference data,
+  // not Prospect data, so keep it outside IndexedDB and outside the Prospect schema.
+  const EVAL_WORKING_LOCATION_KEY = 'baqeri_evaluation_working_location_v1';
+
+  function getWorkingEvaluationLocation() {
+    try {
+      const id = localStorage.getItem(EVAL_WORKING_LOCATION_KEY);
+      if (id && typeof getLocationById === 'function' && getLocationById(id)) return id;
+    } catch (e) {}
+    return null;
+  }
+
+  function setWorkingEvaluationLocation(locationId) {
+    if (!locationId) return;
+    try { localStorage.setItem(EVAL_WORKING_LOCATION_KEY, String(locationId)); } catch (e) {}
+  }
+
+  function applyLocationToFormState(locationId) {
+    formState.locationId = locationId || null;
+    if (formState.locationId && typeof getLocationHierarchy === 'function') {
+      const h = getLocationHierarchy(formState.locationId);
+      formState.routeId = h && h.route ? h.route.id : null;
+      formState.neighborhoodId = h && h.neighborhood ? h.neighborhood.id : null;
+    } else {
+      formState.routeId = null;
+      formState.neighborhoodId = null;
+    }
+  }
+
   function navigateToProspects() {
     if (
       typeof isSpaShell === 'function' &&
@@ -137,15 +167,11 @@
       const routeSel = document.getElementById('eval-loc-route');
       const neighSel = document.getElementById('eval-loc-neigh');
       const syncLocation = function () {
-        formState.locationId = picker.getValue();
-        if (formState.locationId && typeof getLocationHierarchy === 'function') {
-          const h = getLocationHierarchy(formState.locationId);
-          formState.routeId = h && h.route ? h.route.id : null;
-          formState.neighborhoodId = h && h.neighborhood ? h.neighborhood.id : null;
-        } else {
-          formState.routeId = null;
-          formState.neighborhoodId = null;
-        }
+        const selectedLocationId = picker.getValue();
+        applyLocationToFormState(selectedLocationId);
+        // Persist only a complete/valid Location. Intermediate cascading states
+        // (region selected, route not yet selected) must not erase the last context.
+        if (selectedLocationId) setWorkingEvaluationLocation(selectedLocationId);
         updateLive();
       };
       [regionSel, routeSel, neighSel].forEach(function (el) {
@@ -263,7 +289,7 @@
         formState.name = '';
         formState.routeId = null;
         formState.neighborhoodId = null;
-        formState.locationId = null;
+        applyLocationToFormState(getWorkingEvaluationLocation());
       }
     } else {
       formState.mode = 'new';
@@ -271,7 +297,7 @@
       formState.name = '';
       formState.routeId = null;
       formState.neighborhoodId = null;
-      formState.locationId = null;
+      applyLocationToFormState(getWorkingEvaluationLocation());
     }
     formState.answers = {};
     formState.tags = [];
