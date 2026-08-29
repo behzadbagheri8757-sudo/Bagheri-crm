@@ -128,10 +128,12 @@
         ? `<div class="card" style="margin-bottom:12px;"><b>${esc(formState.name)}</b>
             <div class="sub">${esc(getLocationDisplayString(formState.locationId))}</div></div>`
         : `<div class="field"><label>نام مغازه</label><input id="shop-name" value="${esc(formState.name)}" autocomplete="off"></div>
-           <div class="card" style="margin-top:10px;">
-             <div class="label" style="margin-bottom:8px;">موقعیت مغازه</div>
-             ${renderLocationPickerHTML('eval-loc', formState.locationId)}
-             <div class="sub" style="margin-top:6px;">منطقه → مسیر → محله (محله اختیاری است)</div>
+           <div class="eval-location-context card" style="margin-top:10px;">
+             <div class="eval-location-context-main">
+               <span class="eval-location-pin" aria-hidden="true">📍</span>
+               <span class="eval-location-context-text">${esc(formState.locationId ? getLocationDisplayString(formState.locationId) : 'محدوده انتخاب نشده')}</span>
+             </div>
+             <button type="button" class="btn secondary small" id="eval-change-location">تغییر</button>
            </div>`
       }
       <div class="live-score">
@@ -162,26 +164,34 @@
     }
 
     if (!isVisit) {
-      const picker = wireLocationPicker('eval-loc');
-      const regionSel = document.getElementById('eval-loc-region');
-      const routeSel = document.getElementById('eval-loc-route');
-      const neighSel = document.getElementById('eval-loc-neigh');
-      const syncLocation = function () {
-        const selectedLocationId = picker.getValue();
-        applyLocationToFormState(selectedLocationId);
-        // Persist only a complete/valid Location. Intermediate cascading states
-        // (region selected, route not yet selected) must not erase the last context.
-        if (selectedLocationId) setWorkingEvaluationLocation(selectedLocationId);
-        updateLive();
-      };
-      [regionSel, routeSel, neighSel].forEach(function (el) {
-        if (el) el.addEventListener('change', syncLocation);
-      });
-      window.__evalLocationCleanup = function () {
-        [regionSel, routeSel, neighSel].forEach(function (el) {
-          if (el) el.removeEventListener('change', syncLocation);
+      const changeLocationBtn = document.getElementById('eval-change-location');
+      if (changeLocationBtn) {
+        changeLocationBtn.addEventListener('click', function () {
+          const idPrefix = 'eval-context-loc';
+          const current = formState.locationId || null;
+          openSheet(
+            '<h3>محدوده ارزیابی</h3>' +
+            '<div class="sub" style="margin-bottom:10px;">محدوده جدید را انتخاب کن؛ انتخاب مسیر یا محله همان لحظه فعال می‌شود.</div>' +
+            renderLocationPickerHTML(idPrefix, current)
+          );
+          wireLocationPicker(idPrefix);
+          const regionSel = document.getElementById(idPrefix+'-region');
+          const routeSel = document.getElementById(idPrefix+'-route');
+          const neighSel = document.getElementById(idPrefix+'-neigh');
+          const applyContext = function () {
+            const locationId = (neighSel && neighSel.value) || (routeSel && routeSel.value) || null;
+            if (!locationId) return;
+            applyLocationToFormState(locationId);
+            setWorkingEvaluationLocation(locationId);
+            const label = document.querySelector('.eval-location-context-text');
+            if (label) label.textContent = getLocationDisplayString(locationId);
+            updateLive();
+          };
+          [regionSel, routeSel, neighSel].forEach(function (el) {
+            if (el) el.addEventListener('change', applyContext);
+          });
         });
-      };
+      }
     }
 
     // Clear previous handlers
