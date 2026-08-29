@@ -7,8 +7,8 @@
  */
 'use strict';
 
-/* CHANGED: v22 -> v23 (iOS UI polish — route transition, input zoom, FAB z-index) */
-const CACHE_NAME = 'baqeri-shell-v29';
+/* CHANGED: v29 -> v30 (shared Location System — js/location.js, js/views/locations.js) */
+const CACHE_NAME = 'baqeri-shell-v30';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
@@ -17,6 +17,7 @@ const PRECACHE_URLS = [
   './js/models.js',
   './js/ui.js',
   './js/db.js',
+  './js/location.js',
   './js/calc.js',
   './js/stock.js',
   './js/payments.js',
@@ -46,6 +47,7 @@ const PRECACHE_URLS = [
   './js/views/prospects.js',
   './js/views/prospect.js',
   './js/views/prospect-routes.js',
+  './js/views/locations.js',
   './js/views/evaluation.js',
   './js/views/checks.js',
   './js/views/invoice.js',
