@@ -148,10 +148,7 @@
           <div class="prospect-score-value">${shop.latestScore}</div>
           <div class="prospect-score-meta">امتیاز · ${rankPill(shop.latestRank)}</div>
         </div>
-        <div class="prospect-detail-meta">
-          <span>مسیر: ${esc(prospectRouteName(shop.routeId))}</span>
-          <span>محله: ${esc(prospectNeighborhoodName(shop.routeId, shop.neighborhoodId))}</span>
-        </div>
+        
         <div class="prospect-rank-description sub">${esc(info.desc)}</div>
       </div>
       <div class="btn-row" style="margin-bottom:14px;">
