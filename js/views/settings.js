@@ -19,6 +19,74 @@
   let pinLockNowHandler = null;
   let techInfoHandler = null;
   let autoBackupHandlers = [];
+  let themePickerHandler = null;
+
+  // ---------- Theme system (presentation only; no business data touched) ----------
+  // Storage key mirrors the tiny boot-time script in index.html (<head>) that
+  // sets html[data-theme] before first paint, so there is no theme flash.
+  var THEME_STORAGE_KEY = 'baqeri_theme_v1';
+  var THEME_LIST = [
+    { id: 'default',  name: 'پیش‌فرض',        desc: 'سرمه‌ای و طلایی — ظاهر فعلی', colors: ['#15273C', '#C89B3C', '#2F6B45'] },
+    { id: 'ocean',    name: 'اقیانوسی',       desc: 'آبی خنک و آرام',              colors: ['#1A4F8B', '#3B7DD8', '#0E7490'] },
+    { id: 'emerald',  name: 'زمردی',          desc: 'سبز عمیق و طراوت',            colors: ['#14532D', '#10B981', '#F59E0B'] },
+    { id: 'sunset',   name: 'غروب',           desc: 'نارنجی و کهربایی گرم',        colors: ['#7F1D1D', '#EA580C', '#EAB308'] },
+    { id: 'midnight', name: 'نیمه‌شب',        desc: 'خاکستری تیره و مینیمال',      colors: ['#111827', '#60A5FA', '#374151'] }
+  ];
+
+  function getCurrentThemeId() {
+    try {
+      var t = localStorage.getItem(THEME_STORAGE_KEY);
+      return (t && THEME_LIST.some(function (x) { return x.id === t; })) ? t : 'default';
+    } catch (e) {
+      return 'default';
+    }
+  }
+
+  function applyThemeId(id) {
+    if (!THEME_LIST.some(function (x) { return x.id === id; })) id = 'default';
+    try { localStorage.setItem(THEME_STORAGE_KEY, id); } catch (e) {}
+    if (id === 'default') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', id);
+    }
+  }
+
+  function themeCheckSvg() {
+    return '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+
+  function themeOptionHtml(t, activeId) {
+    var active = t.id === activeId;
+    return (
+      '<button type="button" class="theme-option' + (active ? ' is-active' : '') + '" ' +
+        'data-theme-id="' + t.id + '" role="radio" aria-checked="' + (active ? 'true' : 'false') + '">' +
+        '<span class="theme-option-swatches">' +
+          t.colors.map(function (c) { return '<span class="theme-swatch" style="background:' + c + '"></span>'; }).join('') +
+        '</span>' +
+        '<span class="theme-option-body">' +
+          '<span class="theme-option-name">' + t.name + '</span>' +
+          '<span class="theme-option-desc">' + t.desc + '</span>' +
+        '</span>' +
+        '<span class="theme-option-check">' + (active ? themeCheckSvg() : '') + '</span>' +
+      '</button>'
+    );
+  }
+
+  function themePickerHtml() {
+    var activeId = getCurrentThemeId();
+    return (
+      '<div class="settings-section">' +
+        '<h3>ظاهر برنامه</h3>' +
+        '<div class="sub" style="margin-bottom:10px;font-size:.8rem;line-height:1.5;">' +
+          'یک تم رنگی برای برنامه انتخاب کنید. تغییر بلافاصله اعمال می‌شود.' +
+        '</div>' +
+        '<div class="theme-picker" id="theme-picker" role="radiogroup" aria-label="انتخاب تم رنگی">' +
+          THEME_LIST.map(function (t) { return themeOptionHtml(t, activeId); }).join('') +
+        '</div>' +
+      '</div>'
+    );
+  }
   function countCustomerVisits() {
     return (data.customers || []).reduce(function (s, c) {
       return s + ((c.visits || []).length);
@@ -68,6 +136,8 @@
 
     root.innerHTML = `
       <h2 class="section-title">تنظیمات و بکاپ</h2>
+
+      ${themePickerHtml()}
 
       <div class="settings-section">
         <h3>Backup</h3>
@@ -154,6 +224,25 @@
         : '<div class="label">وضعیت</div><div class="value" style="font-size:.95rem;">PIN تنظیم نشده</div>';
     }
     refreshPinStatus();
+
+    // Theme picker (single delegated listener; apply immediately, no reload)
+    const themePicker = document.getElementById('theme-picker');
+    if (themePicker) {
+      themePickerHandler = function (e) {
+        const btn = e.target.closest ? e.target.closest('.theme-option') : null;
+        if (!btn || !themePicker.contains(btn)) return;
+        const id = btn.getAttribute('data-theme-id');
+        applyThemeId(id);
+        themePicker.querySelectorAll('.theme-option').forEach(function (opt) {
+          const isActive = opt === btn;
+          opt.classList.toggle('is-active', isActive);
+          opt.setAttribute('aria-checked', isActive ? 'true' : 'false');
+          const check = opt.querySelector('.theme-option-check');
+          if (check) check.innerHTML = isActive ? themeCheckSvg() : '';
+        });
+      };
+      themePicker.addEventListener('click', themePickerHandler);
+    }
 
     // Export JSON
     const exportJsonBtn = document.getElementById('export-json');
@@ -368,6 +457,13 @@
         } catch (e) {}
       });
       autoBackupHandlers = [];
+
+      // Remove theme-picker handler
+      const themePicker = document.getElementById('theme-picker');
+      if (themePicker && themePickerHandler) {
+        try { themePicker.removeEventListener('click', themePickerHandler); } catch (e) {}
+      }
+      themePickerHandler = null;
 
       // Remove button handlers
       const btnIds = ['export-json', 'export-excel', 'do-import', 'undo-import', 'open-tech-info',
