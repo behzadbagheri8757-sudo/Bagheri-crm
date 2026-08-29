@@ -2691,8 +2691,8 @@ function openSupplierDetail(sid){
 
   // --- inject hidden button + panel ---
   function ensureQAUI(){
-    // Developer QA is never exposed in Production. Enable explicitly in a dev build/session.
-    if(localStorage.getItem('DEV_MODE') !== 'true') return;
+    // iPhone/Safari access: expose the existing Developer QA button directly.
+    // QA operations remain isolated in-memory by the QA DATA ISOLATION PATCH.
     if(document.getElementById('qa-dev-btn')) return;
 
     const style = document.createElement('style');
