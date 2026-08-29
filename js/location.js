@@ -80,8 +80,24 @@ async function putRoute(payload){
 }
 async function deleteRoute(id){
   const dependentNeighborhoods = (data.neighborhoods||[]).filter(n=>n.routeId===id).length;
-  if(dependentNeighborhoods>0){
-    return {ok:false, reason:'این مسیر '+dependentNeighborhoods+' محله دارد و حذف نمی‌شود.'};
+  const customerRefs = (data.customers||[]).filter(c=>c.locationId===id).length;
+  let prospectRefs = 0;
+  try{
+    if(typeof openProspectDatabase==='function'){
+      if(!prospectDbInstance) await openProspectDatabase();
+      const shops = await prospectDbGetAll('shops');
+      prospectRefs = (shops||[]).filter(s=>s.locationId===id).length;
+    }
+  }catch(e){
+    console.error('deleteRoute: prospect reference check failed', e);
+    return {ok:false, reason:'بررسی وابستگی مغازه‌ها انجام نشد؛ مسیر حذف نشد.'};
+  }
+  if(dependentNeighborhoods>0 || customerRefs>0 || prospectRefs>0){
+    const bits=[];
+    if(dependentNeighborhoods>0) bits.push(dependentNeighborhoods+' محله');
+    if(customerRefs>0) bits.push(customerRefs+' مشتری');
+    if(prospectRefs>0) bits.push(prospectRefs+' مغازه بالقوه');
+    return {ok:false, reason:'این مسیر به '+bits.join(' و ')+' متصل است و حذف نمی‌شود.'};
   }
   data.routes = (data.routes||[]).filter(r=>r.id!==id);
   await saveData();
@@ -148,14 +164,24 @@ async function deleteNeighborhood(id){
     extend HERE if a future entity (Street, map pin, ...) is introduced. */
 function getLocationById(locationId){
   if(!locationId) return null;
-  return getNeighborhood(locationId);
+  const neighborhood = getNeighborhood(locationId);
+  if(neighborhood) return {type:'neighborhood', entity:neighborhood};
+  const route = getRoute(locationId);
+  if(route) return {type:'route', entity:route};
+  return null;
 }
 function getLocationHierarchy(locationId){
-  const neighborhood = getLocationById(locationId);
-  if(!neighborhood) return null;
-  const route = getRoute(neighborhood.routeId) || null;
-  const region = route ? getRegion(route.regionId) : null;
-  return {region, route, neighborhood};
+  const resolved = getLocationById(locationId);
+  if(!resolved) return null;
+  if(resolved.type === 'neighborhood') {
+    const neighborhood = resolved.entity;
+    const route = getRoute(neighborhood.routeId) || null;
+    const region = route ? getRegion(route.regionId) : null;
+    return {region, route, neighborhood};
+  }
+  const route = resolved.entity;
+  const region = getRegion(route.regionId) || null;
+  return {region, route, neighborhood:null};
 }
 function getLocationDisplayString(locationId){
   const h = getLocationHierarchy(locationId);
@@ -171,7 +197,7 @@ function getLocationDisplayString(locationId){
 async function setCustomerLocation(customerId, locationId){
   const c = (data.customers||[]).find(x=>x.id===customerId);
   if(!c) return false;
-  if(locationId && !getNeighborhood(locationId)) return false;
+  if(locationId && !getLocationById(locationId)) return false;
   const previous = c.locationId || null;
   c.locationId = locationId || null;
   try{
@@ -187,7 +213,7 @@ async function setProspectLocation(shopId, locationId){
   if(typeof prospectState==='undefined') return false;
   const shop = prospectState.shops.find(s=>s.id===shopId);
   if(!shop) return false;
-  if(locationId && !getNeighborhood(locationId)) return false;
+  if(locationId && !getLocationById(locationId)) return false;
   const previous = shop.locationId || null;
   shop.locationId = locationId || null;
   try{
@@ -237,7 +263,11 @@ function wireLocationPicker(idPrefix){
     if(neighSel){ neighSel.innerHTML = opt(rid?listNeighborhoods(rid):[], ''); neighSel.disabled = !rid; }
   });
   return {
-    getValue(){ return (neighSel && neighSel.value) ? neighSel.value : null; }
+    getValue(){
+      if(neighSel && neighSel.value) return neighSel.value;
+      if(routeSel && routeSel.value) return routeSel.value;
+      return null;
+    }
   };
 }
 
