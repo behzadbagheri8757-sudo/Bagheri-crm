@@ -64,7 +64,7 @@
       products
         .map(function (p) {
           const st = invStatus(p);
-          const val = (Number(p.stockQty) || 0) * (Number(p.buy) || 0);
+          const val = (typeof productInventoryValue === 'function') ? productInventoryValue(p.id) : (Number(p.stockQty) || 0) * (Number(p.buy) || 0);
           const unit = p.packageWeight ? 'بسته ' + p.packageWeight : 'عدد';
           const qtyCls = (Number(p.stockQty) || 0) < 0 ? 'accent-red' : '';
           return (

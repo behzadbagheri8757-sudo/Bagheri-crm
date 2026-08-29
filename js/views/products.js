@@ -21,6 +21,7 @@
   }
 
   function productValue(p) {
+    if (typeof productInventoryValue === 'function') return productInventoryValue(p.id);
     return (Number(p.stockQty) || 0) * (Number(p.buy) || 0);
   }
 
