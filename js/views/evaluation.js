@@ -14,6 +14,7 @@
     name: '',
     routeId: null,
     neighborhoodId: null,
+    locationId: null,
     answers: {},
     tags: [],
   };
@@ -63,7 +64,7 @@
     if (btn) {
       const nameOk = formState.mode === 'visit' ? true : formState.name.trim().length > 0;
       const ansOk = n === PROSPECT_QUESTIONS.length;
-      const routeOk = formState.mode === 'visit' ? true : !!formState.routeId;
+      const routeOk = formState.mode === 'visit' ? true : !!formState.locationId;
       btn.disabled = !(nameOk && ansOk && routeOk);
     }
   }
@@ -71,23 +72,7 @@
   function drawEvaluation(root) {
     const shopId = formState.shopId;
 
-    if (formState.mode === 'new' && prospectState.routes.length === 0) {
-      root.innerHTML = `<h2 class="section-title">ثبت مغازه</h2>
-        <div class="empty">اول حداقل یک مسیر بسازید.</div>
-        <a class="btn" href="#/prospect-routes">ساخت مسیر</a>`;
-      return;
-    }
-
     const isVisit = formState.mode === 'visit';
-    let neighChips = '';
-    if (formState.routeId) {
-      const r = prospectState.routes.find(x => x.id === formState.routeId);
-      if (r && r.neighborhoods.length) {
-        neighChips = r.neighborhoods.map(n =>
-          `<button type="button" class="chip-opt ${formState.neighborhoodId === n.id ? 'selected' : ''}" data-group="neighborhood" data-value="${esc(n.id)}">${esc(n.name)}</button>`
-        ).join('');
-      } else neighChips = '<span class="sub">محله‌ای تعریف نشده</span>';
-    }
 
     const qHtml = PROSPECT_QUESTIONS.map((q, idx) => {
       const opts = q.options.map(o =>
@@ -111,16 +96,12 @@
       <h2 class="section-title">${isVisit ? 'ثبت ویزیت / ارزیابی' : 'ثبت مغازه + ارزیابی'}</h2>
       ${isVisit
         ? `<div class="card" style="margin-bottom:12px;"><b>${esc(formState.name)}</b>
-            <div class="sub">${esc(prospectRouteName(formState.routeId))} — ${esc(prospectNeighborhoodName(formState.routeId, formState.neighborhoodId))}</div></div>`
+            <div class="sub">${esc(getLocationDisplayString(formState.locationId))}</div></div>`
         : `<div class="field"><label>نام مغازه</label><input id="shop-name" value="${esc(formState.name)}" autocomplete="off"></div>
-           <div class="field"><label>مسیر</label>
-             <div class="chip-wrap" id="route-chips">
-               ${prospectState.routes.map(r => `<button type="button" class="chip-opt ${formState.routeId === r.id ? 'selected' : ''}" data-group="route" data-value="${esc(r.id)}">${esc(r.name)}</button>`).join('')}
-             </div>
-           </div>
-           <div class="field" id="neigh-wrap" style="${formState.routeId ? '' : 'display:none'}">
-             <label>محله (اختیاری)</label>
-             <div class="chip-wrap" id="neigh-chips">${neighChips}</div>
+           <div class="card" style="margin-top:10px;">
+             <div class="label" style="margin-bottom:8px;">موقعیت مغازه</div>
+             ${renderLocationPickerHTML('eval-loc', formState.locationId)}
+             <div class="sub" style="margin-top:6px;">منطقه → مسیر → محله</div>
            </div>`
       }
       <div class="live-score">
@@ -150,6 +131,33 @@
       }
     }
 
+    if (!isVisit) {
+      const picker = wireLocationPicker('eval-loc');
+      const regionSel = document.getElementById('eval-loc-region');
+      const routeSel = document.getElementById('eval-loc-route');
+      const neighSel = document.getElementById('eval-loc-neigh');
+      const syncLocation = function () {
+        formState.locationId = picker.getValue();
+        if (formState.locationId && typeof getLocationHierarchy === 'function') {
+          const h = getLocationHierarchy(formState.locationId);
+          formState.routeId = h && h.route ? h.route.id : null;
+          formState.neighborhoodId = h && h.neighborhood ? h.neighborhood.id : null;
+        } else {
+          formState.routeId = null;
+          formState.neighborhoodId = null;
+        }
+        updateLive();
+      };
+      [regionSel, routeSel, neighSel].forEach(function (el) {
+        if (el) el.addEventListener('change', syncLocation);
+      });
+      window.__evalLocationCleanup = function () {
+        [regionSel, routeSel, neighSel].forEach(function (el) {
+          if (el) el.removeEventListener('change', syncLocation);
+        });
+      };
+    }
+
     // Clear previous handlers
     routeHandlers = [];
     questionHandlers = [];
@@ -162,19 +170,6 @@
         const value = el.getAttribute('data-value');
         const multi = el.getAttribute('data-multi') === '1';
 
-        if (group === 'route') {
-          formState.routeId = value;
-          formState.neighborhoodId = null;
-          drawEvaluation(root);
-          return;
-        }
-        if (group === 'neighborhood') {
-          formState.neighborhoodId = value;
-          root.querySelectorAll('[data-group="neighborhood"]').forEach(b =>
-            b.classList.toggle('selected', b.getAttribute('data-value') === value)
-          );
-          return;
-        }
         if (group === 'tags') {
           const i = formState.tags.indexOf(value);
           if (i >= 0) formState.tags.splice(i, 1);
@@ -222,6 +217,7 @@
               name: formState.name,
               routeId: formState.routeId,
               neighborhoodId: formState.neighborhoodId,
+              locationId: formState.locationId,
               answers: formState.answers,
               tags: formState.tags,
             });
@@ -260,12 +256,14 @@
         formState.name = shop.name;
         formState.routeId = shop.routeId;
         formState.neighborhoodId = shop.neighborhoodId;
+        formState.locationId = shop.locationId || null;
       } else {
         formState.mode = 'new';
         formState.shopId = null;
         formState.name = '';
         formState.routeId = null;
         formState.neighborhoodId = null;
+        formState.locationId = null;
       }
     } else {
       formState.mode = 'new';
@@ -273,6 +271,7 @@
       formState.name = '';
       formState.routeId = null;
       formState.neighborhoodId = null;
+      formState.locationId = null;
     }
     formState.answers = {};
     formState.tags = [];
@@ -302,6 +301,10 @@
       });
       tagHandlers = [];
 
+      if (window.__evalLocationCleanup) {
+        try { window.__evalLocationCleanup(); } catch (e) {}
+        window.__evalLocationCleanup = null;
+      }
       if (saveHandler) {
         const btn = document.getElementById('save-eval');
         if (btn) btn.onclick = null;

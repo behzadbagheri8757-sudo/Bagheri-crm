@@ -135,7 +135,7 @@
     list.innerHTML = rows.map(s => `
       <a class="ledger-row" data-open-prospect="${esc(s.id)}" style="text-decoration:none;color:inherit;">
         <span class="name">${esc(s.name)}${s.status === 'converted' ? ' ✅' : ''}
-          <span class="sub">${esc(prospectRouteName(s.routeId))} — ${prospectFaDate(s.updatedAt)}</span>
+          <span class="sub">${esc(getLocationDisplayString(s.locationId))} — ${prospectFaDate(s.updatedAt)}</span>
         </span>
         <span class="filler"></span>
         <span class="amount">${s.latestScore} ${rankPill(s.latestRank)}</span>
@@ -167,7 +167,7 @@
       <h2 class="section-title">مغازه‌های بالقوه</h2>
       <div class="prospect-subnav">
         <a class="btn small secondary" data-nav-evaluation href="#/evaluation">ثبت مغازه + ارزیابی</a>
-        <a class="btn small secondary" data-nav-routes href="#/prospect-routes">مسیرها</a>
+        <a class="btn small secondary" data-nav-routes href="#/locations">موقعیت‌ها</a>
       </div>
       <div id="prospect-target" class="cards" style="margin-bottom:12px;"></div>
       <div class="field"><input id="prospect-search" placeholder="جستجوی نام مغازه..." value="${esc(pQuery)}" autocomplete="off"></div>
@@ -287,9 +287,9 @@
         typeof AppRouter !== 'undefined' &&
         AppRouter.navigate
       ) {
-        AppRouter.navigate('/prospect-routes');
+        AppRouter.navigate('/locations');
       } else {
-        location.href = '#/prospect-routes';
+        location.href = '#/locations';
       }
     });
 
