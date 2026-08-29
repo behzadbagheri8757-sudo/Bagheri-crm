@@ -397,6 +397,20 @@ a.ledger-row:active{
 }
 .fab:active{transform:scale(.94);}
 
+.customer-filter-indicator{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-height:0;
+  margin:-2px 0 8px;
+  font-size:.76rem;
+  color:var(--color-text-muted);
+}
+.customer-filter-indicator .chip{
+  padding:3px 8px;
+  min-height:28px;
+}
+
 /* ===================== SHEET / MODAL ===================== */
 .overlay{
   position:fixed;
