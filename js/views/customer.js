@@ -489,6 +489,7 @@
       '<button type="button" class="btn small secondary" id="act-check">ثبت چک</button>' +
       '<button type="button" class="btn small secondary" id="act-edit">ویرایش مشتری</button>' +
       '<button type="button" class="btn small secondary" id="act-location">اختصاص موقعیت</button>' +
+      '<button type="button" class="btn small secondary" id="act-print-statement">🖨️ صورت‌حساب</button>' +
       '</div>' +
       '<h3 class="sub-title">فاکتورها (' +
       invs.length +
@@ -542,6 +543,12 @@
         },
       });
     };
+    const printBtn = document.getElementById('act-print-statement');
+    if (printBtn) {
+      printBtn.onclick = function () {
+        if (typeof printCustomerStatement === 'function') printCustomerStatement(c.id);
+      };
+    }
   }
 
   function mount(root, params) {
