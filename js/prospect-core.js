@@ -64,8 +64,11 @@ async function createProspectShop(payload){
   });
   const shop = normalizeProspectShop({
     name: (payload.name||'').trim(),
+    // Shared Location System is the source of truth for new prospects.
+    // Legacy routeId/neighborhoodId are retained only for old records.
     routeId: payload.routeId || null,
     neighborhoodId: payload.neighborhoodId || null,
+    locationId: payload.locationId || null,
     latestScore: score,
     latestRank: rank,
     visits: [visit],
@@ -304,8 +307,10 @@ async function convertProspectToCustomer(shopId){
     }
   }
 
-  const region = prospectRouteName(shop.routeId);
-  const route = prospectNeighborhoodName(shop.routeId, shop.neighborhoodId);
+  const sharedLocation = shop.locationId && typeof getLocationHierarchy === 'function'
+    ? getLocationHierarchy(shop.locationId) : null;
+  const region = sharedLocation && sharedLocation.region ? sharedLocation.region.name : prospectRouteName(shop.routeId);
+  const route = sharedLocation && sharedLocation.route ? sharedLocation.route.name : prospectNeighborhoodName(shop.routeId, shop.neighborhoodId);
   const noteParts = [
     'تبدیل‌شده از ارزیابی مغازه',
     'امتیاز آخرین ارزیابی: ' + shop.latestScore + ' (رتبه ' + shop.latestRank + ')',
@@ -318,7 +323,7 @@ async function convertProspectToCustomer(shopId){
     region: region !== '—' ? region : '',
     route: route !== '—' ? route : '',
     // carry the shared Location System reference over as-is; stays null if unset
-    locationId: shop.locationId || null,
+    locationId: (shop.locationId && typeof getLocationHierarchy === 'function' && getLocationHierarchy(shop.locationId)) ? shop.locationId : null,
     address: '',
     note: noteParts.join(' — '),
     openingBalance: 0,

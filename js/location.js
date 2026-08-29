@@ -171,18 +171,32 @@ function getLocationDisplayString(locationId){
 async function setCustomerLocation(customerId, locationId){
   const c = (data.customers||[]).find(x=>x.id===customerId);
   if(!c) return false;
+  if(locationId && !getNeighborhood(locationId)) return false;
+  const previous = c.locationId || null;
   c.locationId = locationId || null;
-  await saveData();
-  return true;
+  try{
+    await saveData();
+    return true;
+  }catch(e){
+    c.locationId = previous;
+    throw e;
+  }
 }
 /** Prospect lives in a separate DB (ProspectScoutDB) — persisted via persistProspectShop(). */
 async function setProspectLocation(shopId, locationId){
   if(typeof prospectState==='undefined') return false;
   const shop = prospectState.shops.find(s=>s.id===shopId);
   if(!shop) return false;
+  if(locationId && !getNeighborhood(locationId)) return false;
+  const previous = shop.locationId || null;
   shop.locationId = locationId || null;
-  if(typeof persistProspectShop==='function') await persistProspectShop(shop);
-  return true;
+  try{
+    if(typeof persistProspectShop==='function') await persistProspectShop(shop);
+    return true;
+  }catch(e){
+    shop.locationId = previous;
+    throw e;
+  }
 }
 
 // ---------- reusable UI: cascading Region → Route → Neighborhood picker ----------
