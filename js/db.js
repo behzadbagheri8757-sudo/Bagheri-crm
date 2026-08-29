@@ -489,6 +489,8 @@ async function loadData(){
 }
 
 async function saveData(){
+  // Developer QA isolation: never persist QA mutations into Production IndexedDB.
+  if(window.__QA_ISOLATION__ === true) return;
   try{
     data.schemaVersion = CURRENT_SCHEMA_VERSION;
     await dbPut(RECORD_KEY, JSON.stringify(data));
