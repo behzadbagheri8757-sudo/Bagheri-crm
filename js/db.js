@@ -28,8 +28,24 @@ async function getDB(){
 // All writes live in an in-memory Map only. Crash / kill / tab close
 // during QA therefore cannot leave QA data in Production baqeriDB.
 // Production behavior is unchanged when isolation is inactive.
+//
+// Event-loop parity: real IndexedDB put/delete complete on a macrotask
+// (IDB oncomplete), which lets the browser paint and handle input between
+// Stress saveData calls. A bare Map.set resolves only as a microtask and
+// starves the UI during Stress-scale work (event-loop starvation / freeze).
+// Isolation writes therefore yield one macrotask after mutating the Map so
+// Stress keeps the same responsiveness profile as v40 + IDB.
 var _qaIsoActive = false;
 var _qaIsoStore = null; // Map: key -> {key, value} (same shape as IDB records)
+
+/** Macrotask yield (MessageChannel) — mirrors IDB oncomplete scheduling. */
+function _qaIsoYieldMacrotask(){
+  return new Promise(function(resolve){
+    var ch = new MessageChannel();
+    ch.port1.onmessage = function(){ resolve(); };
+    ch.port2.postMessage(0);
+  });
+}
 
 /**
  * Enable QA isolation. Optional seedEntries: { [key]: value } preloaded into
@@ -67,7 +83,18 @@ async function dbGet(key){
 }
 async function dbPut(key, value){
   if(_qaIsoActive && _qaIsoStore){
-    _qaIsoStore.set(key, { key: key, value: value });
+    // Auto-backup rows under isolation: keep list/metadata working but do not
+    // retain a second full JSON snapshot of Stress-scale data on the JS heap
+    // (Production IDB would hold that payload off-heap after put). RECORD_KEY
+    // and small keys stay full-fidelity for save/load round-trips.
+    var storeVal = value;
+    if(typeof key === 'string' && typeof AUTO_BACKUP_PREFIX === 'string'
+      && key.indexOf(AUTO_BACKUP_PREFIX) === 0
+      && typeof value === 'string' && value.length > 512){
+      storeVal = '{"_qaIsoStub":1,"len":'+value.length+'}';
+    }
+    _qaIsoStore.set(key, { key: key, value: storeVal });
+    await _qaIsoYieldMacrotask();
     return;
   }
   const db = await getDB();
@@ -81,6 +108,7 @@ async function dbPut(key, value){
 async function dbDelete(key){
   if(_qaIsoActive && _qaIsoStore){
     _qaIsoStore.delete(key);
+    await _qaIsoYieldMacrotask();
     return;
   }
   const db = await getDB();
