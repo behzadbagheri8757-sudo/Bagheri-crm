@@ -37,7 +37,8 @@ function customerTotals(cid){
 function invoiceDiscountAmount(inv){
   if(inv.discountType==='percent'){
     const subtotal = (inv.items||[]).reduce((s,it)=>s+it.qty*it.price-(it.discount||0),0);
-    return subtotal*(inv.discount||0)/100;
+    const pct = Math.min(100, Math.max(0, Number(inv.discount)||0));
+    return subtotal*pct/100;
   }
   return inv.discount||0;
 }

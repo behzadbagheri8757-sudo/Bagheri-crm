@@ -1467,6 +1467,7 @@ function openInvoiceForm(cid, editInv){
   let checkDue = existingCheck ? existingCheck.dueDate : todayISO();
   let discount = editInv ? (editInv.discount||0) : 0;
   let discountType = (editInv && editInv.discountType==='percent') ? 'percent' : 'fixed';
+  if(discountType==='percent') discount = Math.min(100, Math.max(0, discount));
 
   // "مانده قبلی": مانده مشتری بدون احتساب این فاکتور اصلاً — برای فاکتور جدید یعنی مانده فعلی،
   // برای ویرایش یعنی مانده فعلی منهای سهم همین فاکتور (چه از بابت جمع فاکتور و چه از بابت پرداختی‌های همراهش)
@@ -1856,11 +1857,17 @@ function openInvoiceForm(cid, editInv){
     });
     document.getElementById('f-check-due').addEventListener('change', e=>{ checkDue = e.target.value; });
     document.getElementById('f-discount').addEventListener('input', e=>{
-      discount = parseFloat(faToEnDigits(e.target.value))||0;
+      let v = parseFloat(faToEnDigits(e.target.value))||0;
+      if(discountType==='percent'){
+        v = Math.min(100, Math.max(0, v));
+        if(String(v) !== e.target.value) e.target.value = v || '';
+      }
+      discount = v;
       updateSummary();
     });
     document.getElementById('f-discount-type').addEventListener('change', e=>{
       discountType = e.target.value;
+      if(discountType==='percent') discount = Math.min(100, Math.max(0, discount));
       renderSheet();
     });
 

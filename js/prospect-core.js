@@ -118,6 +118,13 @@ async function addProspectVisit(shopId, payload){
 }
 
 async function deleteProspectShop(id){
+  const shop = prospectState.shops.find(s=>s.id===id);
+  // Reverse any Game Center XP claimed for this shop's evaluations (derived only — never touches Prospect/CRM data)
+  if (shop && Array.isArray(shop.visits) && typeof gameOnEvaluationDeleted === 'function') {
+    for (const v of shop.visits) {
+      try { await gameOnEvaluationDeleted(id, v.id); } catch (e) { console.warn('Game reverse failed:', e); }
+    }
+  }
   prospectState.shops = prospectState.shops.filter(s=>s.id!==id);
   await prospectDbDelete('shops', id);
 }
