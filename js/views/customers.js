@@ -67,12 +67,12 @@
       rows = rows.filter(function (x) { return x.c.locationId === locFilter.neighborhoodId; });
     } else if (locFilter.routeId) {
       const neighIds = listNeighborhoods(locFilter.routeId).map(function (n) { return n.id; });
-      rows = rows.filter(function (x) { return x.c.locationId && neighIds.indexOf(x.c.locationId) !== -1; });
+      rows = rows.filter(function (x) { return x.c.locationId === locFilter.routeId || (x.c.locationId && neighIds.indexOf(x.c.locationId) !== -1); });
     } else if (locFilter.regionId) {
       const routeIds = listRoutes(locFilter.regionId).map(function (r) { return r.id; });
       let neighIds = [];
       routeIds.forEach(function (rid) { neighIds = neighIds.concat(listNeighborhoods(rid).map(function (n) { return n.id; })); });
-      rows = rows.filter(function (x) { return x.c.locationId && neighIds.indexOf(x.c.locationId) !== -1; });
+      rows = rows.filter(function (x) { return x.c.locationId && (routeIds.indexOf(x.c.locationId) !== -1 || neighIds.indexOf(x.c.locationId) !== -1); });
     }
 
     if (custSortByDebt) {
@@ -124,147 +124,128 @@
       .join('');
   }
 
-  function renderLocFilterOptionsHTML() {
+  function renderLocationFilterSheet() {
     const regions = listRegions();
-    const routes = locFilter.regionId ? listRoutes(locFilter.regionId) : [];
+    const routes = locFilter.regionId ? listRoutes(locFilter.regionId) : (data.routes || []).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','fa'));
     const neighs = locFilter.routeId ? listNeighborhoods(locFilter.routeId) : [];
-    const opt = function (list, selId) {
-      return '<option value="">— همه —</option>' + list.map(function (x) {
+    const opt = function (list, selId, allLabel) {
+      return '<option value="">' + allLabel + '</option>' + list.map(function (x) {
         return '<option value="' + esc(x.id) + '" ' + (x.id === selId ? 'selected' : '') + '>' + esc(x.name) + '</option>';
       }).join('');
     };
-    return (
-      '<div class="field"><label>منطقه</label><select id="loc-filter-region">' + opt(regions, locFilter.regionId) + '</select></div>' +
-      '<div class="field"><label>مسیر</label><select id="loc-filter-route" ' + (!locFilter.regionId ? 'disabled' : '') + '>' + opt(routes, locFilter.routeId) + '</select></div>' +
-      '<div class="field"><label>محله</label><select id="loc-filter-neigh" ' + (!locFilter.routeId ? 'disabled' : '') + '>' + opt(neighs, locFilter.neighborhoodId) + '</select></div>'
+    openSheet(
+      '<h3>فیلتر مشتریان</h3>' +
+      '<div class="field"><label>مسیر</label><select id="customer-filter-route">' + opt(routes, locFilter.routeId, 'همه مسیرها') + '</select></div>' +
+      '<div class="field"><label>منطقه</label><select id="customer-filter-region">' + opt(regions, locFilter.regionId, 'همه مناطق') + '</select></div>' +
+      '<div class="field"><label>محله</label><select id="customer-filter-neigh" ' + (!locFilter.routeId ? 'disabled' : '') + '>' + opt(neighs, locFilter.neighborhoodId, 'همه محله‌ها') + '</select></div>' +
+      '<div class="btn-row" style="margin-top:4px;"><button type="button" class="btn small secondary" id="customer-filter-clear">پاک کردن فیلتر</button></div>'
     );
+
+    const routeSel = document.getElementById('customer-filter-route');
+    const regionSel = document.getElementById('customer-filter-region');
+    const neighSel = document.getElementById('customer-filter-neigh');
+    const clearBtn = document.getElementById('customer-filter-clear');
+
+    function refreshSheet(keepOpen) {
+      if (!keepOpen) return;
+      renderLocationFilterSheet();
+    }
+    if (routeSel) routeSel.addEventListener('change', function () {
+      locFilter.routeId = routeSel.value;
+      locFilter.neighborhoodId = '';
+      locFilter.unassigned = false;
+      if (locFilter.routeId) {
+        const r = getRoute(locFilter.routeId);
+        locFilter.regionId = r ? r.regionId : '';
+      }
+      renderCustomerListOnly();
+      refreshSheet(true);
+    });
+    if (regionSel) regionSel.addEventListener('change', function () {
+      locFilter.regionId = regionSel.value;
+      if (locFilter.routeId) {
+        const r = getRoute(locFilter.routeId);
+        if (!r || r.regionId !== locFilter.regionId) locFilter.routeId = '';
+      }
+      locFilter.neighborhoodId = '';
+      locFilter.unassigned = false;
+      renderCustomerListOnly();
+      refreshSheet(true);
+    });
+    if (neighSel) neighSel.addEventListener('change', function () {
+      locFilter.neighborhoodId = neighSel.value;
+      locFilter.unassigned = false;
+      renderCustomerListOnly();
+    });
+    if (clearBtn) clearBtn.addEventListener('click', function () {
+      locFilter = { regionId:'', routeId:'', neighborhoodId:'', unassigned:false };
+      renderCustomerListOnly();
+      closeModal();
+      updateLocationFilterIndicator();
+    });
+  }
+
+  function updateLocationFilterIndicator() {
+    const el = document.getElementById('customer-filter-indicator');
+    const btn = document.getElementById('customer-filter');
+    if (!el || !btn) return;
+    const count = (locFilter.regionId ? 1 : 0) + (locFilter.routeId ? 1 : 0) + (locFilter.neighborhoodId ? 1 : 0) + (locFilter.unassigned ? 1 : 0);
+    el.innerHTML = count
+      ? '<span>فیلتر: ' + esc(getLocationDisplayString(locFilter.neighborhoodId || locFilter.routeId || locFilter.regionId)) + '</span><button type="button" class="chip" id="customer-filter-clear-inline">×</button>'
+      : '';
+    btn.classList.toggle('active', count > 0);
+    const clear = document.getElementById('customer-filter-clear-inline');
+    if (clear) clear.onclick = function () {
+      locFilter = { regionId:'', routeId:'', neighborhoodId:'', unassigned:false };
+      updateLocationFilterIndicator();
+      renderCustomerListOnly();
+    };
   }
 
   function drawCustomersPage(root) {
     const chip = function (id, label) {
-      return (
-        '<button type="button" class="chip ' +
-        (custFilter === id ? 'active' : '') +
-        '" data-filter="' +
-        id +
-        '">' +
-        label +
-        '</button>'
-      );
+      return '<button type="button" class="chip ' + (custFilter === id ? 'active' : '') + '" data-filter="' + id + '">' + label + '</button>';
     };
     root.innerHTML =
       '<h2 class="section-title">مشتریان</h2>' +
-      '<div class="field"><input id="customer-search" placeholder="جستجوی نام، تلفن، منطقه، آدرس..." value="' +
-      esc(custQuery) +
-      '" autocomplete="off"></div>' +
-      '<div class="chip-row" id="customer-chips">' +
-      chip('all', 'همه') +
-      chip('debt', 'بدهکار') +
-      chip('settled', 'تسویه') +
-      chip('credit', 'بستانکار') +
+      '<div class="field"><input id="customer-search" placeholder="جستجوی نام، آدرس، تلفن، منطقه و…" value="' + esc(custQuery) + '" autocomplete="off"></div>' +
+      '<div class="chip-row" id="customer-chips">' + chip('all','همه') + chip('debt','بدهکار') + chip('settled','تسویه') + chip('credit','بستانکار') + '</div>' +
+      '<div class="btn-row" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;">' +
+      '<button type="button" class="btn small secondary" id="customer-filter">فیلتر</button>' +
+      '<button type="button" class="btn small secondary" id="sort-debt">' + (custSortByDebt ? '✓ ' : '') + 'مرتب‌سازی بر اساس بدهی</button>' +
       '</div>' +
-      '<div class="btn-row" style="margin-bottom:8px;">' +
-      '<button type="button" class="btn small secondary" id="sort-debt">' +
-      (custSortByDebt ? '✓ ' : '') +
-      'مرتب‌سازی بر اساس بدهی</button>' +
-      '</div>' +
-      '<div id="loc-filter-row">' + renderLocFilterOptionsHTML() + '</div>' +
-      '<div class="chip-row" style="margin-bottom:8px;">' +
-      '<button type="button" class="chip ' + (locFilter.unassigned ? 'active' : '') + '" id="loc-filter-unassigned">بدون موقعیت</button>' +
-      '</div>' +
+      '<div id="customer-filter-indicator" class="customer-filter-indicator" aria-live="polite"></div>' +
       '<div id="customer-list"></div>';
 
     const searchEl = document.getElementById('customer-search');
-    searchHandler = function (e) {
-      custQuery = e.target.value;
-      renderCustomerListOnly();
-    };
+    searchHandler = function (e) { custQuery = e.target.value; renderCustomerListOnly(); };
     searchEl.addEventListener('input', searchHandler);
 
     chipHandlers = [];
     document.querySelectorAll('#customer-chips [data-filter]').forEach(function (btn) {
       const fn = function () {
         custFilter = btn.getAttribute('data-filter');
-        document.querySelectorAll('#customer-chips [data-filter]').forEach(function (b) {
-          b.classList.toggle('active', b.getAttribute('data-filter') === custFilter);
-        });
+        document.querySelectorAll('#customer-chips [data-filter]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-filter') === custFilter); });
         renderCustomerListOnly();
       };
-      btn.addEventListener('click', fn);
-      chipHandlers.push({ el: btn, fn: fn });
+      btn.addEventListener('click', fn); chipHandlers.push({el:btn, fn:fn});
     });
 
+    const filterBtn = document.getElementById('customer-filter');
+    filterBtn.addEventListener('click', renderLocationFilterSheet);
+
     const sortBtn = document.getElementById('sort-debt');
-    sortHandler = function () {
-      custSortByDebt = !custSortByDebt;
-      sortBtn.textContent = (custSortByDebt ? '✓ ' : '') + 'مرتب‌سازی بر اساس بدهی';
-      renderCustomerListOnly();
-    };
+    sortHandler = function () { custSortByDebt = !custSortByDebt; sortBtn.textContent = (custSortByDebt ? '✓ ' : '') + 'مرتب‌سازی بر اساس بدهی'; renderCustomerListOnly(); };
     sortBtn.addEventListener('click', sortHandler);
-
-    function wireLocFilterSelects() {
-      const regionSel = document.getElementById('loc-filter-region');
-      const routeSel = document.getElementById('loc-filter-route');
-      const neighSel = document.getElementById('loc-filter-neigh');
-      if (regionSel) regionSel.addEventListener('change', function () {
-        locFilter.regionId = regionSel.value;
-        locFilter.routeId = '';
-        locFilter.neighborhoodId = '';
-        locFilter.unassigned = false;
-        const row = document.getElementById('loc-filter-row');
-        row.innerHTML = renderLocFilterOptionsHTML();
-        wireLocFilterSelects();
-        document.getElementById('loc-filter-unassigned').classList.remove('active');
-        renderCustomerListOnly();
-      });
-      if (routeSel) routeSel.addEventListener('change', function () {
-        locFilter.routeId = routeSel.value;
-        locFilter.neighborhoodId = '';
-        locFilter.unassigned = false;
-        const row = document.getElementById('loc-filter-row');
-        row.innerHTML = renderLocFilterOptionsHTML();
-        wireLocFilterSelects();
-        document.getElementById('loc-filter-unassigned').classList.remove('active');
-        renderCustomerListOnly();
-      });
-      if (neighSel) neighSel.addEventListener('change', function () {
-        locFilter.neighborhoodId = neighSel.value;
-        locFilter.unassigned = false;
-        document.getElementById('loc-filter-unassigned').classList.remove('active');
-        renderCustomerListOnly();
-      });
-    }
-    locFilterHandler = wireLocFilterSelects;
-    wireLocFilterSelects();
-
-    const unassignedBtn = document.getElementById('loc-filter-unassigned');
-    locUnassignedHandler = function () {
-      locFilter.unassigned = !locFilter.unassigned;
-      if (locFilter.unassigned) {
-        locFilter.regionId = '';
-        locFilter.routeId = '';
-        locFilter.neighborhoodId = '';
-        const row = document.getElementById('loc-filter-row');
-        row.innerHTML = renderLocFilterOptionsHTML();
-        wireLocFilterSelects();
-      }
-      unassignedBtn.classList.toggle('active', locFilter.unassigned);
-      renderCustomerListOnly();
-    };
-    unassignedBtn.addEventListener('click', locUnassignedHandler);
 
     const list = document.getElementById('customer-list');
     listClickHandler = function (e) {
       const row = e.target.closest('[data-open-customer]');
       if (!row) return;
-      if (typeof isSpaShell === 'function' && isSpaShell()) {
-        e.preventDefault();
-        navigateToCustomer(row.getAttribute('data-open-customer'));
-      }
-      // else: plain MPA <a href="#/customer?id=..."> navigates normally
+      if (typeof isSpaShell === 'function' && isSpaShell()) { e.preventDefault(); navigateToCustomer(row.getAttribute('data-open-customer')); }
     };
     list.addEventListener('click', listClickHandler);
-
+    updateLocationFilterIndicator();
     renderCustomerListOnly();
   }
 

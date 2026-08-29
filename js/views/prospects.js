@@ -112,12 +112,12 @@
       rows = rows.filter(s => s.locationId === pLocFilter.neighborhoodId);
     } else if (pLocFilter.routeId) {
       const neighIds = listNeighborhoods(pLocFilter.routeId).map(n => n.id);
-      rows = rows.filter(s => s.locationId && neighIds.indexOf(s.locationId) !== -1);
+      rows = rows.filter(s => s.locationId === pLocFilter.routeId || (s.locationId && neighIds.indexOf(s.locationId) !== -1));
     } else if (pLocFilter.regionId) {
       const routeIds = listRoutes(pLocFilter.regionId).map(r => r.id);
       let neighIds = [];
       routeIds.forEach(rid => { neighIds = neighIds.concat(listNeighborhoods(rid).map(n => n.id)); });
-      rows = rows.filter(s => s.locationId && neighIds.indexOf(s.locationId) !== -1);
+      rows = rows.filter(s => s.locationId && (routeIds.indexOf(s.locationId) !== -1 || neighIds.indexOf(s.locationId) !== -1));
     }
 
     if (pSort === 'score_asc') rows.sort((a,b) => a.latestScore - b.latestScore);

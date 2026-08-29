@@ -101,7 +101,7 @@
            <div class="card" style="margin-top:10px;">
              <div class="label" style="margin-bottom:8px;">موقعیت مغازه</div>
              ${renderLocationPickerHTML('eval-loc', formState.locationId)}
-             <div class="sub" style="margin-top:6px;">منطقه → مسیر → محله</div>
+             <div class="sub" style="margin-top:6px;">منطقه → مسیر → محله (محله اختیاری است)</div>
            </div>`
       }
       <div class="live-score">
