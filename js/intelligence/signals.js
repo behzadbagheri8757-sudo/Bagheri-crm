@@ -87,9 +87,8 @@
     if (!(b.salesPrev30 > 0)) return; // false-positive rule: no signal if no baseline
 
     const declinePct = _pctChange(b.salesPrev30, b.sales30); // positive => decline
-    const growthPct = _pctChange(b.sales30, 0) != null
-      ? ((b.sales30 - b.salesPrev30) / b.salesPrev30) * 100
-      : null;
+    // growthPct: same baseline guard as decline (salesPrev30 > 0 already enforced above)
+    const growthPct = ((b.sales30 - b.salesPrev30) / b.salesPrev30) * 100;
 
     if (declinePct != null && declinePct >= 30) {
       out.push(_mkSignal(cid, 'PURCHASE_DECLINE_SEVERE', {
@@ -225,8 +224,10 @@
     if (days == null || !isFinite(days)) return;
     if (days < 45) return;
 
+    // Observational / operational — does not contribute to Account Risk by default.
+    // Action engine still selects this category for visit recommendations.
     out.push(_mkSignal(cid, 'LONG_NO_VISIT', {
-      type: 'risk',
+      type: 'opportunity',
       severity: 'medium',
       value: days,
       unit: 'days',
@@ -271,8 +272,10 @@
     const overdue = Math.max(0, daysSince - cadence);
     const severity = overdue > (2 * cadence) ? 'high' : 'medium';
 
+    // Observational / operational — does not contribute to Account Risk by default.
+    // Action engine still selects this category for visit recommendations.
     out.push(_mkSignal(cid, 'VISIT_OVERDUE', {
-      type: 'risk',
+      type: 'opportunity',
       severity: severity,
       value: overdue,
       unit: 'days',
@@ -374,6 +377,38 @@
     // based only on actual recorded behavior (invoices/visits/checks),
     // never on the pre-existing opening balance itself (spec #7).
     _paymentSignals(cid, out);
+
+    // ------------------------------------------------------------------
+    // PATCH: Product Gap ≠ Account Risk by default.
+    // KEY_PRODUCT_LOST / BASKET_SHRINK remain fully generated (reason,
+    // value, category, Action visibility). They contribute to Account
+    // Risk only when corroborated by at least one independent
+    // account-level deterioration signal already present.
+    // ------------------------------------------------------------------
+    const ACCOUNT_LEVEL_CORROBORATORS = {
+      PURCHASE_DECLINE_SEVERE: true,
+      PURCHASE_DECLINE_MILD: true,
+      BEHIND_PATTERN: true,
+      CONSECUTIVE_NO_ORDER: true,
+      CHECK_BOUNCED: true,
+      PAYMENT_OVERDUE: true
+    };
+    let hasAccountLevelRisk = false;
+    for (let i = 0; i < out.length; i++) {
+      const s = out[i];
+      if (s && s.type === 'risk' && ACCOUNT_LEVEL_CORROBORATORS[s.category]) {
+        hasAccountLevelRisk = true;
+        break;
+      }
+    }
+    if (!hasAccountLevelRisk) {
+      for (let i = 0; i < out.length; i++) {
+        const s = out[i];
+        if (s && (s.category === 'KEY_PRODUCT_LOST' || s.category === 'BASKET_SHRINK')) {
+          s.type = 'opportunity';
+        }
+      }
+    }
 
     return out;
   }
