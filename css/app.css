@@ -2540,7 +2540,7 @@ a.dash-tile:active .dash-ico{
 .action-urgency{height:30px;width:30px;border-radius:9px;border:1px solid #E8E6E1;background:#FBF9F5;}
 .action-urgency svg{width:16px;height:16px;display:block;}
 /* ====== CHANGE 2: Removed loud backgrounds, kept soft borders and text colors for urgency ====== */
-.action-urgency-critical{color:#A13131;background:transparent;border-color:#E0B6B3;}
+.action-urgency-critical{color:#A13131;background:transparent;border-color:#C1564E;}
 .action-urgency-high{color:#A76A24;background:transparent;border-color:#EAD0B0;}
 .action-urgency-medium{color:#8A741F;background:transparent;border-color:#E3DCC5;}
 .action-urgency-low{color:#6F767C;background:transparent;border-color:#E0DFDA;}
@@ -2600,7 +2600,7 @@ a.dash-tile:active .dash-ico{
   background:#D9D6CF;
 }
 /* ====== CHANGE 3: Softened side rail colors ====== */
-.action-row-critical::after{width:3px;background:#D98B86;}
+.action-row-critical::after{width:3px;background:#C1564E;}
 .action-row-high::after{width:3px;background:#E0A85E;}
 .action-row-medium::after{background:#E3DCC5;}
 .action-row-low::after{background:#E0DFDA;}
@@ -2683,7 +2683,7 @@ a.dash-tile:active .dash-ico{
   height:16px !important;
   stroke-width:1.8;
 }
-.action-urgency-critical{color:#8F2E2A;background:#F5DAD6;border-color:#D98B86;border-width:1.5px;font-weight:700;}
+.action-urgency-critical{color:#8F2E2A;background:#EFD5D1;border-color:#C1564E;border-width:1.5px;font-weight:700;}
 .action-urgency-high{color:#8A5A22;background:#F6E1BE;border-color:#E0A85E;}
 .action-urgency-medium{color:#726326;background:#F2ECD9;border-color:#DFD4AE;}
 .action-urgency-low{color:#83878A;background:#F1F0EC;border-color:#DFDDD6;}
