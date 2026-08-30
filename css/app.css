@@ -2600,8 +2600,8 @@ a.dash-tile:active .dash-ico{
   background:#D9D6CF;
 }
 /* ====== CHANGE 3: Softened side rail colors ====== */
-.action-row-critical::after{width:3px;background:#E0B6B3;}
-.action-row-high::after{width:3px;background:#EAD0B0;}
+.action-row-critical::after{width:3px;background:#D98B86;}
+.action-row-high::after{width:3px;background:#E0A85E;}
 .action-row-medium::after{background:#E3DCC5;}
 .action-row-low::after{background:#E0DFDA;}
 .action-row:active{background:#FBFAF7;}
@@ -2624,6 +2624,7 @@ a.dash-tile:active .dash-ico{
 }
 .action-badge{
   display:inline-flex;
+  align-self:flex-start;
   align-items:center;
   vertical-align:1px;
   margin-inline-start:4px;
@@ -2682,8 +2683,8 @@ a.dash-tile:active .dash-ico{
   height:16px !important;
   stroke-width:1.8;
 }
-.action-urgency-critical{color:#8F2E2A;background:#F7E4E1;border-color:#E4C0BC;border-width:1.5px;font-weight:700;}
-.action-urgency-high{color:#8A5A22;background:#F8EBD8;border-color:#E3D0AC;}
+.action-urgency-critical{color:#8F2E2A;background:#F5DAD6;border-color:#D98B86;border-width:1.5px;font-weight:700;}
+.action-urgency-high{color:#8A5A22;background:#F6E1BE;border-color:#E0A85E;}
 .action-urgency-medium{color:#726326;background:#F2ECD9;border-color:#DFD4AE;}
 .action-urgency-low{color:#83878A;background:#F1F0EC;border-color:#DFDDD6;}
 
