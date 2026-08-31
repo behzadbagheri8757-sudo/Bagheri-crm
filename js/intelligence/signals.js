@@ -63,6 +63,24 @@
     return String(Math.round(n));
   }
 
+  /* P-01: sourceLevel is derived from signal category nature.
+     'sku'  = Customer×SKU intelligence categories (product-scoped).
+     'account' = account / visit / payment behavior categories.
+     Used by Risk Engine for double-counting prevention; never removes signals. */
+  var SKU_SOURCE_CATEGORIES = {
+    SKU_DELAY: true,
+    SKU_QUANTITY_DROP: true,
+    SKU_FREQUENCY_DROP: true,
+    LINE_DROP: true,
+    COMBINED_SKU_DETERIORATION: true,
+    MULTI_SKU_DECLINE: true,
+    SKU_CHURN: true
+  };
+
+  function _sourceLevelForCategory(category) {
+    return SKU_SOURCE_CATEGORIES[category] ? 'sku' : 'account';
+  }
+
   function _mkSignal(cid, category, opts) {
     return {
       id: 'sig_' + cid + '_' + category,
@@ -77,6 +95,7 @@
       detectedAt: _nowISO(),
       actionable: opts.actionable !== false,
       source: opts.source || 'customerBehavior',
+      sourceLevel: opts.sourceLevel || _sourceLevelForCategory(category),
     };
   }
 
@@ -427,8 +446,55 @@
     if (skuSignals.length) {
       _dedupeSkuAgainstAccountSignals(out, skuSignals);
       for (var si = 0; si < skuSignals.length; si++) {
-        if (skuSignals[si]) out.push(skuSignals[si]);
+        if (skuSignals[si]) {
+          // P-01: guarantee sourceLevel on SKU-origin signals (sku_intelligence
+          // may not set it; tagging here keeps Risk dominance deterministic).
+          if (!skuSignals[si].sourceLevel) {
+            skuSignals[si].sourceLevel = _sourceLevelForCategory(skuSignals[si].category) || 'sku';
+          }
+          out.push(skuSignals[si]);
+        }
       }
+    }
+
+    // ------------------------------------------------------------------
+    // P-02 Persistence: record occurrence + set status pending|active.
+    // Does not remove signals. Risk only scores status === 'active'.
+    // ------------------------------------------------------------------
+    if (typeof applyPersistence === 'function') {
+      try {
+        applyPersistence(out);
+      } catch (ePersist) {
+        // Fail-open: persistence errors must not break signal extraction.
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // P-03 Seller Feedback: attach evidence + riskModifier when present.
+    // Does not change status (P-02) or sourceLevel (P-01). No removals.
+    // ------------------------------------------------------------------
+    if (typeof applyFeedbackToSignals === 'function') {
+      try {
+        applyFeedbackToSignals(out);
+      } catch (eFb) {
+        // Fail-open: feedback errors must not break signal extraction.
+      }
+    } else if (typeof applyFeedbackToSignal === 'function') {
+      try {
+        for (var fi = 0; fi < out.length; fi++) applyFeedbackToSignal(out[fi]);
+      } catch (eFb2) { /* fail-open */ }
+    }
+
+    // ------------------------------------------------------------------
+    // P-06 Seasonality: suppress false decline signals in historical
+    // low seasons. Does not change status/sourceLevel/baseline.
+    // ------------------------------------------------------------------
+    if (typeof adjustSignalForSeasonality === 'function') {
+      try {
+        for (var sei = 0; sei < out.length; sei++) {
+          if (out[sei]) adjustSignalForSeasonality(out[sei]);
+        }
+      } catch (eSea) { /* fail-open */ }
     }
 
     return out;

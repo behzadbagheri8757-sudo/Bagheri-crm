@@ -560,6 +560,28 @@
     var historical = _computeBaseline(pair.purchases, null);
     if (historical.purchaseCount < 1) return null;
 
+    // P-05: maintained baseline via baseline_manager (persistent shift detection).
+    // Signal-generation semantics otherwise unchanged — only the source of
+    // typicalCycle / typicalQuantity for the established baseline is managed.
+    if (typeof updateBaselineIfShifted === 'function') {
+      try {
+        updateBaselineIfShifted(customerId, pair.productId, pair.purchases);
+      } catch (eBaseUp) { /* fail-open */ }
+    }
+    if (typeof getBaseline === 'function') {
+      try {
+        var managed = getBaseline(customerId, pair.productId);
+        if (managed) {
+          if (managed.typicalCycle != null && isFinite(managed.typicalCycle) && managed.typicalCycle > 0) {
+            historical.typicalCycle = managed.typicalCycle;
+          }
+          if (managed.typicalQuantity != null && isFinite(managed.typicalQuantity) && managed.typicalQuantity > 0) {
+            historical.typicalQuantity = managed.typicalQuantity;
+          }
+        }
+      } catch (eBaseGet) { /* fail-open */ }
+    }
+
     var recent = _computeBaseline(pair.purchases, SKU_PARAMS.recentWindowSize);
     var current = _computeCurrent(pair, historical, recent, custInvs);
     var importance = _computeImportance(pair, historical, customerId, totalRev, totalProfit, custInvs.length);

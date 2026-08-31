@@ -161,6 +161,78 @@
     return best;
   }
 
+  /* P-07: operational contexts — only from real data; never invent. */
+  function stockContext(productId) {
+    if (productId == null || productId === '' || productId === 'multi') return null;
+    if (typeof data === 'undefined' || !Array.isArray(data.products)) return null;
+    var p = null;
+    for (var i = 0; i < data.products.length; i++) {
+      if (data.products[i] && data.products[i].id === productId) {
+        p = data.products[i];
+        break;
+      }
+    }
+    if (!p || typeof p.stockQty !== 'number' || !isFinite(p.stockQty)) return null;
+    if (p.stockQty <= 0) return 'موجودی انبار تمام است';
+    return null; // positive stock is not actionable context for the allowed samples
+  }
+
+  function visitContext(customerId) {
+    if (!customerId) return null;
+    // Prefer existing visitOverdueDays helper when present
+    if (typeof visitOverdueDays === 'function') {
+      try {
+        var overdue = visitOverdueDays(customerId);
+        if (overdue != null && isFinite(overdue) && overdue > 0) {
+          // "ویزیت نزدیک" only when slightly overdue / due soon — keep short
+          if (overdue <= 7) return 'در ویزیت بعدی';
+          return null; // large overdue already covered by action reason/whyNow
+        }
+        if (overdue === 0) return 'در ویزیت بعدی';
+      } catch (e) { /* ignore */ }
+    }
+    // Fallback: visitCadence + last visit if both available
+    if (typeof visitCadence === 'function' && typeof customerBehavior === 'function' && typeof daysAgo === 'function') {
+      try {
+        var cadence = visitCadence(customerId);
+        var b = customerBehavior(customerId);
+        if (cadence && b && b.lastVisit && b.lastVisit.date) {
+          var days = daysAgo(b.lastVisit.date);
+          if (days != null && isFinite(days) && days >= 0) {
+            var buffer = Math.min(7, cadence * 0.5);
+            // due soon: within cadence window (not heavily overdue)
+            if (days <= cadence + buffer && days >= Math.max(0, cadence - buffer)) {
+              return 'در ویزیت بعدی';
+            }
+          }
+        }
+      } catch (e2) { /* ignore */ }
+    }
+    return null;
+  }
+
+  function feedbackContext(signal) {
+    if (!signal) return null;
+    // Prefer fields already attached by P-03
+    if (signal.feedbackHint) return signal.feedbackHint;
+    if (signal.feedback && signal.feedback.reasonCode === 'competitor_bought') {
+      return 'از رقیب خریداری شده';
+    }
+    if (signal.feedback && signal.feedback.reasonCode === 'still_stock') {
+      return 'موجودی نزد مشتری';
+    }
+    // Live lookup only if API exists and nothing attached yet
+    if (typeof getFeedbackForSignal === 'function') {
+      try {
+        var fb = getFeedbackForSignal(signal);
+        if (!fb || !fb.reasonCode) return null;
+        if (fb.reasonCode === 'competitor_bought') return 'از رقیب خریداری شده';
+        if (fb.reasonCode === 'still_stock') return 'موجودی نزد مشتری';
+      } catch (e) { /* ignore */ }
+    }
+    return null;
+  }
+
   function calculateCustomerAction(cid) {
     const priority = (typeof calculateCustomerPriority === 'function')
       ? calculateCustomerPriority(cid)
@@ -191,6 +263,33 @@
       actionText = rule.action + ' («' + winner.productName + '»)';
     }
 
+    // P-07: append real operational contexts only (short, non-duplicative).
+    var contexts = [];
+    var sc = stockContext(winner.productId);
+    var vc = visitContext(cid);
+    var fc = feedbackContext(winner);
+    if (sc) contexts.push(sc);
+    if (vc) contexts.push(vc);
+    if (fc) contexts.push(fc);
+    // Avoid repeating the same phrase already present in actionText
+    for (var ci = 0; ci < contexts.length; ci++) {
+      if (actionText.indexOf(contexts[ci]) === -1) {
+        actionText = actionText + ' — ' + contexts[ci];
+      }
+    }
+
+    // P-08: attach customer story if available (type/urgency unchanged)
+    var story = null;
+    if (priority.customerStory && priority.customerStory.summary) {
+      story = priority.customerStory;
+    } else if (typeof buildCustomerStory === 'function') {
+      try {
+        story = buildCustomerStory(cid);
+      } catch (eSt) {
+        story = null;
+      }
+    }
+
     return {
       customerId: cid,
       action: actionText,
@@ -200,6 +299,7 @@
       primarySignal: winner,
       priorityScore: priority.priorityScore,
       riskLevel: priority.riskLevel,
+      customerStory: story
     };
   }
 
