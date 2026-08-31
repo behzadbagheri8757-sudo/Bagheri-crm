@@ -152,6 +152,13 @@
     let bestRank = Infinity;
     signals.forEach(function (s) {
       if (!s || !ACTION_RULES[s.category]) return;
+
+      // Persistence is an actual decision gate for behavioral signals.
+      // A pending detection is evidence under observation, not an
+      // operational instruction. Keep backward compatibility for callers
+      // that do not provide a status field at all.
+      if (s.status != null && s.status !== 'active') return;
+
       const r = _actionPriorityRank(s.category);
       if (r < bestRank) {
         bestRank = r;

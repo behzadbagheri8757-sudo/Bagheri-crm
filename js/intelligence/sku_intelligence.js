@@ -85,6 +85,35 @@
     return Math.round((a - b) / 86400000);
   }
 
+  function _isValidISODate(iso) {
+    if (!iso) return false;
+    var s = String(iso).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+
+    // Date.parse normalizes impossible calendar dates (for example
+    // 2026-02-30). Require an exact UTC round-trip so malformed dates
+    // cannot enter Customer × SKU temporal analysis.
+    var parts = s.split('-');
+    var y = Number(parts[0]);
+    var m = Number(parts[1]);
+    var d = Number(parts[2]);
+    var t = Date.UTC(y, m - 1, d);
+    if (!isFinite(t)) return false;
+    var dt = new Date(t);
+    return (
+      dt.getUTCFullYear() === y &&
+      dt.getUTCMonth() === m - 1 &&
+      dt.getUTCDate() === d
+    );
+  }
+
+  function _isValidBusinessDate(iso) {
+    if (!_isValidISODate(iso)) return false;
+    var s = String(iso).slice(0, 10);
+    var today = _today();
+    return s <= today;
+  }
+
   function _median(arr) {
     if (!arr || !arr.length) return null;
     var s = arr.slice().sort(function (x, y) { return x - y; });
@@ -157,6 +186,13 @@
     for (var i = 0; i < invoices.length; i++) {
       var inv = invoices[i];
       if (!inv || inv.customerId !== customerId) continue;
+
+      // Unreliable invoice dates cannot safely participate in a
+      // time-based Customer × SKU baseline/current comparison.
+      // Exclude the whole purchase event rather than inventing a date
+      // or allowing it to contaminate recency, intervals, or trends.
+      if (!_isValidBusinessDate(inv.date)) continue;
+
       var items = inv.items || [];
 
       // Merge duplicate SKU lines within same invoice
@@ -165,7 +201,12 @@
       for (var j = 0; j < items.length; j++) {
         var it = items[j];
         if (!it || !it.productId) continue;
-        if (!(it.qty > 0)) continue;
+        // CRM invoice quantities are numeric fields. Do not rely on JS
+        // coercion here: a malformed numeric string can turn `+=` into
+        // string concatenation (for example 5 + 5 -> "055"), corrupting
+        // Customer × SKU quantity history and every downstream baseline
+        // derived from it.
+        if (typeof it.qty !== 'number' || !isFinite(it.qty) || it.qty <= 0) continue;
 
         if (!byPid[it.productId]) {
           byPid[it.productId] = { qty: 0, revenue: 0 };
@@ -200,6 +241,7 @@
 
       if (!pay || pay.customerId !== customerId) continue;
       if (pay.method !== 'return') continue;
+      if (!_isValidBusinessDate(pay.date)) continue;
 
       var rItems = pay.returnItems || [];
 
@@ -207,7 +249,9 @@
         var ret = rItems[ri];
 
         if (!ret || !ret.productId) continue;
-        if (!(ret.qty > 0)) continue;
+        // Keep return quantities subject to the same strict numeric rule
+        // so malformed return data cannot distort net recent quantity.
+        if (typeof ret.qty !== 'number' || !isFinite(ret.qty) || ret.qty <= 0) continue;
 
         var pairR = ensure(ret.productId);
 
@@ -361,7 +405,9 @@
     var basketWindow = SKU_PARAMS.basketWindowSize;
     var invs = customerInvoicesList || [];
 
-    var sortedInvs = invs.slice().sort(function (a, b) {
+    var sortedInvs = invs.filter(function (inv) {
+      return inv && _isValidBusinessDate(inv.date);
+    }).slice().sort(function (a, b) {
       return String(b.date || '').localeCompare(String(a.date || ''));
     });
 
@@ -390,8 +436,11 @@
         : 0;
 
     var histPresenceCount = 0;
+    var validInvCount = 0;
 
     for (var h = 0; h < invs.length; h++) {
+      if (!invs[h] || !_isValidBusinessDate(invs[h].date)) continue;
+      validInvCount++;
       var its = invs[h].items || [];
 
       for (var jj = 0; jj < its.length; jj++) {
@@ -407,8 +456,8 @@
     }
 
     var historicalPresenceRate =
-      invs.length
-        ? (histPresenceCount / invs.length)
+      validInvCount
+        ? (histPresenceCount / validInvCount)
         : null;
 
     return {
