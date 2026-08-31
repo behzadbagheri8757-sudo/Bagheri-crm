@@ -25,7 +25,7 @@
     basketWindowSize: 5,
     minimumPurchaseCountForTiming: 2,
     minimumPurchaseCountForQuantity: 2,
-    minimumPurchaseCountForFrequency: 2,
+    minimumPurchaseCountForFrequency: 3,
     timingSensitivity: 0.5,
     quantityDropSensitivity: 0.3,
     spendDropSensitivity: 0.3,
@@ -42,7 +42,9 @@
     importanceWeights: { revenue: 0.4, frequency: 0.3, basket: 0.2, profit: 0.1 },
     confidenceWeights: { history: 0.35, stability: 0.25, completeness: 0.15, outliers: 0.1, shift: 0.15 },
     minPurchaseCountForHighConfidence: 6,
-    frequencyWindowMultiplier: 2
+    frequencyWindowMultiplier: 1.5,
+    minConfidenceForGrouping: 0.5,
+    lowHistoryConfidenceFactor: 0.7
   };
 
   var SEVERITY_POINTS = {
@@ -278,6 +280,7 @@
     var freqWindowDays = null;
     if (historical.typicalCycle != null && historical.typicalCycle > 0) {
       freqWindowDays = historical.typicalCycle * SKU_PARAMS.frequencyWindowMultiplier;
+      freqWindowDays = Math.max(30, freqWindowDays);
     } else {
       freqWindowDays = 30;
     }
@@ -422,6 +425,9 @@
   function _computeConfidence(historical, recent, pair) {
     var cw = SKU_PARAMS.confidenceWeights;
     var historyScore = _clamp01(historical.purchaseCount / SKU_PARAMS.minPurchaseCountForHighConfidence);
+    if (historical.purchaseCount < 4) {
+      historyScore *= SKU_PARAMS.lowHistoryConfidenceFactor;
+    }
     var stabilityScore = _clamp01(historical.patternStability);
     var complete = 0;
     var total = pair.purchases.length || 1;
@@ -832,6 +838,7 @@
       pairResults.length >= SKU_PARAMS.minSkuCountForAccountSignal
     ) {
       var qtyLike = pairResults.filter(function (r) {
+        if (!(r.signal && r.signal.confidence >= SKU_PARAMS.minConfidenceForGrouping)) return false;
         return r.dims.indexOf('quantity') >= 0 ||
           r.dims.indexOf('frequency') >= 0 ||
           r.dims.indexOf('basket') >= 0 ||
