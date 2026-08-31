@@ -274,11 +274,18 @@ function fillMoreSheetList(activeId){
   }
 }
 
+let _moreSheetHideTimer = null;
+
 function openMoreSheet(activeId){
   ensureBottomNavDOM();
   const overlay = document.getElementById('more-overlay');
   const sheet = document.getElementById('more-sheet');
   if(!overlay || !sheet) return;
+  // Cancel any pending hide-after-transition timer from a just-closed sheet —
+  // otherwise a rapid close→reopen (tap close, immediately tap "بیشتر" again)
+  // leaves that timer alive, and it later fires `hidden = true` on the sheet
+  // we just reopened, making it silently disappear a moment after opening.
+  if(_moreSheetHideTimer){ clearTimeout(_moreSheetHideTimer); _moreSheetHideTimer = null; }
   fillMoreSheetList(activeId);
   overlay.hidden = false;
   sheet.hidden = false;
@@ -297,7 +304,9 @@ function closeMoreSheet(){
   if(sheet){ sheet.classList.remove('show'); }
   document.body.classList.remove('more-open');
   try{ window.__scrollLock && window.__scrollLock.unlock(); }catch(_e){}
-  setTimeout(() => {
+  if(_moreSheetHideTimer){ clearTimeout(_moreSheetHideTimer); }
+  _moreSheetHideTimer = setTimeout(() => {
+    _moreSheetHideTimer = null;
     if(overlay) overlay.hidden = true;
     if(sheet) sheet.hidden = true;
   }, 200);

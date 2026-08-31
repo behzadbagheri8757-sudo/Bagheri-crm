@@ -1626,6 +1626,17 @@ function openInvoiceForm(cid, editInv){
   }
 
   function renderSheet(){
+    // Preserve the sheet's internal scroll position across re-renders.
+    // renderSheet() is called on every add-row / row-delete / discount-type
+    // change, and each call fully rebuilds #modalRoot via openSheet() (a
+    // brand-new .sheet element with scrollTop=0). On a long invoice where the
+    // user has scrolled down to the discount/payment section, that reset
+    // makes the whole form visibly "jump" back to the top on every one of
+    // those actions. Capturing/restoring scrollTop here is local to this
+    // function and does not change what openSheet()/closeModal() do for any
+    // other sheet in the app.
+    const _prevSheetEl = document.querySelector('.sheet');
+    const _prevScrollTop = _prevSheetEl ? _prevSheetEl.scrollTop : 0;
     openSheet(`
       <h3>${editInv?('ویرایش فاکتور #'+(editInv.number||'—')):'فاکتور جدید'}</h3>
       ${editInv?`<div class="empty" style="padding:0 0 8px;text-align:right;">با ذخیره‌ی این ویرایش، موجودی انبار و مانده حساب مشتری به‌طور خودکار اصلاح می‌شود.</div>`:''}
@@ -1663,6 +1674,10 @@ function openInvoiceForm(cid, editInv){
 
       <div class="btn-row"><button class="btn" id="save-invoice">${editInv?'ذخیره ویرایش':'ثبت فاکتور'}</button></div>
     `);
+    if(_prevSheetEl){
+      const _newSheetEl = document.querySelector('.sheet');
+      if(_newSheetEl) _newSheetEl.scrollTop = _prevScrollTop;
+    }
     updateSummary();
 
     document.getElementById('add-row').addEventListener('click', ()=>{
@@ -1803,13 +1818,20 @@ function openInvoiceForm(cid, editInv){
       });
     });
 
-    // Outside tap closes (once per document)
+    // Outside tap closes (listener bound once per document; the target it reads
+    // is refreshed on every renderSheet() call below so that reopening the
+    // invoice form — or editing a different invoice — after a previous one was
+    // closed doesn't leave this bound to a stale closure from the first time
+    // an invoice sheet was ever opened, which silently broke outside-tap-to-close
+    // on every invoice sheet after the first one in a session)
+    document._invProdDropActive = { get openRow(){ return prodDropOpenRow; }, close: closeAllProductDrops };
     if(!document._invProdDropOutsideBound){
       document._invProdDropOutsideBound = true;
       document.addEventListener('pointerdown', function(e){
         if(e.target.closest('.prod-drop') || e.target.closest('.row-product-search')) return;
-        if(prodDropOpenRow == null) return;
-        closeAllProductDrops();
+        const active = document._invProdDropActive;
+        if(!active || active.openRow == null) return;
+        active.close();
       }, true);
     }
 
