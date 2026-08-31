@@ -2536,7 +2536,16 @@ a.dash-tile:active .dash-ico{
 .dash-activity .ledger-row .name{min-width:0;line-height:1.35;}
 .dash-activity .ledger-row .sub{margin-top:2px;line-height:1.35;}
 .dash-activity .ledger-row .filler{min-width:4px;}
-.dash-activity .ledger-row .amount{width:30px;min-width:30px;display:flex;align-items:center;justify-content:center;}
+/* NOTE: width/min-width:30px removed here — this rule was clipping large
+   invoice/price amounts in the dashboard "آخرین فاکتورها" list. The box was
+   forced to 30px while numbers like 123,456,789 ت need ~70-90px; since the
+   number has white-space:nowrap and overflow:visible (from the base
+   .ledger-row .amount rule), it silently overflowed past the left edge of
+   the screen, cutting off the leading digit(s) — e.g. 123,456,789 rendered
+   as 23,456,789. This restores natural (content-based) width, matching how
+   .amount already sizes itself everywhere else in the app (invoice ledger
+   rows, customer balances, etc.). Alignment/centering behavior is unaffected. */
+.dash-activity .ledger-row .amount{display:flex;align-items:center;justify-content:center;}
 .action-urgency{height:30px;width:30px;border-radius:9px;border:1px solid #E8E6E1;background:#FBF9F5;}
 .action-urgency svg{width:16px;height:16px;display:block;}
 /* ====== CHANGE 2: Removed loud backgrounds, kept soft borders and text colors for urgency ====== */
