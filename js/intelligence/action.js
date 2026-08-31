@@ -23,8 +23,14 @@
     'CHECK_BOUNCED',
     'PAYMENT_OVERDUE',
     'PURCHASE_DECLINE_SEVERE',
+    'MULTI_SKU_DECLINE',
+    'COMBINED_SKU_DETERIORATION',
     'BEHIND_PATTERN',
     'CONSECUTIVE_NO_ORDER',
+    'SKU_DELAY',
+    'SKU_QUANTITY_DROP',
+    'SKU_FREQUENCY_DROP',
+    'LINE_DROP',
     'KEY_PRODUCT_LOST',
     'BASKET_SHRINK',
     'PURCHASE_DECLINE_MILD',
@@ -60,6 +66,36 @@
       actionType: 'visit',
       urgency: 'high',
       action: 'ویزیت حضوری برای شکستن روند بدون‌سفارشی',
+    },
+    MULTI_SKU_DECLINE: {
+      actionType: 'manager_review',
+      urgency: 'high',
+      action: 'بررسی مدیر — افت چندمحصولی حساب',
+    },
+    COMBINED_SKU_DETERIORATION: {
+      actionType: 'manager_review',
+      urgency: 'high',
+      action: 'بررسی مدیر — چند مشکل همزمان روی یک محصول',
+    },
+    SKU_DELAY: {
+      actionType: 'visit',
+      urgency: 'high',
+      action: 'ویزیت حضوری برای بررسی تأخیر خرید محصول',
+    },
+    SKU_QUANTITY_DROP: {
+      actionType: 'investigate',
+      urgency: 'medium',
+      action: 'بررسی علت کاهش مقدار خرید محصول',
+    },
+    SKU_FREQUENCY_DROP: {
+      actionType: 'call',
+      urgency: 'medium',
+      action: 'تماس امروز درباره کاهش تعداد خرید محصول',
+    },
+    LINE_DROP: {
+      actionType: 'visit',
+      urgency: 'medium',
+      action: 'ویزیت حضوری برای بررسی حذف محصول از سبد',
     },
     KEY_PRODUCT_LOST: {
       actionType: 'visit',
@@ -142,10 +178,22 @@
     }
 
     const rule = ACTION_RULES[winner.category];
+    var actionText = rule.action;
+    // SKU signals: include product name in action message when available.
+    if (winner.productName && (
+      winner.category === 'SKU_DELAY' ||
+      winner.category === 'SKU_QUANTITY_DROP' ||
+      winner.category === 'SKU_FREQUENCY_DROP' ||
+      winner.category === 'LINE_DROP' ||
+      winner.category === 'COMBINED_SKU_DETERIORATION' ||
+      winner.category === 'MULTI_SKU_DECLINE'
+    )) {
+      actionText = rule.action + ' («' + winner.productName + '»)';
+    }
 
     return {
       customerId: cid,
-      action: rule.action,
+      action: actionText,
       actionType: rule.actionType,
       urgency: rule.urgency,
       reason: winner.reason,

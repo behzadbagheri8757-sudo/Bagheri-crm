@@ -410,7 +410,102 @@
       }
     }
 
+    // ------------------------------------------------------------------
+    // Customer × SKU Intelligence V1 integration (Handoff order):
+    // existing account signals → existing opportunity reclassification
+    // → extractSkuSignals → merge → F4 deduplication → return
+    // SKU signals must NOT pass through the reclassification patch above.
+    // ------------------------------------------------------------------
+    var skuSignals = [];
+    if (typeof extractSkuSignals === 'function') {
+      try {
+        skuSignals = extractSkuSignals(cid) || [];
+      } catch (eSku) {
+        skuSignals = [];
+      }
+    }
+    if (skuSignals.length) {
+      _dedupeSkuAgainstAccountSignals(out, skuSignals);
+      for (var si = 0; si < skuSignals.length; si++) {
+        if (skuSignals[si]) out.push(skuSignals[si]);
+      }
+    }
+
     return out;
+  }
+
+  /* F4 — KEY_PRODUCT_LOST / BASKET_SHRINK deduplication against SKU signals.
+     Mutates accountSignals in place; may filter skuSignals array length by
+     leaving suppressed account signals removed from accountSignals. */
+  function _dedupeSkuAgainstAccountSignals(accountSignals, skuSignals) {
+    if (!accountSignals || !skuSignals || !skuSignals.length) return;
+
+    var skuProductIds = Object.create(null);
+    var hasLineDropSku = false;
+    for (var i = 0; i < skuSignals.length; i++) {
+      var ss = skuSignals[i];
+      if (!ss) continue;
+      if (ss.productId && ss.productId !== 'multi') skuProductIds[ss.productId] = true;
+      if (ss.evidence && Array.isArray(ss.evidence.affectedProductIds)) {
+        for (var a = 0; a < ss.evidence.affectedProductIds.length; a++) {
+          skuProductIds[ss.evidence.affectedProductIds[a]] = true;
+        }
+      }
+      var cat = ss.category;
+      if (cat === 'LINE_DROP' || cat === 'SKU_CHURN' || cat === 'SKU_QUANTITY_DROP' ||
+          cat === 'COMBINED_SKU_DETERIORATION' || cat === 'MULTI_SKU_DECLINE' ||
+          cat === 'SKU_FREQUENCY_DROP') {
+        hasLineDropSku = true;
+      }
+    }
+
+    for (var j = accountSignals.length - 1; j >= 0; j--) {
+      var s = accountSignals[j];
+      if (!s) continue;
+
+      if (s.category === 'BASKET_SHRINK' && hasLineDropSku) {
+        accountSignals.splice(j, 1);
+        continue;
+      }
+
+      if (s.category === 'KEY_PRODUCT_LOST') {
+        // Rebuild reason from remaining SKUs if we can parse product names;
+        // KEY_PRODUCT_LOST does not store productId list on the signal, only
+        // a Persian reason string built from decliningProducts at generation
+        // time. Re-derive from customerBehavior so F4 can remove matched SKUs.
+        var remainingNames = [];
+        var remainingCount = 0;
+        if (typeof customerBehavior === 'function') {
+          try {
+            var b = customerBehavior(s.customerId);
+            var declining = (b && Array.isArray(b.decliningProducts)) ? b.decliningProducts : [];
+            var lost = declining.filter(function (p) {
+              return p && p.earlyQty >= 5 && p.lateQty === 0;
+            });
+            for (var k = 0; k < lost.length; k++) {
+              var pid = lost[k].productId;
+              if (pid && skuProductIds[pid]) continue; // removed by SKU-level signal
+              remainingNames.push(lost[k].name || pid || '');
+              remainingCount++;
+            }
+          } catch (e) {
+            remainingCount = s.value || 0;
+            remainingNames = [];
+          }
+        } else {
+          remainingCount = s.value || 0;
+        }
+
+        if (remainingCount <= 0) {
+          accountSignals.splice(j, 1);
+        } else if (remainingNames.length) {
+          s.value = remainingCount;
+          s.reason = remainingNames.length === 1
+            ? 'محصول کلیدی «' + remainingNames[0] + '» دیگر خریداری نمی‌شود'
+            : 'محصولات کلیدی (' + remainingNames.join('، ') + ') دیگر خریداری نمی‌شوند';
+        }
+      }
+    }
   }
 
   global.extractCustomerSignals = extractCustomerSignals;

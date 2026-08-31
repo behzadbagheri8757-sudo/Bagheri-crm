@@ -45,7 +45,12 @@
 
     let score = 0;
     riskSignals.forEach(function (s) {
-      score += SEVERITY_POINTS[s.severity] || 0;
+      // Prefer severityPoints when present (SKU intelligence F7 / Risk Contract).
+      if (s && typeof s.severityPoints === 'number' && isFinite(s.severityPoints)) {
+        score += s.severityPoints;
+      } else {
+        score += SEVERITY_POINTS[s.severity] || 0;
+      }
     });
     if (score > 100) score = 100;
 
