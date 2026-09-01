@@ -96,6 +96,72 @@
     return { level: level, risk: risk, good: good, reminder: reminder, action: action };
   }
 
+  /* --- Watch / Early Warning Layer (frozen spec §15) ---
+     Runs BOTH extractCustomerSignals() (Confirmed) and
+     extractWatchObservations() (Watch), as required by the spec.
+     NOTE: this codebase does not currently render extractCustomerSignals()
+     anywhere in the Customer View (it is only used by app.js for the
+     "no purchase reason" prompt on invoices) — there was no existing
+     Confirmed display here to preserve. To satisfy "Confirmed signals
+     طبق منطق فعلی نمایش داده شوند" + "UI باید distinction واضح داشته
+     باشد", a minimal read-only Confirmed list (active signals only,
+     using the signals' own existing reason/productName fields — no new
+     business logic) is shown alongside the new Watch list. This is an
+     explicitly reported interpretation, not a silent guess. No action
+     buttons are added for either list. */
+  function intelligenceWatchHtml(cid) {
+    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function') return '';
+
+    var confirmed = [];
+    if (typeof extractCustomerSignals === 'function') {
+      try { confirmed = extractCustomerSignals(cid) || []; } catch (e) { confirmed = []; }
+    }
+    var watches = [];
+    if (typeof extractWatchObservations === 'function') {
+      try { watches = extractWatchObservations(cid, confirmed) || []; } catch (e2) { watches = []; }
+    }
+    var activeConfirmed = confirmed.filter(function (s) { return s && s.status === 'active'; });
+
+    if (!watches.length && !activeConfirmed.length) return '';
+
+    function levelColor(level) {
+      return level === 'critical' ? '#8E1F13' : level === 'high' ? '#B3261E' : level === 'medium' ? '#C77700' : '#6B7280';
+    }
+    function levelLabel(level) {
+      return level === 'critical' ? 'بحرانی' : level === 'high' ? 'زیاد' : level === 'medium' ? 'متوسط' : 'کم';
+    }
+
+    var confirmedHtml = '';
+    if (activeConfirmed.length) {
+      var crows = activeConfirmed.map(function (s) {
+        var label = (s.productName ? ('«' + esc(s.productName) + '» — ') : '') + esc(s.reason || '');
+        return '<div style="font-size:.85rem;line-height:1.9;display:flex;justify-content:space-between;gap:8px;">' +
+          '<span>• ' + label + '</span>' +
+          '<span style="color:' + levelColor(s.severity) + ';font-weight:600;white-space:nowrap;">' + esc(levelLabel(s.severity)) + '</span>' +
+          '</div>';
+      }).join('');
+      confirmedHtml = '<div class="card wide" style="margin-bottom:10px;">' +
+        '<div class="label">هوش تجاری — تأییدشده (CONFIRMED)</div>' +
+        '<div style="margin-top:6px;">' + crows + '</div></div>';
+    }
+
+    var watchHtml = '';
+    if (watches.length) {
+      var wrows = watches.map(function (w) {
+        var label = (w.productName ? ('«' + esc(w.productName) + '» — ') : '') + esc(w.reason || '');
+        return '<div style="font-size:.85rem;line-height:1.9;display:flex;justify-content:space-between;gap:8px;">' +
+          '<span>• ' + label + '</span>' +
+          '<span style="color:' + levelColor(w.level) + ';font-weight:600;white-space:nowrap;">' + esc(levelLabel(w.level)) + '</span>' +
+          '</div>';
+      }).join('');
+      watchHtml = '<div class="card wide" style="margin-bottom:10px;">' +
+        '<div class="label">هشدار زودهنگام (WATCH / EARLY WARNING)</div>' +
+        '<div style="margin-top:6px;">' + wrows + '</div></div>';
+    }
+
+    return confirmedHtml + watchHtml;
+  }
+
   function drawCustomerPage(root) {
     if (!root) return;
     const id = currentCustomerId;
@@ -371,6 +437,7 @@
       behaviorHtml =
         '<h3 class="sub-title">رفتار خرید مشتری</h3>' +
         summaryHtml +
+        intelligenceWatchHtml(c.id) +
         '<details style="margin-bottom:12px;">' +
         '<summary style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">جزئیات کامل رفتار خرید ▾</summary>' +
         '<div class="cards" style="margin-top:10px;margin-bottom:10px;">' +
