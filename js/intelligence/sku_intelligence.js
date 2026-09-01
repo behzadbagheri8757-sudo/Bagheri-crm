@@ -962,4 +962,185 @@
   global.extractSkuSignals = extractSkuSignals;
   global.SKU_PARAMS = SKU_PARAMS;
 
+  /* ============================================================
+     WATCH / EARLY WARNING LAYER — SKU side (frozen spec §7-9).
+     Read-only. Does NOT call extractCustomerSignals/extractSkuSignals,
+     persistence, risk, or action. Does NOT call updateBaselineIfShifted/
+     getBaseline (baseline_manager.js): those are Confirmed-pipeline-owned
+     (P-05) and would additionally write to localStorage/IndexedDB as a
+     side effect of merely computing metrics — reusing them here would
+     make Watch dependent on Confirmed state and no longer strictly
+     read-only, so raw historical.typicalCycle/typicalQuantity from
+     _computeBaseline are used directly instead. This is a deliberate,
+     reported deviation from "همان baseline منطقی که _analyzePair استفاده
+     می‌کند" in the strict sense of reusing the *managed* baseline; the
+     same aggregation/median baseline *algorithm* is reused exactly.
+     ============================================================ */
+
+  /* Public contract (spec §7): exact fields only, plus purchaseCount —
+     added because the Watch rules in this same file need it to apply
+     each rule's minimum-purchase-count gate (spec §8), and the contract
+     does not forbid additional fields. Reported explicitly, not guessed
+     silently. */
+  function _extractSkuRawMetrics(customerId) {
+    var out = [];
+    if (!customerId || typeof data === 'undefined') return out;
+    var map = _aggregatePairMap(customerId);
+    var keys = Object.keys(map);
+    if (!keys.length) return out;
+    var custInvs = (typeof customerInvoices === 'function') ? customerInvoices(customerId) : [];
+
+    for (var i = 0; i < keys.length; i++) {
+      var pair = map[keys[i]];
+      if (!pair.purchases.length) continue;
+
+      var historical = _computeBaseline(pair.purchases, null);
+      if (historical.purchaseCount < 1) continue;
+      var recent = _computeBaseline(pair.purchases, SKU_PARAMS.recentWindowSize);
+      var current = _computeCurrent(pair, historical, recent, custInvs);
+
+      var eventRatio = null;
+      if (historical.typicalQuantity != null && historical.typicalQuantity > 0 && recent.typicalQuantity != null) {
+        eventRatio = recent.typicalQuantity / historical.typicalQuantity;
+      }
+
+      var freqRatio = null;
+      if (
+        historical.typicalFrequency != null && historical.typicalFrequency > 0 &&
+        historical.typicalCycle != null && historical.typicalCycle > 0
+      ) {
+        var expectedInWindow = historical.typicalFrequency * (historical.typicalCycle * SKU_PARAMS.frequencyWindowMultiplier);
+        if (expectedInWindow > 0) freqRatio = current.recentFrequency / expectedInWindow;
+      }
+
+      var presenceDrop = null;
+      if (current.historicalPresenceRate != null) {
+        presenceDrop = current.historicalPresenceRate - current.currentBasketPresence;
+      }
+
+      out.push({
+        productId: pair.productId,
+        productName: _productName(pair.productId),
+        typicalCycle: historical.typicalCycle,
+        currentGap: current.currentGap,
+        eventRatio: eventRatio,
+        freqRatio: freqRatio,
+        presenceDrop: presenceDrop,
+        historicalPresenceRate: current.historicalPresenceRate,
+        currentBasketPresence: current.currentBasketPresence,
+        purchaseCount: historical.purchaseCount
+      });
+    }
+    return out;
+  }
+
+  var WATCH_LEVEL_RANK = { low: 1, medium: 2, high: 3 };
+  function _watchLevelMax(a, b) {
+    return (WATCH_LEVEL_RANK[b] || 0) > (WATCH_LEVEL_RANK[a] || 0) ? b : a;
+  }
+
+  /* SKU Watch rules (spec §8) + Combined SKU Watch collapsing (spec §9). */
+  function extractSkuWatchObservations(customerId) {
+    var out = [];
+    if (!customerId) return out;
+    var raw;
+    try { raw = _extractSkuRawMetrics(customerId) || []; } catch (eRaw) { raw = []; }
+    if (!raw.length) return out;
+
+    for (var i = 0; i < raw.length; i++) {
+      var m = raw[i];
+      var components = [];
+
+      // A) SKU_DELAY_WATCH
+      if (
+        m.purchaseCount >= SKU_PARAMS.minimumPurchaseCountForTiming &&
+        m.typicalCycle != null && m.typicalCycle > 0 &&
+        m.currentGap != null && m.currentGap > 0
+      ) {
+        var delayRatio = m.currentGap / m.typicalCycle;
+        if (delayRatio >= 0.20) {
+          components.push({
+            category: 'SKU_DELAY_WATCH',
+            level: delayRatio >= 0.40 ? 'high' : (delayRatio >= 0.30 ? 'medium' : 'low'),
+            deviationStrength: Math.min(1, m.currentGap / (0.5 * m.typicalCycle)),
+            reason: 'تأخیر زودهنگام در خرید «' + m.productName + '» نسبت به الگوی معمول مشاهده می‌شود'
+          });
+        }
+      }
+
+      // B) SKU_QUANTITY_DROP_WATCH
+      if (m.purchaseCount >= SKU_PARAMS.minimumPurchaseCountForQuantity && m.eventRatio != null && m.eventRatio < 0.85) {
+        components.push({
+          category: 'SKU_QUANTITY_DROP_WATCH',
+          level: m.eventRatio < 0.75 ? 'medium' : 'low',
+          deviationStrength: Math.min(1, (1 - m.eventRatio) / 0.3),
+          reason: 'کاهش زودهنگام در مقدار خرید «' + m.productName + '» مشاهده می‌شود'
+        });
+      }
+
+      // C) SKU_FREQUENCY_DROP_WATCH
+      if (m.purchaseCount >= SKU_PARAMS.minimumPurchaseCountForFrequency && m.freqRatio != null && m.freqRatio < 0.85) {
+        components.push({
+          category: 'SKU_FREQUENCY_DROP_WATCH',
+          level: m.freqRatio < 0.75 ? 'medium' : 'low',
+          deviationStrength: Math.min(1, (1 - m.freqRatio) / 0.3),
+          reason: 'کاهش زودهنگام در تعداد دفعات خرید «' + m.productName + '» مشاهده می‌شود'
+        });
+      }
+
+      // D) LINE_DROP_WATCH
+      if (m.presenceDrop != null && m.presenceDrop >= 0.30) {
+        components.push({
+          category: 'LINE_DROP_WATCH',
+          level: m.presenceDrop >= 0.45 ? 'medium' : 'low',
+          deviationStrength: Math.min(1, m.presenceDrop / 0.5),
+          reason: '«' + m.productName + '» به‌تدریج از سبد خریدهای اخیر کم‌رنگ‌تر شده است'
+        });
+      }
+
+      if (!components.length) continue;
+
+      if (components.length >= 2) {
+        var level = 'low';
+        var deviationStrength = 0;
+        var watchComponents = [];
+        var reasons = [];
+        for (var c = 0; c < components.length; c++) {
+          level = _watchLevelMax(level, components[c].level);
+          if (components[c].deviationStrength > deviationStrength) deviationStrength = components[c].deviationStrength;
+          watchComponents.push(components[c].category);
+          reasons.push(components[c].reason);
+        }
+        out.push({
+          customerId: customerId,
+          productId: m.productId,
+          productName: m.productName,
+          category: 'COMBINED_SKU_WATCH',
+          level: level,
+          reason: reasons.join('؛ '),
+          deviationStrength: deviationStrength,
+          source: 'sku',
+          watchComponents: watchComponents
+        });
+      } else {
+        var comp = components[0];
+        out.push({
+          customerId: customerId,
+          productId: m.productId,
+          productName: m.productName,
+          category: comp.category,
+          level: comp.level,
+          reason: comp.reason,
+          deviationStrength: comp.deviationStrength,
+          source: 'sku',
+          watchComponents: null
+        });
+      }
+    }
+    return out;
+  }
+
+  global._extractSkuRawMetrics = _extractSkuRawMetrics;
+  global.extractSkuWatchObservations = extractSkuWatchObservations;
+
 })(typeof window !== 'undefined' ? window : this);

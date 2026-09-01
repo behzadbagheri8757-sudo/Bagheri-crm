@@ -576,4 +576,234 @@
 
   global.extractCustomerSignals = extractCustomerSignals;
 
+  /* ============================================================
+     WATCH / EARLY WARNING LAYER (frozen spec — implementation only)
+     ------------------------------------------------------------
+     Independent second pipeline. Does NOT reuse Confirmed signal
+     objects for detection — only raw customerBehavior()/invoice data.
+     Confirmed pipeline above is completely untouched by everything
+     below this line.
+
+     Public API: extractWatchObservations(cid, confirmedSignalsOverride?)
+     ============================================================ */
+
+  var WATCH_SUPERSESSION_MAP = {
+    'PURCHASE_DECLINE_WATCH': ['PURCHASE_DECLINE_SEVERE', 'PURCHASE_DECLINE_MILD'],
+    'BEHIND_PATTERN_WATCH': ['BEHIND_PATTERN'],
+    'BASKET_SHRINK_WATCH': ['BASKET_SHRINK'],
+    'KEY_PRODUCT_LOST_WATCH': ['KEY_PRODUCT_LOST'],
+    'SKU_DELAY_WATCH': ['SKU_DELAY'],
+    'SKU_QUANTITY_DROP_WATCH': ['SKU_QUANTITY_DROP'],
+    'SKU_FREQUENCY_DROP_WATCH': ['SKU_FREQUENCY_DROP'],
+    'LINE_DROP_WATCH': ['LINE_DROP'],
+    'COMBINED_SKU_WATCH': [
+      'SKU_DELAY',
+      'SKU_QUANTITY_DROP',
+      'SKU_FREQUENCY_DROP',
+      'LINE_DROP',
+      'COMBINED_SKU_DETERIORATION'
+    ]
+  };
+
+  /* ---------------------------------------------------------
+     Raw invoice split (early half vs late half), independent of
+     customerBehavior().decliningProducts. Used only by
+     BASKET_SHRINK_WATCH / KEY_PRODUCT_LOST_WATCH (spec 6C/6D
+     explicitly require independence from decliningProducts).
+     --------------------------------------------------------- */
+  function _watchProductName(pid) {
+    if (typeof data === 'undefined' || !Array.isArray(data.products)) return pid || '';
+    var p = data.products.find(function (x) { return x && x.id === pid; });
+    return (p && p.name) ? p.name : (pid || '');
+  }
+
+  function _watchRawInvoiceSplit(cid) {
+    if (typeof customerInvoices !== 'function') return null;
+    var invs = customerInvoices(cid).slice().sort(function (a, b) {
+      return String(a.date || '').localeCompare(String(b.date || ''));
+    });
+    var count = invs.length;
+    if (count < 2) return null; // minimum invoiceCount = 2 (spec 6C)
+    var mid = Math.floor(count / 2);
+    var early = invs.slice(0, mid);
+    var late = invs.slice(mid);
+    function qtyMap(list) {
+      var map = Object.create(null);
+      for (var i = 0; i < list.length; i++) {
+        var items = list[i].items || [];
+        for (var j = 0; j < items.length; j++) {
+          var it = items[j];
+          if (!it || !it.productId || !(it.qty > 0)) continue;
+          if (!map[it.productId]) {
+            map[it.productId] = { productId: it.productId, name: it.name || _watchProductName(it.productId), qty: 0 };
+          }
+          map[it.productId].qty += it.qty;
+        }
+      }
+      return map;
+    }
+    return { invoiceCount: count, early: qtyMap(early), late: qtyMap(late) };
+  }
+
+  function _mkWatch(cid, category, opts) {
+    return {
+      customerId: cid,
+      productId: opts.productId != null ? opts.productId : null,
+      productName: opts.productName != null ? opts.productName : null,
+      category: category,
+      level: opts.level,
+      reason: opts.reason,
+      deviationStrength: opts.deviationStrength,
+      source: opts.source,
+      watchComponents: opts.watchComponents || null
+    };
+  }
+
+  /* A) PURCHASE_DECLINE_WATCH — raw sales30 vs salesPrev30, independent
+     of PURCHASE_DECLINE_MILD/SEVERE thresholds (spec 6A). */
+  function _purchaseDeclineWatch(cid, b, out) {
+    if (!(b.salesPrev30 > 0)) return;
+    var declinePct = ((b.salesPrev30 - b.sales30) / b.salesPrev30) * 100;
+    if (!(declinePct >= 15)) return;
+    var level = declinePct >= 25 ? 'high' : (declinePct >= 20 ? 'medium' : 'low');
+    out.push(_mkWatch(cid, 'PURCHASE_DECLINE_WATCH', {
+      level: level,
+      reason: 'نشانه‌های زودهنگام کاهش خرید (حدود ' + _fa(declinePct) + '٪) مشاهده می‌شود',
+      deviationStrength: Math.min(1, declinePct / 30),
+      source: 'account'
+    }));
+  }
+
+  /* B) BEHIND_PATTERN_WATCH — daysSinceLast / avgIntervalDays (spec 6B). */
+  function _behindPatternWatch(cid, b, out) {
+    if (!(b.avgIntervalDays > 0) || b.daysSinceLast == null) return;
+    var ratio = b.daysSinceLast / b.avgIntervalDays;
+    if (!(ratio >= 0.80)) return;
+    var level = ratio >= 0.95 ? 'high' : (ratio >= 0.90 ? 'medium' : 'low');
+    out.push(_mkWatch(cid, 'BEHIND_PATTERN_WATCH', {
+      level: level,
+      reason: 'مشتری در حال نزدیک‌شدن به عقب‌افتادن از الگوی معمول خرید است',
+      deviationStrength: Math.min(1, ratio),
+      source: 'account'
+    }));
+  }
+
+  /* C) BASKET_SHRINK_WATCH — raw invoice split, independent of
+     customerBehavior().decliningProducts (spec 6C).
+     ASSUMPTION (spec gives no level bands for this rule — reported in
+     the implementation report, not guessed silently): level is 'medium'
+     when >=2 products show a meaningful decline, otherwise 'low'.
+     "Meaningful decline" per product: earlyQty >= 2 and lateQty <= earlyQty*0.5
+     — chosen independently of calc.js's decliningProducts thresholds
+     (which require invoiceCount>=4, earlyQty>=2, lateQty<earlyQty*0.6). */
+  function _basketShrinkWatch(cid, out) {
+    var split = _watchRawInvoiceSplit(cid);
+    if (!split) return;
+    var earlyKeys = Object.keys(split.early);
+    var decliningCount = 0;
+    for (var i = 0; i < earlyKeys.length; i++) {
+      var e = split.early[earlyKeys[i]];
+      var l = split.late[earlyKeys[i]];
+      var lateQty = l ? l.qty : 0;
+      if (e.qty >= 2 && lateQty <= e.qty * 0.5) decliningCount++;
+    }
+    if (decliningCount < 1) return;
+    var level = decliningCount >= 2 ? 'medium' : 'low';
+    out.push(_mkWatch(cid, 'BASKET_SHRINK_WATCH', {
+      level: level,
+      reason: 'تنوع سبد خرید اخیر رو به کاهش است',
+      deviationStrength: Math.min(1, decliningCount / 2),
+      source: 'account'
+    }));
+  }
+
+  /* D) KEY_PRODUCT_LOST_WATCH — raw split-history, independent of
+     customerBehavior().decliningProducts (spec 6D). Exact thresholds
+     given by spec: earlyQty >= 3, lateQty === 0.
+     ASSUMPTION (spec gives no level bands for this rule — reported,
+     not guessed silently): same medium/low convention as 6C above. */
+  function _keyProductLostWatch(cid, out) {
+    var split = _watchRawInvoiceSplit(cid);
+    if (!split) return;
+    var earlyKeys = Object.keys(split.early);
+    var lostCount = 0;
+    for (var i = 0; i < earlyKeys.length; i++) {
+      var e = split.early[earlyKeys[i]];
+      var l = split.late[earlyKeys[i]];
+      var lateQty = l ? l.qty : 0;
+      if (e.qty >= 3 && lateQty === 0) lostCount++;
+    }
+    if (lostCount < 1) return;
+    var level = lostCount >= 2 ? 'medium' : 'low';
+    out.push(_mkWatch(cid, 'KEY_PRODUCT_LOST_WATCH', {
+      level: level,
+      reason: 'توقف زودهنگام خرید یک یا چند محصول کلیدی مشاهده می‌شود',
+      deviationStrength: Math.min(1, lostCount / 2),
+      source: 'account'
+    }));
+  }
+
+  /* Suppression (spec 11/12): a Watch is suppressed only when a mapped
+     Confirmed signal with the SAME customerId+productId identity has
+     status === 'active'. Pending Confirmed never suppresses a Watch. */
+  function _isWatchSuppressedByConfirmed(watch, confirmedSignals) {
+    var superseded = WATCH_SUPERSESSION_MAP[watch.category];
+    if (!superseded || !superseded.length || !confirmedSignals || !confirmedSignals.length) return false;
+    var wantPid = (watch.productId != null && watch.productId !== '') ? watch.productId : null;
+    for (var i = 0; i < confirmedSignals.length; i++) {
+      var s = confirmedSignals[i];
+      if (!s || s.status !== 'active') continue;
+      if (superseded.indexOf(s.category) === -1) continue;
+      var sPid = (s.productId != null && s.productId !== '' && s.productId !== 'multi') ? s.productId : null;
+      if (sPid === wantPid) return true;
+    }
+    return false;
+  }
+
+  /* Main Watch entry point (spec 4/5).
+     confirmedSignalsOverride: optional — lets a caller that already
+     computed extractCustomerSignals(cid) this render cycle (e.g.
+     customer.js, which must call both per spec §15) pass it in to
+     avoid a redundant recomputation. When omitted, computed internally. */
+  function extractWatchObservations(cid, confirmedSignalsOverride) {
+    var out = [];
+    if (!cid) return out;
+    if (typeof customerBehavior !== 'function') return out;
+    var b = customerBehavior(cid);
+    if (!b) return out;
+
+    _purchaseDeclineWatch(cid, b, out);
+    _behindPatternWatch(cid, b, out);
+    _basketShrinkWatch(cid, out);
+    _keyProductLostWatch(cid, out);
+
+    if (typeof extractSkuWatchObservations === 'function') {
+      try {
+        var skuW = extractSkuWatchObservations(cid) || [];
+        for (var i = 0; i < skuW.length; i++) {
+          if (skuW[i]) out.push(skuW[i]);
+        }
+      } catch (eSkuW) { /* fail-open: Watch errors must never break the page */ }
+    }
+
+    var confirmed;
+    if (Array.isArray(confirmedSignalsOverride)) {
+      confirmed = confirmedSignalsOverride;
+    } else {
+      confirmed = [];
+      if (typeof extractCustomerSignals === 'function') {
+        try { confirmed = extractCustomerSignals(cid) || []; } catch (eConf) { confirmed = []; }
+      }
+    }
+
+    var visible = [];
+    for (var j = 0; j < out.length; j++) {
+      if (out[j] && !_isWatchSuppressedByConfirmed(out[j], confirmed)) visible.push(out[j]);
+    }
+    return visible;
+  }
+
+  global.extractWatchObservations = extractWatchObservations;
+  global.WATCH_SUPERSESSION_MAP = WATCH_SUPERSESSION_MAP;
+
 })(typeof window !== 'undefined' ? window : this);
