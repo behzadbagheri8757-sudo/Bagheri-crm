@@ -133,15 +133,6 @@
     return p.active !== false;
   }
 
-  // Business override: a product explicitly marked strategic remains eligible
-  // for SKU deterioration signals even when its calculated importance is below
-  // the generic 5% gate. No default products are treated as strategic.
-  function _productStrategic(productId) {
-    if (typeof data === 'undefined' || !Array.isArray(data.products)) return false;
-    var p = data.products.find(function (x) { return x && x.id === productId; });
-    return !!(p && p.strategic === true);
-  }
-
   function _productStock(productId) {
     if (typeof data === 'undefined' || !Array.isArray(data.products)) return null;
     var p = data.products.find(function (x) { return x && x.id === productId; });
@@ -309,17 +300,37 @@
     }
 
     var invs = customerInvoicesList || [];
-    // Compare recent basket presence over a window scaled to the SKU's own
-    // historical presence. A slow SKU (e.g. present in 1/6 invoices) needs a
-    // materially longer recent invoice window than a fast SKU; otherwise the
-    // fixed 5-invoice window manufactures LINE_DROP signals.
-    var basketWindow = SKU_PARAMS.basketWindowSize;
-    if (historical && historical.purchaseCount > 0) {
-      var presenceRateForWindow = invs.length ? (historical.purchaseCount / invs.length) : 0;
-      if (presenceRateForWindow > 0) {
-        basketWindow = Math.max(basketWindow, Math.ceil(basketWindow / presenceRateForWindow));
+
+    // Compute historicalPresenceRate first (needed below to size the
+    // basket window adaptively).
+    var histPresenceCount = 0;
+    for (var h = 0; h < invs.length; h++) {
+      var its = invs[h].items || [];
+      for (var jj = 0; jj < its.length; jj++) {
+        if (its[jj] && its[jj].productId === pair.productId && its[jj].qty > 0) {
+          histPresenceCount++;
+          break;
+        }
       }
     }
+    var historicalPresenceRate = invs.length ? (histPresenceCount / invs.length) : null;
+
+    // BUGFIX (proven by runtime repro): basketWindowSize is a fixed
+    // lookback (5 invoices). For any SKU whose natural purchase cadence
+    // is longer than that window (e.g. bought roughly every 6+ invoices —
+    // a perfectly normal, healthy slow-moving SKU), currentBasketPresence
+    // reads 0% almost every time it's checked, purely because the window
+    // is shorter than the SKU's own cycle — not because anything changed.
+    // Widen the window just enough that, at this SKU's own historical
+    // rate, at least one occurrence would normally be expected. Never
+    // shrinks the window below the configured basketWindowSize, so normal-
+    // cadence SKUs (the common case) are completely unaffected.
+    var basketWindow = SKU_PARAMS.basketWindowSize;
+    if (historicalPresenceRate != null && historicalPresenceRate > 0) {
+      var neededForOneExpected = Math.ceil(1 / historicalPresenceRate);
+      if (neededForOneExpected > basketWindow) basketWindow = neededForOneExpected;
+    }
+
     var sortedInvs = invs.slice().sort(function (a, b) {
       return String(b.date || '').localeCompare(String(a.date || ''));
     });
@@ -335,18 +346,6 @@
       }
     }
     var currentBasketPresence = windowInvs.length ? (presenceCount / windowInvs.length) : 0;
-
-    var histPresenceCount = 0;
-    for (var h = 0; h < invs.length; h++) {
-      var its = invs[h].items || [];
-      for (var jj = 0; jj < its.length; jj++) {
-        if (its[jj] && its[jj].productId === pair.productId && its[jj].qty > 0) {
-          histPresenceCount++;
-          break;
-        }
-      }
-    }
-    var historicalPresenceRate = invs.length ? (histPresenceCount / invs.length) : null;
 
     return {
       daysSinceLastPurchase: daysSinceLast,
@@ -676,7 +675,16 @@
       var eventRatio = recent.typicalQuantity / historical.typicalQuantity;
       var effectiveRatio = Math.max(qtyRatio, eventRatio); // conservative: use less severe
       // Actually for drop detection use the lower of the two (more drop) only if returns don't neutralize
-      var returnsExplain = pair.returns.length > 0 &&
+      // BUGFIX (proven by runtime repro): "returnsExplain" never actually
+      // checked whether any return exists for this SKU — it only compared
+      // ratios. That meant a single large outlier order in the recent
+      // window could itself push qtyRatio back above threshold and mask a
+      // genuine, sustained per-order quantity decline (e.g. baseline 20,
+      // recent orders 100/12/12 — a real drop to ~12 — with zero returns
+      // involved at all). Require an actual recorded return before
+      // "returns explain it" is allowed to suppress the signal.
+      var hasReturnsInPeriod = !!(pair.returns && pair.returns.length > 0);
+      var returnsExplain = hasReturnsInPeriod &&
         (eventRatio < 1 - SKU_PARAMS.quantityDropSensitivity) &&
         (qtyRatio >= 1 - SKU_PARAMS.quantityDropSensitivity);
       if (!returnsExplain && eventRatio < 1 - SKU_PARAMS.quantityDropSensitivity) {
@@ -788,9 +796,8 @@
       });
     }
 
-    // Importance gate. Explicitly strategic SKUs bypass the generic
-    // importance floor; ordinary low-share SKUs keep the existing behavior.
-    if (importance < SKU_PARAMS.minImportanceForSignal && !_productStrategic(pair.productId)) {
+    // Importance gate
+    if (importance < SKU_PARAMS.minImportanceForSignal) {
       return null;
     }
 

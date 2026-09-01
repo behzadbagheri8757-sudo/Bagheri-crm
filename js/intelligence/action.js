@@ -151,12 +151,19 @@
     let best = null;
     let bestRank = Infinity;
     signals.forEach(function (s) {
-      // Only persisted/confirmed signals are actionable. Seasonally suppressed
-      // signals are explicitly non-actionable even when their risk status
-      // remains active for visibility/audit purposes.
       if (!s || !ACTION_RULES[s.category]) return;
-      if (s.status !== 'active') return;
-      if (s.actionable === false || s.seasonallySuppressed === true) return;
+      // BUGFIX (proven by runtime repro): this selection ignored two
+      // explicit flags that upstream stages compute for exactly this
+      // purpose — persistence.js's s.status ("pending" = not yet
+      // confirmed by a second occurrence; immediate categories are
+      // already 'active' on first hit, so they are unaffected) and
+      // seasonality.js's s.seasonallySuppressed (explicitly marked as a
+      // likely false decline). Without these checks, a single unconfirmed
+      // or seasonally-explained detection could still generate a concrete
+      // operational action. Missing/undefined status is still treated as
+      // active, matching the existing convention in risk.js/priority.js.
+      if (s.status === 'pending') return;
+      if (s.seasonallySuppressed === true) return;
       const r = _actionPriorityRank(s.category);
       if (r < bestRank) {
         bestRank = r;

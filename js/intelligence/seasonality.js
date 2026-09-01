@@ -248,10 +248,6 @@
 
     // Suppress false seasonal decline contribution (do not delete signal).
     signal.seasonallySuppressed = true;
-    // Suppressed seasonal signals remain visible for evidence/audit, but must
-    // not enter the operational Action queue. Risk/status semantics remain
-    // unchanged.
-    signal.actionable = false;
     var keep = 1 - SEASONALITY_PARAMS.suppressionFactor; // 0.2 retained
     if (typeof signal.severityPoints === 'number' && isFinite(signal.severityPoints)) {
       signal.severityPoints = signal.severityPoints * keep;
