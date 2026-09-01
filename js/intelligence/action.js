@@ -151,14 +151,12 @@
     let best = null;
     let bestRank = Infinity;
     signals.forEach(function (s) {
+      // Only persisted/confirmed signals are actionable. Seasonally suppressed
+      // signals are explicitly non-actionable even when their risk status
+      // remains active for visibility/audit purposes.
       if (!s || !ACTION_RULES[s.category]) return;
-
-      // Persistence is an actual decision gate for behavioral signals.
-      // A pending detection is evidence under observation, not an
-      // operational instruction. Keep backward compatibility for callers
-      // that do not provide a status field at all.
-      if (s.status != null && s.status !== 'active') return;
-
+      if (s.status !== 'active') return;
+      if (s.actionable === false || s.seasonallySuppressed === true) return;
       const r = _actionPriorityRank(s.category);
       if (r < bestRank) {
         bestRank = r;

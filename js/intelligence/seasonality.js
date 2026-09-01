@@ -73,29 +73,6 @@
     return (by - ay) * 12 + (bm - am);
   }
 
-  /**
-   * Returns the SUM of quantities for a specific product in an invoice.
-   * If productId is null (account-level), we fall back to revenue (original behavior)
-   * because summing quantities across different products is not meaningful.
-   */
-  function _invoiceQuantity(inv, productId) {
-    if (!inv) return 0;
-    var items = inv.items || [];
-    if (productId != null && productId !== '' && productId !== 'multi') {
-      var sum = 0;
-      for (var i = 0; i < items.length; i++) {
-        var it = items[i];
-        if (!it || it.productId !== productId) continue;
-        if (!(it.qty > 0)) continue;
-        sum += it.qty;
-      }
-      return sum;
-    }
-    // Account-level: prefer invoice total fields if present, else sum items revenue
-    return _invoiceAmount(inv, productId);
-  }
-
-  // Keep the original amount function for fallback (unchanged)
   function _invoiceAmount(inv, productId) {
     if (!inv) return 0;
     var items = inv.items || [];
@@ -125,9 +102,6 @@
    * Build monthly demand series for customer (+ optional product).
    * Returns { months: { 'YYYY-MM': amount }, spanMonths, overallMean, byCalMonth: {1..12: mean} }
    * or null if insufficient.
-   *
-   * For product-specific series, we now use quantity (not revenue) so price changes do not
-   * distort the seasonal pattern. For account-level (productId null) we keep revenue.
    */
   function _buildMonthlySeries(customerId, productId) {
     if (typeof data === 'undefined' || !Array.isArray(data.invoices)) return null;
@@ -140,7 +114,7 @@
       if (!inv || inv.customerId !== customerId) continue;
       var mk = _monthKey(inv.date);
       if (!mk) continue;
-      var amt = _invoiceQuantity(inv, productId); // <-- changed from _invoiceAmount
+      var amt = _invoiceAmount(inv, productId);
       if (!byMonth[mk]) byMonth[mk] = 0;
       byMonth[mk] += amt;
       if (!minDate || mk < minDate) minDate = mk + '-01';
@@ -166,6 +140,7 @@
       if (!calBuckets[cm]) calBuckets[cm] = [];
       calBuckets[cm].push(v);
     }
+    var span = _monthsBetween(minDate, maxDate);
 
     if (!allVals.length) return null;
     var sum = 0;
@@ -273,6 +248,10 @@
 
     // Suppress false seasonal decline contribution (do not delete signal).
     signal.seasonallySuppressed = true;
+    // Suppressed seasonal signals remain visible for evidence/audit, but must
+    // not enter the operational Action queue. Risk/status semantics remain
+    // unchanged.
+    signal.actionable = false;
     var keep = 1 - SEASONALITY_PARAMS.suppressionFactor; // 0.2 retained
     if (typeof signal.severityPoints === 'number' && isFinite(signal.severityPoints)) {
       signal.severityPoints = signal.severityPoints * keep;
