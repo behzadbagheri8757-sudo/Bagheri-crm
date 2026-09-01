@@ -1156,11 +1156,147 @@ function openAddCheck(cid){
   });
 }
 
+/* ============================================================
+   No-Purchase Reason (V1) — low-friction structured feedback
+   Uses existing P-03 recordFeedback. Never blocks save.
+   ============================================================ */
+var NO_PURCHASE_REASON_CATEGORIES = {
+  SKU_DELAY: true,
+  SKU_QUANTITY_DROP: true,
+  SKU_FREQUENCY_DROP: true,
+  LINE_DROP: true,
+  COMBINED_SKU_DETERIORATION: true,
+  KEY_PRODUCT_LOST: true
+};
+var NO_PURCHASE_REASON_OPTIONS = [
+  { code: 'still_stock', label: 'موجودی دارد' },
+  { code: 'competitor_bought', label: 'از رقیب خریده' },
+  { code: 'no_need', label: 'فعلاً نیاز ندارد' },
+  { code: 'price_issue', label: 'قیمت مناسب نیست' },
+  { code: 'liquidity', label: 'نقدینگی ندارد' }
+];
+
+/**
+ * Return up to `limit` high-confidence SKU signals that justify asking
+ * "why didn't they buy this product?". Filters pending / seasonally
+ * suppressed / already-answered / multi-product signals.
+ * excludeProductIds: optional Set/array of productIds already in the basket.
+ */
+function getNoPurchaseCandidates(cid, excludeProductIds, limit){
+  limit = (typeof limit === 'number' && limit > 0) ? limit : 3;
+  if(!cid || typeof extractCustomerSignals !== 'function') return [];
+  var exclude = Object.create(null);
+  if(excludeProductIds){
+    if(Array.isArray(excludeProductIds)){
+      excludeProductIds.forEach(function(id){ if(id) exclude[id] = true; });
+    }else if(typeof excludeProductIds === 'object'){
+      Object.keys(excludeProductIds).forEach(function(id){ if(id) exclude[id] = true; });
+    }
+  }
+  var signals = [];
+  try{ signals = extractCustomerSignals(cid) || []; }catch(e){ signals = []; }
+  var out = [];
+  for(var i = 0; i < signals.length; i++){
+    var s = signals[i];
+    if(!s || !s.category) continue;
+    if(!NO_PURCHASE_REASON_CATEGORIES[s.category]) continue;
+    if(s.status === 'pending') continue;
+    if(s.seasonallySuppressed === true) continue;
+    var pid = s.productId;
+    if(pid == null || pid === '' || pid === 'multi') continue;
+    if(exclude[pid]) continue;
+    if(s.feedback && s.feedback.reasonCode) continue;
+    out.push(s);
+  }
+  out.sort(function(a, b){
+    var pa = (typeof a.severityPoints === 'number') ? a.severityPoints : 0;
+    var pb = (typeof b.severityPoints === 'number') ? b.severityPoints : 0;
+    return pb - pa;
+  });
+  var seen = Object.create(null);
+  var unique = [];
+  for(var j = 0; j < out.length; j++){
+    var p = out[j].productId;
+    if(seen[p]) continue;
+    seen[p] = true;
+    unique.push(out[j]);
+    if(unique.length >= limit) break;
+  }
+  return unique;
+}
+
+function noPurchaseReasonChipsHtml(productId, category, source){
+  return NO_PURCHASE_REASON_OPTIONS.map(function(o){
+    return '<button type="button" class="chip-opt npr-chip" data-npr-pid="' + esc(String(productId)) +
+      '" data-npr-cat="' + esc(String(category)) +
+      '" data-npr-code="' + esc(o.code) +
+      '" data-npr-source="' + esc(source || '') +
+      '">' + esc(o.label) + '</button>';
+  }).join('');
+}
+
+function noPurchasePromptHtml(candidates, source, introText){
+  if(!candidates || !candidates.length) return '';
+  var blocks = candidates.map(function(s){
+    var name = s.productName || (typeof data !== 'undefined' && data.products
+      ? ((data.products.find(function(p){ return p && p.id === s.productId; }) || {}).name || s.productId)
+      : s.productId);
+    return '<div class="npr-product" style="margin:8px 0 4px;">' +
+      '<div style="font-weight:600;margin-bottom:4px;">' + esc(name) + '</div>' +
+      '<div class="chip-wrap">' + noPurchaseReasonChipsHtml(s.productId, s.category, source) + '</div>' +
+      '</div>';
+  }).join('');
+  return '<div class="npr-card" id="npr-card" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:10px 0 12px;background:var(--bg-elevated, transparent);">' +
+    '<div style="font-size:0.92rem;margin-bottom:4px;">' + esc(introText || 'این مشتری معمولاً این محصول را می‌خرد') + '</div>' +
+    blocks +
+    '<div class="btn-row" style="margin-top:6px;"><button type="button" class="btn small secondary" id="npr-dismiss">رد کردن</button></div>' +
+    '</div>';
+}
+
+function bindNoPurchasePrompt(cid){
+  var card = document.getElementById('npr-card');
+  if(!card) return;
+  var dismiss = document.getElementById('npr-dismiss');
+  if(dismiss){
+    dismiss.addEventListener('click', function(){
+      card.style.display = 'none';
+    });
+  }
+  card.querySelectorAll('.npr-chip').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(btn.disabled) return;
+      var pid = btn.getAttribute('data-npr-pid');
+      var cat = btn.getAttribute('data-npr-cat');
+      var code = btn.getAttribute('data-npr-code');
+      var source = btn.getAttribute('data-npr-source') || '';
+      if(!cid || !cat || !code) return;
+      if(typeof recordFeedback === 'function'){
+        try{
+          recordFeedback(cid, pid, cat, code, '', source || null);
+        }catch(e){
+          console.warn('recordFeedback failed', e);
+        }
+      }
+      var productBlock = btn.closest('.npr-product');
+      if(productBlock){
+        productBlock.querySelectorAll('.npr-chip').forEach(function(b){
+          b.disabled = true;
+          b.classList.remove('selected');
+        });
+        btn.classList.add('selected');
+      }
+      if(typeof showToast === 'function') showToast('ثبت شد');
+    });
+  });
+}
+
 function openAddVisit(cid){
   const reasonOpts = (typeof VISIT_REASONS !== 'undefined' ? VISIT_REASONS : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
   const oppOpts = (typeof VISIT_OPPORTUNITIES !== 'undefined' ? VISIT_OPPORTUNITIES : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
   const threatOpts = (typeof VISIT_THREATS !== 'undefined' ? VISIT_THREATS : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
   const nextOpts = (typeof VISIT_NEXT_ACTIONS !== 'undefined' ? VISIT_NEXT_ACTIONS : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  const nprCandidates = getNoPurchaseCandidates(cid, null, 3);
+  const nprHtml = noPurchasePromptHtml(nprCandidates, 'visit', 'این مشتری معمولاً این محصول را می‌خرد — علت عدم خرید؟');
   openSheet(`
     <h3>ثبت ویزیت مشتری</h3>
     <div class="field"><label>تاریخ</label>${shamsiDateInputHTML('f-date', todayISO())}</div>
@@ -1170,6 +1306,7 @@ function openAddVisit(cid){
       <select id="f-result">${VISIT_RESULTS.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select>
     </div>
     <div class="field"><label>یادداشت کوتاه (اختیاری)</label><input id="f-visit-note" placeholder="اختیاری" autocomplete="off"></div>
+    ${nprHtml}
     <div class="btn-row" style="margin-bottom:8px;">
       <button type="button" class="btn small secondary" id="toggle-visit-detail">جزئیات بیشتر</button>
     </div>
@@ -1192,6 +1329,7 @@ function openAddVisit(cid){
     </div>
     <div class="btn-row"><button class="btn" id="save-visit">ثبت ویزیت</button></div>
   `);
+  bindNoPurchasePrompt(cid);
   const detailBtn = document.getElementById('toggle-visit-detail');
   if(detailBtn){
     detailBtn.addEventListener('click', ()=>{
@@ -1637,12 +1775,21 @@ function openInvoiceForm(cid, editInv){
     // other sheet in the app.
     const _prevSheetEl = document.querySelector('.sheet');
     const _prevScrollTop = _prevSheetEl ? _prevSheetEl.scrollTop : 0;
+    // No-Purchase Reason: expected SKUs missing from current basket (non-blocking)
+    const basketPids = rows.map(function(r){ return r.productId; }).filter(Boolean);
+    const nprCandidatesInv = (typeof getNoPurchaseCandidates === 'function')
+      ? getNoPurchaseCandidates(cid, basketPids, 3)
+      : [];
+    const nprHtmlInv = (typeof noPurchasePromptHtml === 'function')
+      ? noPurchasePromptHtml(nprCandidatesInv, 'invoice', 'این مشتری معمولاً این محصول را می‌خرد، ولی در فاکتور فعلی نیست — علت؟')
+      : '';
     openSheet(`
       <h3>${editInv?('ویرایش فاکتور #'+(editInv.number||'—')):'فاکتور جدید'}</h3>
       ${editInv?`<div class="empty" style="padding:0 0 8px;text-align:right;">با ذخیره‌ی این ویرایش، موجودی انبار و مانده حساب مشتری به‌طور خودکار اصلاح می‌شود.</div>`:''}
       <div class="field"><label>تاریخ</label>${shamsiDateInputHTML('f-date', editInv?editInv.date:todayISO())}</div>
       <div id="items-wrap">${itemsHtml()}</div>
       <button class="btn secondary small" id="add-row">+ افزودن قلم</button>
+      ${nprHtmlInv}
 
       <h2 class="section-title">دریافتی همراه این فاکتور (اختیاری)</h2>
       <div class="field" style="display:flex;gap:8px;">
@@ -1679,6 +1826,8 @@ function openInvoiceForm(cid, editInv){
       if(_newSheetEl) _newSheetEl.scrollTop = _prevScrollTop;
     }
     updateSummary();
+    // No-Purchase Reason chips (re-bound after every renderSheet rebuild)
+    if(typeof bindNoPurchasePrompt === 'function') bindNoPurchasePrompt(cid);
 
     document.getElementById('add-row').addEventListener('click', ()=>{
       rows.push({productId:'', qty:1, price:0, discount:0});
@@ -1785,6 +1934,18 @@ function openInvoiceForm(cid, editInv){
       closeAllProductDrops();
       updateRowInfo(idx);
       updateSummary();
+      // Hide No-Purchase prompt for products now in the basket
+      try{
+        const card = document.getElementById('npr-card');
+        if(card){
+          card.querySelectorAll('.npr-chip[data-npr-pid="' + productId + '"]').forEach(function(chip){
+            const block = chip.closest('.npr-product');
+            if(block) block.style.display = 'none';
+          });
+          const remaining = card.querySelectorAll('.npr-product:not([style*="display: none"])');
+          if(!remaining.length) card.style.display = 'none';
+        }
+      }catch(eNpr){ /* non-critical */ }
     }
 
     // Single gesture open via pointerup (avoids focus+click double-open on mobile)

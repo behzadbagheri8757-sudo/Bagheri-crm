@@ -31,6 +31,8 @@ async function downloadFile(filename, blobParts, mime){
 
 /** کلید اسنپ‌شات Prospect قبل از Restore (داخل همان baqeriDB، جدا از CRM) */
 const PRERESTORE_PROSPECT_KEY = 'preRestoreProspect';
+/** کلید اسنپ‌شات Intelligence قبل از Restore (داخل همان baqeriDB، جدا از CRM) */
+const PRERESTORE_INTELLIGENCE_KEY = 'preRestoreIntelligence';
 
 /**
  * دسترسی مستقیم به ProspectScoutDB (بدون وابستگی به لود بودن prospect-db.js)
@@ -162,12 +164,171 @@ async function restoreProspectScoutBundle(bundle){
   }
 }
 
+
+/* ============================================================
+   Intelligence backup / restore (bagheri_intelligence_db)
+   Additive only. Does not touch CRM or ProspectScout.
+   Runtime DBs stay separate; one user-facing backup file.
+   ============================================================ */
+const INTELLIGENCE_DB_NAME = 'bagheri_intelligence_db';
+const INTELLIGENCE_DB_VERSION = 3;
+const INTELLIGENCE_STORES = ['occurrences', 'seller_feedback', 'baseline_cache'];
+const INTELLIGENCE_LS_KEYS = {
+  occurrences: 'bagheri_intelligence_occurrences',
+  seller_feedback: 'bagheri_intelligence_seller_feedback',
+  baseline_cache: 'bagheri_intelligence_baseline_cache'
+};
+
+function openIntelligenceDbForBackup(){
+  return new Promise((resolve, reject)=>{
+    try{
+      const req = indexedDB.open(INTELLIGENCE_DB_NAME, INTELLIGENCE_DB_VERSION);
+      req.onupgradeneeded = (e)=>{
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains('occurrences')){
+          db.createObjectStore('occurrences', { keyPath: 'key' });
+        }
+        if(!db.objectStoreNames.contains('seller_feedback')){
+          db.createObjectStore('seller_feedback', { keyPath: 'id' });
+        }
+        if(!db.objectStoreNames.contains('baseline_cache')){
+          db.createObjectStore('baseline_cache', { keyPath: 'key' });
+        }
+      };
+      req.onsuccess = (e)=> resolve(e.target.result);
+      req.onerror = (e)=> reject(e.target.error);
+    }catch(e){ reject(e); }
+  });
+}
+
+function intelligenceBackupGetAll(db, storeName){
+  return new Promise((resolve, reject)=>{
+    try{
+      if(!db.objectStoreNames.contains(storeName)){
+        resolve([]);
+        return;
+      }
+      const r = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+      r.onsuccess = ()=> resolve(r.result || []);
+      r.onerror = ()=> reject(r.error);
+    }catch(e){ reject(e); }
+  });
+}
+
+async function exportIntelligenceBundle(){
+  try{
+    const db = await openIntelligenceDbForBackup();
+    const occurrences = await intelligenceBackupGetAll(db, 'occurrences');
+    const seller_feedback = await intelligenceBackupGetAll(db, 'seller_feedback');
+    const baseline_cache = await intelligenceBackupGetAll(db, 'baseline_cache');
+    try{ db.close(); }catch(e){}
+    return {
+      dbVersion: INTELLIGENCE_DB_VERSION,
+      occurrences: occurrences || [],
+      seller_feedback: seller_feedback || [],
+      baseline_cache: baseline_cache || []
+    };
+  }catch(e){
+    console.error('exportIntelligenceBundle failed', e);
+    return null;
+  }
+}
+
+function runIntelligenceRestoreTx(db, bundle){
+  return new Promise((resolve, reject)=>{
+    let settled = false;
+    const finish = (ok, err)=>{
+      if(settled) return;
+      settled = true;
+      if(ok) resolve(true); else reject(err || new Error('intelligence restore transaction failed'));
+    };
+    try{
+      const storeNames = INTELLIGENCE_STORES.filter(function(name){
+        return db.objectStoreNames.contains(name);
+      });
+      if(!storeNames.length){
+        finish(false, new Error('no intelligence stores present'));
+        return;
+      }
+      const tx = db.transaction(storeNames, 'readwrite');
+      tx.oncomplete = ()=> finish(true);
+      tx.onerror = (e)=> finish(false, (e && e.target && e.target.error) || tx.error);
+      tx.onabort = ()=> finish(false, tx.error);
+
+      storeNames.forEach(function(name){
+        const store = tx.objectStore(name);
+        store.clear();
+        const rows = (bundle && Array.isArray(bundle[name])) ? bundle[name] : [];
+        rows.forEach(function(row){
+          if(row != null) store.put(row);
+        });
+      });
+    }catch(e){
+      finish(false, e);
+    }
+  });
+}
+
+async function restoreIntelligenceBundle(bundle){
+  if(!bundle || typeof bundle !== 'object') return false;
+  if(!Array.isArray(bundle.occurrences) && !Array.isArray(bundle.seller_feedback) && !Array.isArray(bundle.baseline_cache)){
+    return false;
+  }
+  let db = null;
+  try{
+    db = await openIntelligenceDbForBackup();
+    await runIntelligenceRestoreTx(db, {
+      occurrences: Array.isArray(bundle.occurrences) ? bundle.occurrences : [],
+      seller_feedback: Array.isArray(bundle.seller_feedback) ? bundle.seller_feedback : [],
+      baseline_cache: Array.isArray(bundle.baseline_cache) ? bundle.baseline_cache : []
+    });
+
+    try{
+      if(typeof localStorage !== 'undefined' && localStorage){
+        const occMap = Object.create(null);
+        (bundle.occurrences || []).forEach(function(row){
+          if(row && row.key != null && Array.isArray(row.dates)){
+            occMap[row.key] = row.dates.slice();
+          }
+        });
+        localStorage.setItem(INTELLIGENCE_LS_KEYS.occurrences, JSON.stringify(occMap));
+
+        localStorage.setItem(
+          INTELLIGENCE_LS_KEYS.seller_feedback,
+          JSON.stringify(Array.isArray(bundle.seller_feedback) ? bundle.seller_feedback : [])
+        );
+
+        const baseMap = Object.create(null);
+        (bundle.baseline_cache || []).forEach(function(row){
+          if(row && row.key != null) baseMap[row.key] = row;
+        });
+        localStorage.setItem(INTELLIGENCE_LS_KEYS.baseline_cache, JSON.stringify(baseMap));
+      }
+    }catch(lsErr){
+      console.warn('intelligence localStorage mirror refresh failed', lsErr);
+    }
+    return true;
+  }catch(e){
+    console.error('restoreIntelligenceBundle failed', e);
+    return false;
+  }finally{
+    if(db){ try{ db.close(); }catch(e){} }
+  }
+}
+
 async function exportBackupJSON(){
   const stamp = todayISO();
-  // سازگاری: همان فیلدهای data در ریشه؛ prospectScout اختیاری و اضافه
+  // سازگاری: همان فیلدهای data در ریشه؛ prospectScout و intelligence اختیاری و اضافه
   const payload = JSON.parse(JSON.stringify(data));
+  payload.backupFormatVersion = 2;
+  payload.exportedAt = new Date().toISOString();
+
   const prospect = await exportProspectScoutBundle();
   if(prospect) payload.prospectScout = prospect;
+
+  const intelligence = await exportIntelligenceBundle();
+  if(intelligence) payload.intelligence = intelligence;
+
   await downloadFile(`baqeri-backup-${stamp}.json`, JSON.stringify(payload, null, 2), 'application/json');
   showToast('فایل بکاپ آماده شد');
 }
@@ -183,7 +344,19 @@ function validateBackupShape(parsed){
   // still passes, while a JSON missing a whole section (e.g. no "invoices"
   // key at all) is now correctly rejected instead of silently wiping that
   // section to [] on restore.
-  return arrays.every(k => Array.isArray(parsed[k]));
+  if(!arrays.every(k => Array.isArray(parsed[k]))) return false;
+
+  // Optional intelligence section: if present it must be a plain object whose
+  // known stores (when present) are arrays. Malformed intelligence must not
+  // pass validation and must not cause a partial restore later.
+  if(parsed.intelligence != null){
+    if(typeof parsed.intelligence !== 'object' || Array.isArray(parsed.intelligence)) return false;
+    const intel = parsed.intelligence;
+    if(intel.occurrences != null && !Array.isArray(intel.occurrences)) return false;
+    if(intel.seller_feedback != null && !Array.isArray(intel.seller_feedback)) return false;
+    if(intel.baseline_cache != null && !Array.isArray(intel.baseline_cache)) return false;
+  }
+  return true;
 }
 
 async function importBackupJSON(file){
@@ -201,6 +374,11 @@ async function importBackupJSON(file){
       const pSnap = await exportProspectScoutBundle();
       if(pSnap) await dbPut(PRERESTORE_PROSPECT_KEY, JSON.stringify(pSnap));
     }catch(e){ console.error('prospect pre-restore snapshot failed', e); }
+    // اسنپ‌شات Intelligence فعلی برای Undo (حتی اگر فایل بکاپ Intelligence نداشته باشد)
+    try{
+      const iSnap = await exportIntelligenceBundle();
+      if(iSnap) await dbPut(PRERESTORE_INTELLIGENCE_KEY, JSON.stringify(iSnap));
+    }catch(e){ console.error('intelligence pre-restore snapshot failed', e); }
 
     // FIX 4: keep the previous in-memory data so a failed save doesn't leave
     // the app running on an unsaved/half-applied dataset.
@@ -215,6 +393,11 @@ async function importBackupJSON(file){
     // فقط اگر بکاپ جدید شامل prospectScout باشد جایگزین می‌شود؛ بکاپ قدیمی Prospect فعلی را دست نمی‌زند
     if(parsed.prospectScout){
       await restoreProspectScoutBundle(parsed.prospectScout);
+    }
+    // فقط اگر بکاپ شامل intelligence باشد جایگزین می‌شود.
+    // بکاپ قدیمی CRM-only → Intelligence فعلی دستگاه دست‌نخورده می‌ماند.
+    if(parsed.intelligence){
+      await restoreIntelligenceBundle(parsed.intelligence);
     }
     render();
     showToast('اطلاعات با موفقیت بازیابی شد');
@@ -248,6 +431,12 @@ async function undoLastRestore(){
         await restoreProspectScoutBundle(JSON.parse(pSnap.value));
       }
     }catch(e){ console.error('prospect undo restore failed', e); }
+    try{
+      const iSnap = await dbGet(PRERESTORE_INTELLIGENCE_KEY);
+      if(iSnap && iSnap.value){
+        await restoreIntelligenceBundle(JSON.parse(iSnap.value));
+      }
+    }catch(e){ console.error('intelligence undo restore failed', e); }
     render();
     showToast('به حالت قبل از بازیابی برگشت');
   }catch(e){
