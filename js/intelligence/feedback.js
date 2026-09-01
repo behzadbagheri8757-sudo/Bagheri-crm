@@ -34,12 +34,19 @@
 
   var REASON_MODIFIERS = {
     competitor_bought: 20,
-    still_stock: -30
+    still_stock: -30,
+    // V1 No-Purchase Reason — neutral modifiers (data collection only)
+    no_need: 0,
+    price_issue: 0,
+    liquidity: 0
   };
 
   var REASON_ACTION_HINT = {
     competitor_bought: 'احتمال خرید از رقیب',
-    still_stock: 'موجودی نزد مشتری'
+    still_stock: 'موجودی نزد مشتری',
+    no_need: 'فعلاً نیاز ندارد',
+    price_issue: 'قیمت مناسب نیست',
+    liquidity: 'نقدینگی ندارد'
   };
 
   // in-memory list of feedback records
@@ -137,7 +144,12 @@
     if (db) _idbHydrate(function () {});
   });
 
-  function recordFeedback(customerId, productId, signalCategory, reasonCode, comment) {
+  /**
+   * Record structured seller feedback.
+   * Optional 6th arg `source` (e.g. 'visit' | 'invoice') is additive and
+   * ignored by older callers. Does not affect scoring — only metadata.
+   */
+  function recordFeedback(customerId, productId, signalCategory, reasonCode, comment, source) {
     if (!customerId || !signalCategory) return null;
     var rec = {
       id: _uid(),
@@ -148,6 +160,9 @@
       comment: comment || '',
       createdAt: _nowISO()
     };
+    if (source != null && source !== '') {
+      rec.source = String(source);
+    }
     _mem.push(rec);
     _saveLS();
     _idbPut(rec);
