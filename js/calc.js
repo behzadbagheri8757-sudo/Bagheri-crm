@@ -393,9 +393,19 @@ function _behaviorReturnPayments(cid){
     .filter(p => p && p.method === 'return');
 }
 
-function _behaviorReturnsInRange(returns, startISO, endISO){
+function _behaviorReturnsInRange(returns, startISO, endISO, invs){
+  // Attribute a sales return to the original invoice period when the return
+  // carries invoiceId. A return made today for an old invoice must not reduce
+  // the current 30-day sales window. Legacy/unlinked returns retain the old
+  // date-based behavior because their original sale cannot be recovered.
+  const invoiceDates = {};
+  (invs || []).forEach(inv=>{
+    if(inv && inv.id != null && inv.date) invoiceDates[inv.id] = inv.date;
+  });
   return returns.reduce((s, p)=>{
-    const d = p.date || '';
+    const d = (p && p.invoiceId != null && invoiceDates[p.invoiceId])
+      ? invoiceDates[p.invoiceId]
+      : (p.date || '');
     if(startISO && d < startISO) return s;
     if(endISO && d > endISO) return s;
     return s + (p.amount || 0);
@@ -534,9 +544,9 @@ function customerBehavior(cid){
   const d60 = _behaviorISODaysAgo(60);
   const d90 = _behaviorISODaysAgo(90);
   const d31 = _behaviorISODaysAgo(31);
-  const sales30 = _behaviorSalesInRange(invs, d30, today) - _behaviorReturnsInRange(returns, d30, today);
-  const sales90 = _behaviorSalesInRange(invs, d90, today) - _behaviorReturnsInRange(returns, d90, today);
-  const salesPrev30 = _behaviorSalesInRange(invs, d60, d31) - _behaviorReturnsInRange(returns, d60, d31);
+  const sales30 = _behaviorSalesInRange(invs, d30, today) - _behaviorReturnsInRange(returns, d30, today, invs);
+  const sales90 = _behaviorSalesInRange(invs, d90, today) - _behaviorReturnsInRange(returns, d90, today, invs);
+  const salesPrev30 = _behaviorSalesInRange(invs, d60, d31) - _behaviorReturnsInRange(returns, d60, d31, invs);
 
   let amountTrend = null;
   if(count >= 2){

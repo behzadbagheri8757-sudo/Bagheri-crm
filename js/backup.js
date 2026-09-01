@@ -162,12 +162,121 @@ async function restoreProspectScoutBundle(bundle){
   }
 }
 
+
+// ---------- Intelligence backup / restore ----------
+// Intelligence keeps its own IndexedDB database and localStorage mirrors.
+// The CRM backup therefore carries a point-in-time snapshot of all three
+// Intelligence stores. Restore uses one readwrite transaction inside the
+// Intelligence DB, and the caller keeps a CRM + Intelligence pre-restore
+// snapshot so a failure in either phase can be compensated by rollback.
+const INTELLIGENCE_DB_NAME = 'bagheri_intelligence_db';
+const INTELLIGENCE_DB_VERSION = 3;
+const INTELLIGENCE_STORE_NAMES = ['occurrences', 'baseline_cache', 'seller_feedback'];
+const INTELLIGENCE_LS_KEYS = {
+  occurrences: 'bagheri_intelligence_occurrences',
+  baseline_cache: 'bagheri_intelligence_baseline_cache',
+  seller_feedback: 'bagheri_intelligence_seller_feedback'
+};
+
+function openIntelligenceDbForBackup(){
+  return new Promise((resolve, reject)=>{
+    try{
+      const req = indexedDB.open(INTELLIGENCE_DB_NAME, INTELLIGENCE_DB_VERSION);
+      req.onupgradeneeded = (e)=>{
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains('occurrences')) db.createObjectStore('occurrences',{keyPath:'key'});
+        if(!db.objectStoreNames.contains('baseline_cache')) db.createObjectStore('baseline_cache',{keyPath:'key'});
+        if(!db.objectStoreNames.contains('seller_feedback')) db.createObjectStore('seller_feedback',{keyPath:'id'});
+      };
+      req.onsuccess = (e)=>resolve(e.target.result);
+      req.onerror = (e)=>reject(e.target.error || new Error('Intelligence DB open failed'));
+    }catch(e){ reject(e); }
+  });
+}
+
+function intelligenceGetAll(db, storeName){
+  return new Promise((resolve,reject)=>{
+    try{
+      const req = db.transaction(storeName,'readonly').objectStore(storeName).getAll();
+      req.onsuccess = ()=>resolve(req.result || []);
+      req.onerror = (e)=>reject(e.target.error || new Error('Intelligence read failed'));
+    }catch(e){ reject(e); }
+  });
+}
+
+async function exportIntelligenceState(){
+  const out = {version: INTELLIGENCE_DB_VERSION, occurrences: [], baseline_cache: [], seller_feedback: []};
+  let localOk = false;
+  // Intelligence modules synchronously update these mirrors before their async
+  // IndexedDB writes. Prefer them when present so an immediately-created DB
+  // cannot accidentally overwrite a fresher in-memory/localStorage snapshot.
+  try{
+    const rawOcc = localStorage.getItem(INTELLIGENCE_LS_KEYS.occurrences);
+    const rawBase = localStorage.getItem(INTELLIGENCE_LS_KEYS.baseline_cache);
+    const rawFb = localStorage.getItem(INTELLIGENCE_LS_KEYS.seller_feedback);
+    if(rawOcc != null || rawBase != null || rawFb != null){
+      const occ = rawOcc ? JSON.parse(rawOcc) : {};
+      const base = rawBase ? JSON.parse(rawBase) : {};
+      const fb = rawFb ? JSON.parse(rawFb) : [];
+      if(occ && typeof occ === 'object') Object.keys(occ).forEach(k=>out.occurrences.push({key:k,dates:Array.isArray(occ[k])?occ[k]:[]}));
+      if(base && typeof base === 'object') Object.keys(base).forEach(k=>{ if(base[k]) out.baseline_cache.push(base[k]); });
+      if(Array.isArray(fb)) out.seller_feedback = fb;
+      localOk = true;
+    }
+  }catch(e){ /* fall through to IndexedDB */ }
+  if(localOk) return out;
+
+  try{
+    const db = await openIntelligenceDbForBackup();
+    const [occ, base, fb] = await Promise.all(INTELLIGENCE_STORE_NAMES.map(n=>intelligenceGetAll(db,n)));
+    try{ db.close(); }catch(e){}
+    out.occurrences = occ;
+    out.baseline_cache = base;
+    out.seller_feedback = fb;
+  }catch(e){
+    // Optional Intelligence state must not make a legacy/empty CRM backup fail.
+  }
+  return out;
+}
+
+function restoreIntelligenceState(state){
+  return new Promise(async (resolve,reject)=>{
+    if(!state || typeof state !== 'object') return resolve(false);
+    let db = null;
+    try{
+      db = await openIntelligenceDbForBackup();
+      const tx = db.transaction(INTELLIGENCE_STORE_NAMES,'readwrite');
+      tx.oncomplete = ()=>{
+        try{
+          const occMap = {};
+          (state.occurrences||[]).forEach(r=>{ if(r && r.key) occMap[r.key]=Array.isArray(r.dates)?r.dates:[]; });
+          const baseMap = {};
+          (state.baseline_cache||[]).forEach(r=>{ if(r && r.key) baseMap[r.key]=r; });
+          localStorage.setItem(INTELLIGENCE_LS_KEYS.occurrences, JSON.stringify(occMap));
+          localStorage.setItem(INTELLIGENCE_LS_KEYS.baseline_cache, JSON.stringify(baseMap));
+          localStorage.setItem(INTELLIGENCE_LS_KEYS.seller_feedback, JSON.stringify(Array.isArray(state.seller_feedback)?state.seller_feedback:[]));
+          try{ db.close(); }catch(e){}
+          resolve(true);
+        }catch(e){ try{db.close();}catch(_e){} reject(e); }
+      };
+      tx.onerror = (e)=>{ try{db.close();}catch(_e){} reject(e.target.error || tx.error || new Error('Intelligence restore failed')); };
+      tx.onabort = ()=>{ try{db.close();}catch(_e){} reject(tx.error || new Error('Intelligence restore aborted')); };
+      INTELLIGENCE_STORE_NAMES.forEach(name=>tx.objectStore(name).clear());
+      (state.occurrences||[]).forEach(r=>tx.objectStore('occurrences').put(r));
+      (state.baseline_cache||[]).forEach(r=>tx.objectStore('baseline_cache').put(r));
+      (state.seller_feedback||[]).forEach(r=>tx.objectStore('seller_feedback').put(r));
+    }catch(e){ if(db){try{db.close();}catch(_e){}} reject(e); }
+  });
+}
+
 async function exportBackupJSON(){
   const stamp = todayISO();
   // سازگاری: همان فیلدهای data در ریشه؛ prospectScout اختیاری و اضافه
   const payload = JSON.parse(JSON.stringify(data));
   const prospect = await exportProspectScoutBundle();
   if(prospect) payload.prospectScout = prospect;
+  // Intelligence state is part of the backup contract from this version on.
+  payload.intelligenceState = await exportIntelligenceState();
   await downloadFile(`baqeri-backup-${stamp}.json`, JSON.stringify(payload, null, 2), 'application/json');
   showToast('فایل بکاپ آماده شد');
 }
@@ -196,6 +305,7 @@ async function importBackupJSON(file){
     }
     // safety net: keep a snapshot of what's about to be overwritten
     await dbPut(PRERESTORE_KEY, JSON.stringify(data));
+    const previousIntelligenceState = await exportIntelligenceState();
     // اسنپ‌شات Prospect فعلی برای Undo (حتی اگر فایل بکاپ Prospect نداشته باشد)
     try{
       const pSnap = await exportProspectScoutBundle();
@@ -208,9 +318,14 @@ async function importBackupJSON(file){
     data = normalizeData(parsed);
     try{
       await saveData();
-    }catch(saveErr){
+      if(parsed.intelligenceState){
+        await restoreIntelligenceState(parsed.intelligenceState);
+      }
+    }catch(restoreErr){
       data = previousData;
-      throw saveErr;
+      try{ await saveData(); }catch(rollbackCrmErr){ console.error('CRM restore rollback failed', rollbackCrmErr); }
+      try{ await restoreIntelligenceState(previousIntelligenceState); }catch(rollbackIntelErr){ console.error('Intelligence restore rollback failed', rollbackIntelErr); }
+      throw restoreErr;
     }
     // فقط اگر بکاپ جدید شامل prospectScout باشد جایگزین می‌شود؛ بکاپ قدیمی Prospect فعلی را دست نمی‌زند
     if(parsed.prospectScout){
@@ -268,7 +383,9 @@ async function autoBackupTick(){
   if(Date.now() - last < AUTO_BACKUP_INTERVAL_MS) return; // هنوز زوده، لازم نیست نسخه‌ی جدید بگیریم
   const ts = Date.now();
   const key = AUTO_BACKUP_PREFIX + ts;
-  await dbPut(key, JSON.stringify(data));
+  const autoPayload = JSON.parse(JSON.stringify(data));
+  autoPayload.intelligenceState = await exportIntelligenceState();
+  await dbPut(key, JSON.stringify(autoPayload));
   list.push({key, ts});
   while(list.length > AUTO_BACKUP_MAX){
     const old = list.shift();
@@ -287,11 +404,16 @@ async function restoreFromAutoBackup(key){
     // FIX 4: keep the previous in-memory data so a failed save doesn't leave
     // the app running on an unsaved/half-applied dataset.
     const previousData = data;
-    data = normalizeData(JSON.parse(snap.value));
+    const previousIntelligenceState = await exportIntelligenceState();
+    const autoParsed = JSON.parse(snap.value);
+    data = normalizeData(autoParsed);
     try{
       await saveData();
+      if(autoParsed.intelligenceState) await restoreIntelligenceState(autoParsed.intelligenceState);
     }catch(saveErr){
       data = previousData;
+      try{ await saveData(); }catch(rollbackCrmErr){ console.error('CRM auto-backup rollback failed', rollbackCrmErr); }
+      try{ await restoreIntelligenceState(previousIntelligenceState); }catch(rollbackIntelErr){ console.error('Intelligence auto-backup rollback failed', rollbackIntelErr); }
       throw saveErr;
     }
     render();
