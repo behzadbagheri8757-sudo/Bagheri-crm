@@ -7,8 +7,8 @@
  */
 'use strict';
 
-/* CHANGED: v31 -> v32 (UI polish: font path, iOS chrome/keyboard fixes) */
-const CACHE_NAME = 'baqeri-shell-v32';
+/* CHANGED: v32 -> v33 (sync precache with current index.html assets) */
+const CACHE_NAME = 'baqeri-shell-v33';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
@@ -61,7 +61,19 @@ const PRECACHE_URLS = [
   './icons/apple-touch-icon.png',
   './icons/icon-152.png',
   './logo-export.png',
-  './fonts/Vazirmatn[wght].woff2'
+  './fonts/Vazirmatn[wght].woff2',
+  './js/intelligence/persistence.js',
+  './js/intelligence/feedback.js',
+  './js/intelligence/baseline_manager.js',
+  './js/intelligence/seasonality.js',
+  './js/intelligence/interpretation.js',
+  './js/intelligence/signals.js',
+  './js/intelligence/sku_intelligence.js',
+  './js/intelligence/risk.js',
+  './js/intelligence/priority.js',
+  './js/intelligence/action.js',
+  './js/intelligence/watch_lifecycle.js',
+  './js/views/watches.js',
 ];
 
 /** Critical SPA shell/assets that must exist for install to be considered successful. */
