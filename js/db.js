@@ -1,5 +1,5 @@
 /* db.js — IndexedDB, normalizeData, loadData, saveData
-   Phase 0 extract: no logic changes. DB_NAME/store/keys unchanged.
+   Freeze blocker fix: recover any interrupted cross-subsystem restore before load.
 */
 // ---------- IndexedDB layer ----------
 // Chosen over localStorage because: async (never blocks the UI thread on an
@@ -401,19 +401,29 @@ function normalizeData(parsed){
   const d = emptyData();
   if(!parsed || typeof parsed !== 'object') return d;
   // نسخه‌ی ورودی را فقط برای لاگ/عیب‌یابی نگه می‌داریم؛ نبودش یعنی بکاپ قدیمی (نسخه ۱)
-  const inputSchemaVersion = parsed.schemaVersion || 1;
-  d.invoiceSeq = parsed.invoiceSeq || 1000;
+  const inputSchemaVersion = Number(parsed.schemaVersion) || 1;
+  // Backups can originate from JSON editors, older app builds, or external
+  // tooling where numeric fields are represented as strings. Normalize every
+  // financial/inventory quantity at the data boundary so downstream arithmetic
+  // can never accidentally fall into JS string concatenation.
+  const num = (v, fallback=0) => {
+    if(v === null || v === undefined || v === '') return fallback;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const optNum = (v) => (v === null || v === undefined || v === '' ? v : num(v));
+  d.invoiceSeq = num(parsed.invoiceSeq || 1000, 1000);
   d.products = (parsed.products||[]).map(p=>({
     id: p.id||uid(),
     name: p.name||'',
     category: p.category||'',
-    packageWeight: p.packageWeight||0,
-    buy: p.buy||0,
-    wholesale: (p.wholesale!==undefined? p.wholesale : p.sell) || 0,
-    retail: (p.retail!==undefined? p.retail : p.sell) || 0,
-    sell: p.sell || p.retail || 0,
-    stockQty: p.stockQty!==undefined ? p.stockQty : 0,
-    minStock: p.minStock||0,
+    packageWeight: num(p.packageWeight),
+    buy: num(p.buy),
+    wholesale: num((p.wholesale!==undefined && p.wholesale!==null && p.wholesale!=='' ? p.wholesale : p.sell)),
+    retail: num((p.retail!==undefined && p.retail!==null && p.retail!=='' ? p.retail : p.sell)),
+    sell: num(p.sell !== undefined && p.sell !== '' ? p.sell : p.retail),
+    stockQty: num(p.stockQty),
+    minStock: num(p.minStock),
     priceHistory: p.priceHistory||[],
     stockLog: p.stockLog||[],
     active: p.active!==false,
@@ -426,86 +436,69 @@ function normalizeData(parsed){
     address: c.address||'',
     region: c.region||'',
     route: c.route||'',
-    // generic Location System reference (js/location.js); legacy region/route
-    // strings above are untouched and never auto-converted into this.
     locationId: c.locationId!==undefined ? c.locationId : null,
     note: c.note||'',
-    openingBalance: c.openingBalance||0,
+    openingBalance: num(c.openingBalance),
     visits: c.visits||[],
     active: c.active!==false,
   }));
   d.invoices = (parsed.invoices||[]).map(i=>({
-    id:i.id||uid(), number:i.number, customerId:i.customerId, date:i.date,
+    id:i.id||uid(), number:optNum(i.number), customerId:i.customerId, date:i.date,
+    visitId: i.visitId || null,
     items:(i.items||[]).map(it=>({
-      productId:it.productId, name:it.name, qty:it.qty, price:it.price,
-      buyPrice:it.buyPrice||0, discount:it.discount||0, weight:it.weight||0,
+      productId:it.productId, name:it.name, qty:num(it.qty), price:num(it.price),
+      buyPrice:num(it.buyPrice), discount:num(it.discount), weight:num(it.weight),
     })),
-    total:i.total||0, discount:i.discount||0, discountType:i.discountType,
-    prevBalance:i.prevBalance, cashPaid:i.cashPaid||0, checkPaid:i.checkPaid||0,
-    cardPaid:i.cardPaid||0, transferPaid:i.transferPaid||0,
-    newBalance:i.newBalance,
+    total:num(i.total), discount:num(i.discount), discountType:i.discountType,
+    prevBalance:optNum(i.prevBalance), cashPaid:num(i.cashPaid), checkPaid:num(i.checkPaid),
+    cardPaid:num(i.cardPaid), transferPaid:num(i.transferPaid), newBalance:optNum(i.newBalance),
     editHistory:i.editHistory||[],
   }));
   d.payments = (parsed.payments||[]).map(p=>({
-    id:p.id||uid(), customerId:p.customerId, date:p.date, amount:p.amount,
+    id:p.id||uid(), customerId:p.customerId, date:p.date, amount:num(p.amount),
     method:p.method||'cash', invoiceId:p.invoiceId, note:p.note||'',
-    // برگشت‌های قدیمی این فیلد را ندارند => آرایه خالی => رفتار قبلی (فقط اصلاح حساب) دقیقاً حفظ می‌شود
     returnItems: Array.isArray(p.returnItems) ? p.returnItems.map(ri=>({
-      productId: ri.productId, name: ri.name||'', qty: ri.qty||0, price: ri.price||0,
+      productId: ri.productId, name: ri.name||'', qty:num(ri.qty), price:num(ri.price),
     })) : [],
   }));
   d.checks = (parsed.checks||[]).map(c=>({
-    id:c.id||uid(), customerId:c.customerId, amount:c.amount, dueDate:c.dueDate,
+    id:c.id||uid(), customerId:c.customerId, amount:num(c.amount), dueDate:c.dueDate,
     checkNumber:c.checkNumber||'', status:c.status||'pending', invoiceId:c.invoiceId,
   }));
   d.suppliers = (parsed.suppliers||[]).map(s=>({
     id:s.id||uid(), name:s.name||'', phone:s.phone||'',
-    openingBalance: s.openingBalance||0,
-    // FIX 1: archival/inactive flag only — never removes the supplier or its history.
-    // Same convention as products/customers (`active!==false` keeps old backups defaulting to active).
+    openingBalance: num(s.openingBalance),
     active: s.active!==false,
     purchases:(s.purchases||[]).map(p=>({
-      id:p.id||uid(), date:p.date, amount:p.amount, desc:p.desc||'', productId:p.productId||'', qty:p.qty||0,
-      items: Array.isArray(p.items) ? p.items.map(it=>({id:it.id||uid(), productId:it.productId||'', name:it.name||'', qty:it.qty||0, unitCost:it.unitCost||0, lineAmount:it.lineAmount||0})) : undefined,
-      returns:(p.returns||[]).map(r=>({
-        id:r.id||uid(), date:r.date||p.date, qty:r.qty||0, amount:r.amount||0,
-        items: Array.isArray(r.items) ? r.items.map(x=>({itemId:x.itemId, productId:x.productId||'', qty:x.qty||0, amount:x.amount||0})) : undefined,
-      })),
+      id:p.id||uid(), date:p.date, amount:num(p.amount), desc:p.desc||'', productId:p.productId||'', qty:num(p.qty),
+      items: Array.isArray(p.items) ? p.items.map(it=>({id:it.id||uid(), productId:it.productId||'', name:it.name||'', qty:num(it.qty), unitCost:num(it.unitCost), lineAmount:num(it.lineAmount)})) : undefined,
+      returns:(p.returns||[]).map(r=>{
+        const out = {
+          id:r.id||uid(), date:r.date||p.date, qty:num(r.qty), amount:num(r.amount),
+          items: Array.isArray(r.items) ? r.items.map(x=>({itemId:x.itemId, productId:x.productId||'', qty:num(x.qty), amount:num(x.amount)})) : undefined,
+        };
+        if(r.returnReason) out.returnReason = r.returnReason;
+        return out;
+      }),
     })),
-    payments:s.payments||[],
+    payments:Array.isArray(s.payments) ? s.payments.map(p=>({
+      ...p, amount:num(p.amount), faceAmount:optNum(p.faceAmount),
+    })) : [],
   }));
-  // shared Location System (regions/routes/neighborhoods) — additive, empty
-  // arrays for old backups that don't have them yet. No fuzzy matching, no
-  // automatic assignment; ids simply carry over unchanged.
   d.regions = (parsed.regions||[]).map(r=>({ id: r.id||uid(), name: r.name||'' }));
   d.routes = (parsed.routes||[]).map(r=>({ id: r.id||uid(), regionId: r.regionId||null, name: r.name||'' }));
   d.neighborhoods = (parsed.neighborhoods||[]).map(n=>({ id: n.id||uid(), routeId: n.routeId||null, name: n.name||'' }));
-  // inventory layers (FIFO)
-  // schema < 3 or missing/empty layers → build from real purchases (never claim empty=[] is migration)
   if(inputSchemaVersion >= 3 && Array.isArray(parsed.inventoryLayers) && parsed.inventoryLayers.length){
     d.inventoryLayers = parsed.inventoryLayers.map(l=>({
-      id: l.id||uid(),
-      purchaseId: l.purchaseId||null,
-      productId: l.productId,
-      itemId: l.itemId||null,
-      qtyOriginal: Number(l.qtyOriginal)||0,
-      qtyRemaining: Number(l.qtyRemaining)||0,
-      unitCost: Number(l.unitCost)||0,
-      status: l.status||'open',
-      source: l.source||'purchase',
-      date: l.date||'',
-      note: l.note||'',
+      id: l.id||uid(), purchaseId: l.purchaseId||null, productId: l.productId, itemId: l.itemId||null,
+      qtyOriginal:num(l.qtyOriginal), qtyRemaining:num(l.qtyRemaining), unitCost:num(l.unitCost),
+      status:l.status||'open', source:l.source||'purchase', date:l.date||'', note:l.note||'',
     }));
   } else {
     d.inventoryLayers = migrateBuildInventoryLayers(d);
   }
-  // اول لایه‌های legacy قبلی که با باگ میانگین purchase قیمت خورده‌اند را اصلاح کن
-  // (فقط unitCost/source/note؛ qty و purchase و فاکتور دست‌نخورده)
   repairMispricedLegacyLayers(d);
-  // سپس هر شکاف باقی‌مانده را با هزینهٔ تاریخی (نه میانگین purchase) بساز
   reconcileMissingInventoryLayers(d);
-
-  // invoice item costAllocations preserved when present (no rewrite of historical buyPrice)
   d.invoices = d.invoices.map((inv, idx)=>{
     const src = (parsed.invoices||[])[idx];
     if(!src) return inv;
@@ -513,32 +506,27 @@ function normalizeData(parsed){
       const sit = (src.items||[])[j];
       if(sit && Array.isArray(sit.costAllocations)){
         it.costAllocations = sit.costAllocations.map(a=>({
-          layerId: a.layerId||null,
-          qty: Number(a.qty)||0,
-          unitCost: Number(a.unitCost)||0,
-          cost: Number(a.cost)||0,
-          emergency: !!a.emergency,
+          layerId: a.layerId||null, qty:num(a.qty), unitCost:num(a.unitCost), cost:num(a.cost), emergency:!!a.emergency,
         }));
       }
-      if(sit && sit.cogs!==undefined) it.cogs = sit.cogs;
+      if(sit && sit.cogs!==undefined) it.cogs = num(sit.cogs);
       return it;
     });
     return inv;
   });
-
-  // بعد از migration و آماده‌سازی کامل داده، همیشه نسخه‌ی فعلی schema خروجی گرفته می‌شود
   d.schemaVersion = CURRENT_SCHEMA_VERSION;
   if(inputSchemaVersion !== CURRENT_SCHEMA_VERSION){
     console.log('normalizeData: migrated data from schemaVersion', inputSchemaVersion, 'to', CURRENT_SCHEMA_VERSION);
   }
   return d;
 }
-
 async function loadData(){
   try{
+    if(typeof _recoverPendingRestoreJournal === 'function') await _recoverPendingRestoreJournal();
     const record = await dbGet(RECORD_KEY);
     if(record && record.value){
       data = normalizeData(JSON.parse(record.value));
+      _lastPersistedData = JSON.parse(JSON.stringify(data));
     } else if(window.storage){
       // fallback: recover from an older window.storage-based save, if this
       // file was ever previously run inside a Claude artifact sandbox
@@ -562,10 +550,13 @@ async function saveData(){
   try{
     data.schemaVersion = CURRENT_SCHEMA_VERSION;
     await dbPut(RECORD_KEY, JSON.stringify(data));
+    _lastPersistedData = JSON.parse(JSON.stringify(data));
   }catch(e){
     console.error('save failed', e);
-    showToast('⚠️ ذخیره نشد، دوباره تلاش کن');
-    // Propagate failure so callers do not show success / close modal / navigate
+    // Global last-known-good rollback closes the remaining integrity gap for
+    // mutation paths that do not maintain their own previousData snapshot.
+    try{ data = JSON.parse(JSON.stringify(_lastPersistedData)); }catch(rollbackErr){ console.error('global save rollback failed', rollbackErr); }
+    showToast('⚠️ ذخیره نشد؛ تغییر انجام‌شده برگردانده شد');
     throw e;
   }
   // fire-and-forget: بکاپ خودکار کاملاً جدا از ذخیره‌ی اصلی اجرا می‌شود؛

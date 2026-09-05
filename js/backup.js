@@ -1,5 +1,5 @@
 /* backup.js — export/import JSON, auto-backup, undo restore, excel export
-   Phase 0 extract: no logic changes.
+   Freeze blocker fix: application-level restore journal + deep validation.
 */
 // ---------- backup / restore ----------
 async function downloadFile(filename, blobParts, mime){
@@ -33,6 +33,12 @@ async function downloadFile(filename, blobParts, mime){
 const PRERESTORE_PROSPECT_KEY = 'preRestoreProspect';
 /** کلید اسنپ‌شات Intelligence قبل از Restore (داخل همان baqeriDB، جدا از CRM) */
 const PRERESTORE_INTELLIGENCE_KEY = 'preRestoreIntelligence';
+/** کلید اسنپ‌شات هدف فروش ماهانه قبل از Restore */
+const PRERESTORE_TARGET_KEY = 'preRestoreSalesTarget';
+/** کلید اسنپ‌شات Watch Lifecycle قبل از Restore */
+const PRERESTORE_WATCH_KEY = 'preRestoreWatchLifecycle';
+/** کلید اسنپ‌شات Game Center قبل از Restore */
+const PRERESTORE_GAME_KEY = 'preRestoreGameState';
 
 /**
  * دسترسی مستقیم به ProspectScoutDB (بدون وابستگی به لود بودن prospect-db.js)
@@ -216,21 +222,29 @@ function intelligenceBackupGetAll(db, storeName){
 }
 
 async function exportIntelligenceBundle(){
+  let db = null;
   try{
-    const db = await openIntelligenceDbForBackup();
-    const occurrences = await intelligenceBackupGetAll(db, 'occurrences');
-    const seller_feedback = await intelligenceBackupGetAll(db, 'seller_feedback');
-    const baseline_cache = await intelligenceBackupGetAll(db, 'baseline_cache');
-    try{ db.close(); }catch(e){}
-    return {
-      dbVersion: INTELLIGENCE_DB_VERSION,
-      occurrences: occurrences || [],
-      seller_feedback: seller_feedback || [],
-      baseline_cache: baseline_cache || []
-    };
+    db = await openIntelligenceDbForBackup();
+    let occurrences = await intelligenceBackupGetAll(db, 'occurrences');
+    let seller_feedback = await intelligenceBackupGetAll(db, 'seller_feedback');
+    let baseline_cache = await intelligenceBackupGetAll(db, 'baseline_cache');
+    // localStorage is the synchronous mirror used by the Intelligence modules
+    // for immediate state. Prefer it when present so a backup taken immediately
+    // after a write cannot capture a stale async IDB mirror.
+    try{
+      const occRaw=localStorage.getItem(INTELLIGENCE_LS_KEYS.occurrences);
+      if(occRaw){ const map=JSON.parse(occRaw); if(map && typeof map==='object' && !Array.isArray(map)) occurrences=Object.keys(map).map(k=>({key:k,dates:Array.isArray(map[k])?map[k]:[]})); }
+      const fbRaw=localStorage.getItem(INTELLIGENCE_LS_KEYS.seller_feedback);
+      if(fbRaw){ const arr=JSON.parse(fbRaw); if(Array.isArray(arr)) seller_feedback=arr; }
+      const baseRaw=localStorage.getItem(INTELLIGENCE_LS_KEYS.baseline_cache);
+      if(baseRaw){ const map=JSON.parse(baseRaw); if(map && typeof map==='object' && !Array.isArray(map)) baseline_cache=Object.keys(map).map(k=>map[k]).filter(Boolean); }
+    }catch(lsErr){ console.warn('exportIntelligenceBundle localStorage mirror read failed',lsErr); }
+    return { dbVersion: INTELLIGENCE_DB_VERSION, occurrences: occurrences || [], seller_feedback: seller_feedback || [], baseline_cache: baseline_cache || [] };
   }catch(e){
     console.error('exportIntelligenceBundle failed', e);
     return null;
+  }finally{
+    if(db){ try{ db.close(); }catch(e){} }
   }
 }
 
@@ -316,11 +330,93 @@ async function restoreIntelligenceBundle(bundle){
   }
 }
 
+
+/* ============================================================
+   Watch Lifecycle backup / restore (bagheri_watch_db) — additive
+   ============================================================ */
+async function exportWatchLifecycleBundleForBackup(){
+  try{
+    if(typeof exportWatchLifecycleBundle === 'function'){
+      return await exportWatchLifecycleBundle();
+    }
+  }catch(e){
+    console.error('exportWatchLifecycleBundleForBackup failed', e);
+  }
+  return null;
+}
+
+async function restoreWatchLifecycleBundleForBackup(bundle){
+  try{
+    if(!bundle) return true;
+    if(typeof restoreWatchLifecycleBundle === 'function'){
+      return await restoreWatchLifecycleBundle(bundle);
+    }
+  }catch(e){
+    console.error('restoreWatchLifecycleBundleForBackup failed', e);
+    return false;
+  }
+  return true;
+}
+
+function _validateWatchLifecycleBundle(bundle){
+  if(!_isPlainObject(bundle)) return false;
+  if(bundle.version != null && Number(bundle.version) !== 1) return false;
+  if(!Array.isArray(bundle.occurrences)) return false;
+  for(const row of bundle.occurrences){
+    if(!_isPlainObject(row) || row.id == null || row.customerId == null || !row.watchCategory) return false;
+    if(row.status != null && !['active','resolved','dismissed'].includes(String(row.status))) return false;
+  }
+  return true;
+}
+
+async function exportGameStateForBackup(){
+  try{
+    if(typeof gameLoadMeta !== 'function' || typeof gameLoadLedger !== 'function') return null;
+    const gameMeta = await gameLoadMeta();
+    const gameLedger = await gameLoadLedger();
+    return { gameMeta: _deepClone(gameMeta), gameLedger: _deepClone(gameLedger) };
+  }catch(e){
+    console.error('exportGameStateForBackup failed', e);
+    return null;
+  }
+}
+
+async function restoreGameStateForBackup(game){
+  if(!game || !_validateGameState(game.gameMeta, game.gameLedger)) throw new Error('Game Center state invalid');
+  const metaKey = (typeof GAME_CONFIG !== 'undefined' && GAME_CONFIG.storage && GAME_CONFIG.storage.metaKey) || 'gameMeta';
+  const ledgerKey = (typeof GAME_CONFIG !== 'undefined' && GAME_CONFIG.storage && GAME_CONFIG.storage.ledgerKey) || 'gameLedger';
+  await dbPut(metaKey, _deepClone(game.gameMeta));
+  await dbPut(ledgerKey, _deepClone(game.gameLedger));
+  const actual = await exportGameStateForBackup();
+  if(!actual || _stableJson(actual)!==_stableJson(game)) throw new Error('Game Center restore verification failed');
+  return true;
+}
+
+function _validateGameState(meta, ledger){
+  if(!_isPlainObject(meta) || !Array.isArray(ledger)) return false;
+  if(meta.schemaVersion != null && (!Number.isInteger(Number(meta.schemaVersion)) || Number(meta.schemaVersion)<1)) return false;
+  if(meta.currentStreak != null && !_isFiniteNonNegative(meta.currentStreak)) return false;
+  if(meta.bestStreak != null && !_isFiniteNonNegative(meta.bestStreak)) return false;
+  if(meta.monthlyTargetClaimedFor != null && typeof meta.monthlyTargetClaimedFor !== 'string') return false;
+  if(meta.dailyQuestTargets != null && !_isPlainObject(meta.dailyQuestTargets)) return false;
+  const ids=new Set();
+  for(const e of ledger){
+    if(!_isPlainObject(e) || e.id==null || String(e.id)==='' || e.key==null || String(e.key)==='') return false;
+    const id=String(e.id); if(ids.has(id)) return false; ids.add(id);
+    if(e.xp != null && !Number.isFinite(Number(e.xp))) return false;
+    if(e.reversed != null && typeof e.reversed !== 'boolean') return false;
+    if(e.date != null && typeof e.date !== 'string') return false;
+  }
+  return true;
+}
+
 async function exportBackupJSON(){
   const stamp = todayISO();
   // سازگاری: همان فیلدهای data در ریشه؛ prospectScout و intelligence اختیاری و اضافه
   const payload = JSON.parse(JSON.stringify(data));
-  payload.backupFormatVersion = 2;
+  payload.backupFormatVersion = 3;
+  // Settings that affect the dashboard/game are part of the user-visible state.
+  payload.settings = { monthlySalesTarget: getMonthlySalesTarget() };
   payload.exportedAt = new Date().toISOString();
 
   const prospect = await exportProspectScoutBundle();
@@ -329,120 +425,480 @@ async function exportBackupJSON(){
   const intelligence = await exportIntelligenceBundle();
   if(intelligence) payload.intelligence = intelligence;
 
+  const watchLifecycle = await exportWatchLifecycleBundleForBackup();
+  if(watchLifecycle) payload.watchLifecycle = watchLifecycle;
+
+  const gameState = await exportGameStateForBackup();
+  if(!gameState) throw new Error('Game Center state unavailable; full backup was not created');
+  payload.gameMeta = gameState.gameMeta;
+  payload.gameLedger = gameState.gameLedger;
+
   await downloadFile(`baqeri-backup-${stamp}.json`, JSON.stringify(payload, null, 2), 'application/json');
   showToast('فایل بکاپ آماده شد');
 }
 
-function validateBackupShape(parsed){
-  if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-  const arrays = ['products','customers','invoices','payments','checks','suppliers'];
-  // FIX (independent audit, round 2): require ALL six known arrays to be
-  // present — not just "at least one" (previous FIX 2) or "undefined is ok"
-  // (original code). Every real backup produced by this app — old or new —
-  // always includes all six as arrays (even empty ones), because emptyData()
-  // and normalizeData() always populate them before export. So a real backup
-  // still passes, while a JSON missing a whole section (e.g. no "invoices"
-  // key at all) is now correctly rejected instead of silently wiping that
-  // section to [] on restore.
-  if(!arrays.every(k => Array.isArray(parsed[k]))) return false;
+function _isPlainObject(v){ return !!v && typeof v === 'object' && !Array.isArray(v); }
 
-  // Optional intelligence section: if present it must be a plain object whose
-  // known stores (when present) are arrays. Malformed intelligence must not
-  // pass validation and must not cause a partial restore later.
-  if(parsed.intelligence != null){
-    if(typeof parsed.intelligence !== 'object' || Array.isArray(parsed.intelligence)) return false;
-    const intel = parsed.intelligence;
-    if(intel.occurrences != null && !Array.isArray(intel.occurrences)) return false;
-    if(intel.seller_feedback != null && !Array.isArray(intel.seller_feedback)) return false;
-    if(intel.baseline_cache != null && !Array.isArray(intel.baseline_cache)) return false;
+/**
+ * Compatibility normalization for older backup envelopes.
+ * Mutates parsed in place so validate + restore see the current contract.
+ * Does not invent CRM financial data.
+ */
+function _normalizeBackupEnvelope(parsed){
+  if(!_isPlainObject(parsed)) return parsed;
+  // Older exports stored Intelligence under intelligenceState
+  if(parsed.intelligence == null && _isPlainObject(parsed.intelligenceState)){
+    parsed.intelligence = parsed.intelligenceState;
+  }
+  // Older Intelligence envelopes used `version`; current export uses `dbVersion`.
+  // Align shape so post-commit verification (exportIntelligenceBundle) does not
+  // false-negative on otherwise valid restores.
+  if(_isPlainObject(parsed.intelligence)){
+    var intel = parsed.intelligence;
+    if(intel.dbVersion == null && intel.version != null){
+      intel.dbVersion = Number(intel.version);
+    }
+    if(Object.prototype.hasOwnProperty.call(intel, 'version')){
+      delete intel.version;
+    }
+  }
+  return parsed;
+}
+
+/** Inventory layer sources produced by stock.js + db.js (including migration). */
+const _LAYER_SOURCES = new Set([
+  'purchase','manual-in','manual-adjust','sale-return','sale-revert',
+  'legacy-opening','migration-gap'
+]);
+
+function _isFiniteNonNegative(v){ return Number.isFinite(Number(v)) && Number(v) >= 0; }
+function _isIsoDateOnly(v){
+  if(typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(v + 'T00:00:00Z');
+  return !isNaN(d.getTime()) && d.toISOString().slice(0,10) === v;
+}
+function _isIsoTimestamp(v){
+  if(typeof v !== 'string' || !v) return false;
+  const d = new Date(v);
+  return !isNaN(d.getTime()) && /T/.test(v);
+}
+function _uniqueIds(arr){
+  const seen = new Set();
+  for(const row of arr){
+    if(!_isPlainObject(row) || row.id == null || String(row.id)==='') return false;
+    const id=String(row.id); if(seen.has(id)) return false; seen.add(id);
+  }
+  return true;
+}
+function _validateProspectBundle(bundle, customerIds, locationIds, currentSchema){
+  if(!_isPlainObject(bundle)) return false;
+  if(bundle.version != null && Number(bundle.version) !== 1) return false;
+  if(!Array.isArray(bundle.shops) || !Array.isArray(bundle.routes)) return false;
+  if(bundle.dailyTarget != null && !_isPlainObject(bundle.dailyTarget)) return false;
+  if(!_uniqueIds(bundle.shops) || !_uniqueIds(bundle.routes)) return false;
+  const routeIds = new Set(bundle.routes.map(r=>String(r.id)));
+  for(const r of bundle.routes){
+    if(typeof r.name !== 'string') return false;
+    if(r.createdAt != null && !_isIsoTimestamp(r.createdAt)) return false;
+    if(!Array.isArray(r.neighborhoods)) return false;
+    const nids=new Set();
+    for(const n of r.neighborhoods){
+      if(!_isPlainObject(n) || n.id==null || String(n.id)==='' || typeof n.name!=='string') return false;
+      const id=String(n.id); if(nids.has(id)) return false; nids.add(id);
+    }
+  }
+  for(const sh of bundle.shops){
+    // locationId is optional (legacy ProspectScout shops omit it; normalizeProspectShop defaults null)
+    const required=['name','routeId','neighborhoodId','status','createdAt','updatedAt','latestScore','latestRank','visits'];
+    if(currentSchema>=3){ for(const k of required){ if(!(k in sh)) return false; } }
+    if(typeof sh.name !== 'string') return false;
+    // Orphan routeId/neighborhoodId allowed when routes[] is empty or missing that id
+    // (legacy exports kept shop FKs after routes were cleared). Enforce only when present.
+    if(sh.routeId != null && routeIds.size && !routeIds.has(String(sh.routeId))) return false;
+    if(sh.neighborhoodId != null){
+      const r=sh.routeId!=null ? bundle.routes.find(x=>String(x.id)===String(sh.routeId)) : null;
+      if(r && !r.neighborhoods.some(n=>String(n.id)===String(sh.neighborhoodId))) return false;
+    }
+    if(sh.locationId != null && !locationIds.has(String(sh.locationId))) return false;
+    if(sh.linkedCustomerId != null && !customerIds.has(String(sh.linkedCustomerId))) return false;
+    if(sh.status != null && sh.status !== 'active' && sh.status !== 'converted') return false;
+    if(sh.createdAt != null && !_isIsoTimestamp(sh.createdAt)) return false;
+    if(sh.updatedAt != null && !_isIsoTimestamp(sh.updatedAt)) return false;
+    if(sh.latestScore != null && (!Number.isFinite(Number(sh.latestScore)) || Number(sh.latestScore)<0 || Number(sh.latestScore)>100)) return false;
+    if(sh.latestRank != null && !['A+','A','B','C','D'].includes(String(sh.latestRank))) return false;
+    if(!Array.isArray(sh.visits)) return false;
+    const vids=new Set();
+    for(const v of sh.visits){
+      if(!_isPlainObject(v) || v.id==null || String(v.id)==='') return false;
+      const vid=String(v.id); if(vids.has(vid)) return false; vids.add(vid);
+      if(v.date!=null && !_isIsoTimestamp(v.date)) return false;
+      if(v.answers!=null && !_isPlainObject(v.answers)) return false;
+      if(v.score!=null && (!Number.isFinite(Number(v.score)) || Number(v.score)<0 || Number(v.score)>100)) return false;
+      if(v.rank!=null && !['A+','A','B','C','D'].includes(String(v.rank))) return false;
+      if(v.scoringVersion!=null && (!Number.isInteger(Number(v.scoringVersion)) || Number(v.scoringVersion)<1)) return false;
+      if(v.tags!=null && !Array.isArray(v.tags)) return false;
+    }
+  }
+  if(bundle.dailyTarget != null){
+    const dt=bundle.dailyTarget;
+    if(typeof dt.date!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(dt.date)) return false;
+    if(!_isFiniteNonNegative(dt.target) || !_isFiniteNonNegative(dt.count)) return false;
+    if(!_isPlainObject(dt.hit) || !_isPlainObject(dt.lastMsg)) return false;
   }
   return true;
 }
 
+const _INTEL_CONFIRMED_CATEGORIES = new Set([
+  'PURCHASE_DECLINE_SEVERE','PURCHASE_DECLINE_MILD','PURCHASE_GROWTH','BEHIND_PATTERN',
+  'CONSECUTIVE_NO_ORDER','BASKET_SHRINK','KEY_PRODUCT_LOST','LONG_NO_VISIT','VISIT_OVERDUE',
+  'VISIT_CONVERSION_LOW','CHECK_BOUNCED','PAYMENT_OVERDUE','SKU_DELAY','SKU_QUANTITY_DROP',
+  'SKU_FREQUENCY_DROP','LINE_DROP','COMBINED_SKU_DETERIORATION','MULTI_SKU_DECLINE'
+]);
+const _INTEL_FEEDBACK_REASONS = new Set(['competitor_bought','still_stock','no_need','price_issue','liquidity']);
+const _INTEL_FEEDBACK_SOURCES = new Set(['visit','invoice']);
+const _INTEL_BASELINE_REASONS = new Set(['establish','shift']);
+function _validateIntelligenceBundle(bundle, customerIds, productIds){
+  if(!_isPlainObject(bundle)) return false;
+  if(bundle.dbVersion != null && Number(bundle.dbVersion) !== 3) return false;
+  for(const k of ['occurrences','seller_feedback','baseline_cache']) if(!Array.isArray(bundle[k])) return false;
+  const occKeys=new Set();
+  for(const row of bundle.occurrences){
+    if(!_isPlainObject(row) || typeof row.key!=='string' || !row.key) return false;
+    if(occKeys.has(row.key)) return false; occKeys.add(row.key);
+    if(!Array.isArray(row.dates)) return false;
+    const parts=row.key.split('|'); if(parts.length<2 || !parts[0] || !parts[1]) return false;
+    if(!customerIds.has(String(parts[0]))) return false;
+    if(!_INTEL_CONFIRMED_CATEGORIES.has(parts[1])) return false;
+    const pid=parts.slice(2).join('|');
+    if(pid && pid!=='multi' && !productIds.has(String(pid))) return false;
+    const dates=new Set();
+    for(const d of row.dates){ if(!_isIsoDateOnly(d) || dates.has(d)) return false; dates.add(d); }
+  }
+  const fbIds=new Set();
+  for(const f of bundle.seller_feedback){
+    if(!_isPlainObject(f) || typeof f.id!=='string' || !f.id) return false;
+    if(fbIds.has(f.id)) return false; fbIds.add(f.id);
+    if(!customerIds.has(String(f.customerId))) return false;
+    if(f.productId != null && f.productId !== '' && !productIds.has(String(f.productId))) return false;
+    if(typeof f.signalCategory!=='string' || !_INTEL_CONFIRMED_CATEGORIES.has(f.signalCategory)) return false;
+    if(f.reasonCode != null && !_INTEL_FEEDBACK_REASONS.has(String(f.reasonCode))) return false;
+    if(f.comment != null && typeof f.comment!=='string') return false;
+    if(!_isIsoTimestamp(f.createdAt)) return false;
+    if(f.source != null && !_INTEL_FEEDBACK_SOURCES.has(String(f.source))) return false;
+  }
+  const baseKeys=new Set();
+  for(const b of bundle.baseline_cache){
+    if(!_isPlainObject(b) || typeof b.key!=='string' || !b.key) return false;
+    if(baseKeys.has(b.key)) return false; baseKeys.add(b.key);
+    if(!customerIds.has(String(b.customerId)) || b.productId == null || !productIds.has(String(b.productId))) return false;
+    if(b.typicalCycle != null && !_isFiniteNonNegative(b.typicalCycle)) return false;
+    if(b.typicalQuantity != null && !_isFiniteNonNegative(b.typicalQuantity)) return false;
+    if(!Number.isInteger(Number(b.purchaseCount)) || Number(b.purchaseCount)<0) return false;
+    if(!_isIsoTimestamp(b.updatedAt)) return false;
+    if(b.reason != null && !_INTEL_BASELINE_REASONS.has(String(b.reason))) return false;
+    if(b.key !== String(b.customerId)+'|'+String(b.productId)) return false;
+  }
+  return true;
+}
+
+function validateBackupShape(parsed){
+  if(!_isPlainObject(parsed)) return false;
+  _normalizeBackupEnvelope(parsed);
+  const arrays = ['products','customers','invoices','payments','checks','suppliers'];
+  if(!arrays.every(k => Array.isArray(parsed[k]))) return false;
+  const schema = Number(parsed.schemaVersion || 1);
+  if(!Number.isInteger(schema) || schema<1 || schema>3) return false;
+  // schemaVersion 3 = CRM shape (inventoryLayers + location arrays).
+  // Envelope extras (settings / prospectScout / intelligence) are optional on
+  // older schema-3 files; validate when present.
+  if(schema >= 3){
+    if(!Array.isArray(parsed.inventoryLayers) || !Array.isArray(parsed.regions) || !Array.isArray(parsed.routes) || !Array.isArray(parsed.neighborhoods)) return false;
+  }
+  if(parsed.settings != null){
+    if(!_isPlainObject(parsed.settings)) return false;
+    if(parsed.settings.monthlySalesTarget != null && !_isFiniteNonNegative(parsed.settings.monthlySalesTarget)) return false;
+  }
+  if(!_uniqueIds(parsed.products) || !_uniqueIds(parsed.customers) || !_uniqueIds(parsed.invoices) || !_uniqueIds(parsed.payments) || !_uniqueIds(parsed.checks) || !_uniqueIds(parsed.suppliers)) return false;
+  const productIds=new Set(parsed.products.map(x=>String(x.id)));
+  const customerIds=new Set(parsed.customers.map(x=>String(x.id)));
+  const invoiceIds=new Set(parsed.invoices.map(x=>String(x.id)));
+  for(const inv of parsed.invoices){
+    if(!customerIds.has(String(inv.customerId)) || !Array.isArray(inv.items)) return false;
+    const invoiceNumericFields=['number','total','discount','prevBalance','cashPaid','checkPaid','cardPaid','transferPaid','newBalance'];
+    for(const k of invoiceNumericFields){ if(inv[k] != null && !Number.isFinite(Number(inv[k]))) return false; }
+    for(const it of inv.items){
+      if(!_isPlainObject(it) || it.productId==null || !productIds.has(String(it.productId))) return false;
+      for(const k of ['qty','price','buyPrice','discount','weight']){ if(it[k] != null && !Number.isFinite(Number(it[k]))) return false; }
+      if(it.costAllocations != null){
+        if(!Array.isArray(it.costAllocations)) return false;
+        for(const a of it.costAllocations){
+          if(!_isPlainObject(a)) return false;
+          for(const k of ['qty','unitCost','cost']){ if(a[k] != null && !Number.isFinite(Number(a[k]))) return false; }
+        }
+      }
+      if(it.cogs != null && !Number.isFinite(Number(it.cogs))) return false;
+    }
+  }
+  for(const pay of parsed.payments){
+    if(!customerIds.has(String(pay.customerId)) || (pay.invoiceId!=null && !invoiceIds.has(String(pay.invoiceId))) || !_isFiniteNonNegative(pay.amount)) return false;
+  }
+  for(const chk of parsed.checks){
+    if(!customerIds.has(String(chk.customerId)) || (chk.invoiceId!=null && !invoiceIds.has(String(chk.invoiceId))) || !_isFiniteNonNegative(chk.amount)) return false;
+  }
+  if(schema>=3){
+    const layerIds=new Set();
+    for(const l of parsed.inventoryLayers){
+      if(!_isPlainObject(l) || l.id==null || layerIds.has(String(l.id)) || !productIds.has(String(l.productId))) return false;
+      layerIds.add(String(l.id));
+      const src = l.source != null ? String(l.source) : 'purchase';
+      if(!_LAYER_SOURCES.has(src)) return false;
+      // purchase layers must reference a purchase; orphan layers (sale-return,
+      // legacy-opening, manual-*, etc.) legitimately have purchaseId null
+      if(src === 'purchase' && (l.purchaseId==null || String(l.purchaseId)==='')) return false;
+      if(!_isFiniteNonNegative(l.qtyOriginal) || !_isFiniteNonNegative(l.qtyRemaining) || Number(l.qtyRemaining)>Number(l.qtyOriginal) || !_isFiniteNonNegative(l.unitCost)) return false;
+      if(l.status!=null && !['open','depleted','voided'].includes(String(l.status))) return false;
+      if(l.date!=null && !_isIsoDateOnly(String(l.date).slice(0,10))) return false;
+    }
+    if(!_uniqueIds(parsed.regions) || !_uniqueIds(parsed.routes) || !_uniqueIds(parsed.neighborhoods)) return false;
+    const regionIds=new Set(parsed.regions.map(x=>String(x.id))), routeIds=new Set(parsed.routes.map(x=>String(x.id))), neighIds=new Set(parsed.neighborhoods.map(x=>String(x.id)));
+    for(const r of parsed.routes){ if(r.regionId==null || !regionIds.has(String(r.regionId))) return false; }
+    for(const n of parsed.neighborhoods){ if(n.routeId==null || !routeIds.has(String(n.routeId))) return false; }
+    for(const c of parsed.customers){ if(c.locationId!=null && !neighIds.has(String(c.locationId)) && !routeIds.has(String(c.locationId))) return false; }
+    if(parsed.prospectScout != null && !_validateProspectBundle(parsed.prospectScout, customerIds, new Set([...neighIds,...routeIds]), schema)) return false;
+    if(parsed.intelligence != null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)) return false;
+  } else {
+    if(parsed.prospectScout!=null && !_validateProspectBundle(parsed.prospectScout, customerIds, new Set(), schema)) return false;
+    if(parsed.intelligence!=null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)) return false;
+  }
+  // Optional Game Center state: when present it is validated and restored;
+  // older backups without these fields remain compatible and preserve current game state.
+  if(parsed.gameMeta != null || parsed.gameLedger != null){
+    if(!_validateGameState(parsed.gameMeta, parsed.gameLedger)) return false;
+  }
+  // Optional additive: invalid watchLifecycle must not reject whole backup
+  if(parsed.watchLifecycle != null && !_validateWatchLifecycleBundle(parsed.watchLifecycle)){
+    try{ console.warn('backup watchLifecycle invalid — ignoring'); }catch(_e){}
+    delete parsed.watchLifecycle;
+  }
+  return true;
+}
+
+const RESTORE_JOURNAL_KEY = 'restoreJournal_v2';
+
+function _deepClone(v){ return JSON.parse(JSON.stringify(v)); }
+function _stableValue(v){
+  if(Array.isArray(v)) return v.map(_stableValue);
+  if(v && typeof v==='object'){
+    const o={}; Object.keys(v).sort().forEach(k=>{ o[k]=_stableValue(v[k]); }); return o;
+  }
+  return v;
+}
+function _stableJson(v){ return JSON.stringify(_stableValue(v)); }
+
+async function _readTargetState(){
+  let localRaw=null, dbRaw=null;
+  try{ localRaw=localStorage.getItem(SALES_TARGET_KEY); }catch(e){}
+  try{ const r=await dbGet(SALES_TARGET_DB_KEY); dbRaw = r && Object.prototype.hasOwnProperty.call(r,'value') ? r.value : (r==null?null:r); }catch(e){}
+  return { value:getMonthlySalesTarget(), localRaw, dbRaw };
+}
+async function _restoreTargetState(s){
+  if(!s || typeof s!=='object') throw new Error('invalid target snapshot');
+  _monthlySalesTargetCache = Math.max(0, Number(s.value)||0);
+  if(typeof localStorage!=='undefined' && localStorage){
+    if(s.localRaw == null) localStorage.removeItem(SALES_TARGET_KEY); else localStorage.setItem(SALES_TARGET_KEY, String(s.localRaw));
+  }
+  if(s.dbRaw == null) await dbDelete(SALES_TARGET_DB_KEY);
+  else await dbPut(SALES_TARGET_DB_KEY, s.dbRaw);
+}
+async function _writeTargetValue(value){
+  const n=Math.max(0,Number(value)||0);
+  _monthlySalesTargetCache=n;
+  try{ localStorage.setItem(SALES_TARGET_KEY,String(n)); }catch(e){ throw new Error('sales target localStorage write failed'); }
+  await dbPut(SALES_TARGET_DB_KEY,n);
+}
+async function restoreProspectScoutBundleStrict(bundle){
+  if(!_validateProspectBundle(bundle, new Set((data.customers||[]).map(x=>String(x.id))), new Set([...(data.neighborhoods||[]).map(x=>String(x.id)), ...(data.routes||[]).map(x=>String(x.id))]), Number(data.schemaVersion||3))) throw new Error('Prospect bundle validation failed');
+  const db=await openProspectScoutDbForBackup();
+  try{ await runProspectRestoreTx(db,bundle); } finally { try{db.close();}catch(e){} }
+  return true;
+}
+async function restoreIntelligenceBundleStrict(bundle){
+  if(!_validateIntelligenceBundle(bundle,new Set((data.customers||[]).map(x=>String(x.id))),new Set((data.products||[]).map(x=>String(x.id))))) throw new Error('Intelligence bundle validation failed');
+  const db=await openIntelligenceDbForBackup();
+  try{
+    await runIntelligenceRestoreTx(db,bundle);
+  }finally{ try{db.close();}catch(e){} }
+  // localStorage mirrors are part of Intelligence state; failures are fatal.
+  const occMap=Object.create(null); (bundle.occurrences||[]).forEach(r=>{occMap[r.key]=r.dates.slice();});
+  const baseMap=Object.create(null); (bundle.baseline_cache||[]).forEach(r=>{baseMap[r.key]=r;});
+  localStorage.setItem(INTELLIGENCE_LS_KEYS.occurrences,JSON.stringify(occMap));
+  localStorage.setItem(INTELLIGENCE_LS_KEYS.seller_feedback,JSON.stringify(bundle.seller_feedback||[]));
+  localStorage.setItem(INTELLIGENCE_LS_KEYS.baseline_cache,JSON.stringify(baseMap));
+  return true;
+}
+
+async function _snapshotRestoreState(){
+  const prospect=await exportProspectScoutBundle();
+  const intelligence=await exportIntelligenceBundle();
+  const game=await exportGameStateForBackup();
+  if(!prospect || !intelligence || !game) throw new Error('complete subsystem snapshot unavailable');
+  return {
+    data:_deepClone(data),
+    prospect:_deepClone(prospect),
+    intelligence:_deepClone(intelligence),
+    target:await _readTargetState(),
+    game:_deepClone(game)
+  };
+}
+async function _applyCrmSnapshot(snapshotData){
+  const next=normalizeData(_deepClone(snapshotData));
+  await dbPut(RECORD_KEY, JSON.stringify(next));
+  data=next;
+  if(typeof _lastPersistedData!=='undefined') _lastPersistedData=_deepClone(next);
+}
+async function _restoreSnapshot(snapshot){
+  await _applyCrmSnapshot(snapshot.data);
+  if(!await restoreProspectScoutBundleStrict(snapshot.prospect)) throw new Error('Prospect restore failed');
+  if(!await restoreIntelligenceBundleStrict(snapshot.intelligence)) throw new Error('Intelligence restore failed');
+  await _restoreTargetState(snapshot.target);
+  await restoreGameStateForBackup(snapshot.game);
+}
+async function _readCurrentSemanticState(){
+  const game=await exportGameStateForBackup();
+  if(!game) throw new Error('Game Center state unavailable');
+  return {data:_deepClone(data), prospect:await exportProspectScoutBundle(), intelligence:await exportIntelligenceBundle(), target:await _readTargetState(), game:_deepClone(game)};
+}
+function _semanticStateEqual(a,b){ return _stableJson(a)===_stableJson(b); }
+
+async function _recoverPendingRestoreJournal(){
+  const rec=await dbGet(RESTORE_JOURNAL_KEY);
+  if(!rec || !rec.value) return {ok:true, recovered:false};
+  let journal;
+  try{ journal=JSON.parse(rec.value); }catch(e){ throw new Error('restore journal is corrupted'); }
+  if(!journal || journal.version!==2 || !journal.snapshot) throw new Error('restore journal is invalid');
+  try{
+    await _restoreSnapshot(journal.snapshot);
+    const actual=await _readCurrentSemanticState();
+    if(!_semanticStateEqual(actual,journal.snapshot)) throw new Error('journal recovery verification failed');
+    await dbDelete(RESTORE_JOURNAL_KEY);
+    return {ok:true,recovered:true};
+  }catch(e){
+    console.error('Pending restore recovery failed; journal retained for retry',e);
+    throw new Error('بازیابی ایمن اطلاعات ناقص است؛ برنامه بدون ادامه‌ی کار متوقف شد. دوباره برنامه را باز کنید.');
+  }
+}
+
+async function _restoreParsedBackup(parsed){
+  const previous=await _snapshotRestoreState();
+  const targetValue = parsed.settings && Object.prototype.hasOwnProperty.call(parsed.settings,'monthlySalesTarget')
+    ? Math.max(0,Number(parsed.settings.monthlySalesTarget)||0) : previous.target.value;
+  const journal={version:2,status:'committing',createdAt:new Date().toISOString(),snapshot:previous,target:{value:targetValue}};
+  await dbPut(RESTORE_JOURNAL_KEY, JSON.stringify(journal));
+  try{
+    // Preserve the user-visible Undo Restore snapshot only after the durable
+    // journal exists, and before the first destructive commit.
+    await dbPut(PRERESTORE_KEY, JSON.stringify(previous.data));
+    await dbPut(PRERESTORE_PROSPECT_KEY, JSON.stringify(previous.prospect));
+    await dbPut(PRERESTORE_INTELLIGENCE_KEY, JSON.stringify(previous.intelligence));
+    await dbPut(PRERESTORE_TARGET_KEY, JSON.stringify(previous.target));
+    await dbPut(PRERESTORE_GAME_KEY, JSON.stringify(previous.game));
+    try{
+      const wSnap = await exportWatchLifecycleBundleForBackup();
+      if(wSnap) await dbPut(PRERESTORE_WATCH_KEY, JSON.stringify(wSnap));
+    }catch(_we){}
+    const nextData=normalizeData(_deepClone(parsed));
+    await dbPut(RECORD_KEY, JSON.stringify(nextData));
+    data=nextData;
+    if(typeof _lastPersistedData!=='undefined') _lastPersistedData=_deepClone(nextData);
+    if(parsed.prospectScout){ if(!await restoreProspectScoutBundleStrict(parsed.prospectScout)) throw new Error('Prospect restore failed'); }
+    if(parsed.intelligence){ if(!await restoreIntelligenceBundleStrict(parsed.intelligence)) throw new Error('Intelligence restore failed'); }
+    await _writeTargetValue(targetValue);
+    if(parsed.gameMeta != null || parsed.gameLedger != null){
+      if(!_validateGameState(parsed.gameMeta, parsed.gameLedger)) throw new Error('Game Center backup validation failed');
+      await restoreGameStateForBackup({gameMeta:_deepClone(parsed.gameMeta), gameLedger:_deepClone(parsed.gameLedger)});
+    }
+    const expectedGame = (parsed.gameMeta != null || parsed.gameLedger != null)
+      ? {gameMeta:_deepClone(parsed.gameMeta), gameLedger:_deepClone(parsed.gameLedger)}
+      : previous.game;
+    const expected={data:_deepClone(nextData),prospect:parsed.prospectScout ? _deepClone(parsed.prospectScout) : previous.prospect,intelligence:parsed.intelligence ? _deepClone(parsed.intelligence) : previous.intelligence,target:{value:targetValue,localRaw:String(targetValue),dbRaw:targetValue},game:expectedGame};
+    const actual=await _readCurrentSemanticState();
+    if(!_semanticStateEqual(actual,expected)) throw new Error('post-commit verification failed');
+    // Additive Watch Lifecycle restore (best-effort; not part of semantic journal equality)
+    try{
+      if(parsed.watchLifecycle){
+        await restoreWatchLifecycleBundleForBackup(parsed.watchLifecycle);
+      }
+    }catch(wErr){ console.warn('watchLifecycle restore skipped', wErr); }
+    await dbDelete(RESTORE_JOURNAL_KEY);
+    return true;
+  }catch(e){
+    console.error('restore commit failed; attempting journaled rollback',e);
+    try{
+      await _restoreSnapshot(previous);
+      const actual=await _readCurrentSemanticState();
+      if(!_semanticStateEqual(actual,previous)) throw new Error('rollback verification failed');
+      await dbDelete(RESTORE_JOURNAL_KEY);
+      return false;
+    }catch(re){
+      console.error('CRITICAL: restore rollback incomplete; journal retained',re);
+      try{ window.__bagheriRestoreRecoveryBlocked = true; }catch(_e){}
+      try{
+        if(typeof document !== 'undefined' && document.body){
+          document.body.innerHTML = '<div style="padding:28px 18px;text-align:center;direction:rtl;font-family:sans-serif;"><h2>بازیابی کامل نشد</h2><p style="line-height:1.8">برای جلوگیری از کار روی داده‌ی ناهماهنگ، برنامه متوقف شد. برنامه را دوباره باز کنید تا بازیابی ایمن خودکار انجام شود.</p></div>';
+        }
+      }catch(_e){}
+      throw new Error('بازیابی انجام نشد و بازگردانی کامل نشد؛ برنامه متوقف شد تا بازیابی ایمن انجام شود.');
+    }
+  }
+}
+
 async function importBackupJSON(file){
   try{
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    if(!validateBackupShape(parsed)){
-      showToast('این فایل، فایل بکاپ معتبری نیست');
-      return;
-    }
-    // safety net: keep a snapshot of what's about to be overwritten
-    await dbPut(PRERESTORE_KEY, JSON.stringify(data));
-    // اسنپ‌شات Prospect فعلی برای Undo (حتی اگر فایل بکاپ Prospect نداشته باشد)
-    try{
-      const pSnap = await exportProspectScoutBundle();
-      if(pSnap) await dbPut(PRERESTORE_PROSPECT_KEY, JSON.stringify(pSnap));
-    }catch(e){ console.error('prospect pre-restore snapshot failed', e); }
-    // اسنپ‌شات Intelligence فعلی برای Undo (حتی اگر فایل بکاپ Intelligence نداشته باشد)
-    try{
-      const iSnap = await exportIntelligenceBundle();
-      if(iSnap) await dbPut(PRERESTORE_INTELLIGENCE_KEY, JSON.stringify(iSnap));
-    }catch(e){ console.error('intelligence pre-restore snapshot failed', e); }
-
-    // FIX 4: keep the previous in-memory data so a failed save doesn't leave
-    // the app running on an unsaved/half-applied dataset.
-    const previousData = data;
-    data = normalizeData(parsed);
-    try{
-      await saveData();
-    }catch(saveErr){
-      data = previousData;
-      throw saveErr;
-    }
-    // فقط اگر بکاپ جدید شامل prospectScout باشد جایگزین می‌شود؛ بکاپ قدیمی Prospect فعلی را دست نمی‌زند
-    if(parsed.prospectScout){
-      await restoreProspectScoutBundle(parsed.prospectScout);
-    }
-    // فقط اگر بکاپ شامل intelligence باشد جایگزین می‌شود.
-    // بکاپ قدیمی CRM-only → Intelligence فعلی دستگاه دست‌نخورده می‌ماند.
-    if(parsed.intelligence){
-      await restoreIntelligenceBundle(parsed.intelligence);
-    }
-    render();
-    showToast('اطلاعات با موفقیت بازیابی شد');
+    const parsed=JSON.parse(await file.text());
+    _normalizeBackupEnvelope(parsed);
+    if(!validateBackupShape(parsed)){ showToast('این فایل، فایل بکاپ معتبر یا کامل نیست'); return; }
+    const ok=await _restoreParsedBackup(parsed);
+    if(ok){ render(); showToast('اطلاعات با موفقیت بازیابی شد'); }
+    else { render(); showToast('بازیابی انجام نشد؛ اطلاعات قبلی حفظ شد'); }
   }catch(e){
-    console.error(e);
-    showToast('فایل بکاپ معتبر نیست یا خراب است');
+    console.error('importBackupJSON failed',e);
+    showToast(e && e.message ? e.message : 'بازیابی انجام نشد');
   }
 }
 
 async function undoLastRestore(){
   try{
-    const snap = await dbGet(PRERESTORE_KEY);
-    if(!snap || !snap.value){ showToast('نسخه‌ی قبل از بازیابی موجود نیست'); return; }
-    // FIX 4: keep the previous in-memory data so a failed save doesn't leave
-    // the app running on an unsaved/half-applied dataset.
-    const previousData = data;
-    data = normalizeData(JSON.parse(snap.value));
+    const snap=await dbGet(PRERESTORE_KEY), pSnap=await dbGet(PRERESTORE_PROSPECT_KEY), iSnap=await dbGet(PRERESTORE_INTELLIGENCE_KEY), tSnap=await dbGet(PRERESTORE_TARGET_KEY), gSnap=await dbGet(PRERESTORE_GAME_KEY);
+    if(!snap || !snap.value || !pSnap || !pSnap.value || !iSnap || !iSnap.value || !tSnap || !tSnap.value || !gSnap || !gSnap.value){ showToast('نسخه‌ی کامل قبل از بازیابی موجود نیست'); return; }
+    const storedTarget=JSON.parse(tSnap.value);
+    const storedGame=JSON.parse(gSnap.value);
+    if(!_validateGameState(storedGame && storedGame.gameMeta, storedGame && storedGame.gameLedger)) throw new Error('Game Center pre-restore snapshot invalid');
+    const previous={data:JSON.parse(snap.value),prospect:JSON.parse(pSnap.value),intelligence:JSON.parse(iSnap.value),target:(storedTarget && typeof storedTarget==='object' && !Array.isArray(storedTarget)) ? storedTarget : {value:Math.max(0,Number(storedTarget)||0),localRaw:String(Math.max(0,Number(storedTarget)||0)),dbRaw:Math.max(0,Number(storedTarget)||0)},game:storedGame};
+    const current=await _snapshotRestoreState();
+    const journal={version:2,status:'undoing',createdAt:new Date().toISOString(),snapshot:current};
+    await dbPut(RESTORE_JOURNAL_KEY,JSON.stringify(journal));
     try{
-      await saveData();
-    }catch(saveErr){
-      data = previousData;
-      throw saveErr;
+      await _restoreSnapshot(previous);
+      const actual=await _readCurrentSemanticState();
+      if(!_semanticStateEqual(actual,previous)) throw new Error('undo verification failed');
+      try{
+        const wSnap = await dbGet(PRERESTORE_WATCH_KEY);
+        if(wSnap && wSnap.value){
+          await restoreWatchLifecycleBundleForBackup(JSON.parse(wSnap.value));
+        }
+      }catch(_wu){}
+      await dbDelete(RESTORE_JOURNAL_KEY); await dbDelete(PRERESTORE_KEY); await dbDelete(PRERESTORE_PROSPECT_KEY); await dbDelete(PRERESTORE_INTELLIGENCE_KEY); await dbDelete(PRERESTORE_TARGET_KEY); await dbDelete(PRERESTORE_GAME_KEY);
+      try{ await dbDelete(PRERESTORE_WATCH_KEY); }catch(_wd){}
+      render(); showToast('به حالت قبل از بازیابی برگشت');
+    }catch(e){
+      try{ await _restoreSnapshot(current); const actual=await _readCurrentSemanticState(); if(!_semanticStateEqual(actual,current)) throw new Error('undo rollback verification failed'); await dbDelete(RESTORE_JOURNAL_KEY); }catch(re){ console.error('CRITICAL undo rollback incomplete',re); throw new Error('بازگردانی Undo کامل نشد؛ برنامه را دوباره باز کنید.'); }
+      throw e;
     }
-    // FIX 3: the snapshot has now been successfully consumed — invalidate it so
-    // it can't remain permanently reusable / silently reapplied months later.
-    // Only removed AFTER a successful save (a failed save keeps it for recovery).
-    try{ await dbDelete(PRERESTORE_KEY); }catch(e){ console.error('pre-restore snapshot cleanup failed', e); }
-    try{
-      const pSnap = await dbGet(PRERESTORE_PROSPECT_KEY);
-      if(pSnap && pSnap.value){
-        await restoreProspectScoutBundle(JSON.parse(pSnap.value));
-      }
-    }catch(e){ console.error('prospect undo restore failed', e); }
-    try{
-      const iSnap = await dbGet(PRERESTORE_INTELLIGENCE_KEY);
-      if(iSnap && iSnap.value){
-        await restoreIntelligenceBundle(JSON.parse(iSnap.value));
-      }
-    }catch(e){ console.error('intelligence undo restore failed', e); }
-    render();
-    showToast('به حالت قبل از بازیابی برگشت');
-  }catch(e){
-    console.error(e);
-    showToast('بازگرداندن ممکن نشد');
-  }
+  }catch(e){ console.error('undoLastRestore failed',e); showToast(e.message || 'بازگرداندن انجام نشد'); }
+}
+
+function backupPayloadFromAutoOrFile(parsed){
+  return parsed && typeof parsed === 'object' ? parsed : null;
 }
 
 // ---------- بکاپ خودکار ساده (fire-and-forget، هیچ‌وقت نباید جلوی ذخیره‌ی اصلی را بگیرد) ----------
@@ -454,14 +910,30 @@ async function getAutoBackupList(){
 async function autoBackupTick(){
   const list = await getAutoBackupList();
   const last = list.length ? list[list.length-1].ts : 0;
-  if(Date.now() - last < AUTO_BACKUP_INTERVAL_MS) return; // هنوز زوده، لازم نیست نسخه‌ی جدید بگیریم
+  if(Date.now() - last < AUTO_BACKUP_INTERVAL_MS) return;
   const ts = Date.now();
   const key = AUTO_BACKUP_PREFIX + ts;
-  await dbPut(key, JSON.stringify(data));
+  const payload = JSON.parse(JSON.stringify(data));
+  payload.backupFormatVersion = 3;
+  payload.autoBackup = true;
+  payload.exportedAt = new Date().toISOString();
+  payload.settings = { monthlySalesTarget: getMonthlySalesTarget() };
+  const prospect = await exportProspectScoutBundle();
+  if(prospect) payload.prospectScout = prospect;
+  const intelligence = await exportIntelligenceBundle();
+  if(intelligence) payload.intelligence = intelligence;
+  const watchLifecycle = await exportWatchLifecycleBundleForBackup();
+  if(watchLifecycle) payload.watchLifecycle = watchLifecycle;
+  const gameState = await exportGameStateForBackup();
+  if(!gameState) throw new Error('auto backup payload missing Game Center state');
+  payload.gameMeta = gameState.gameMeta;
+  payload.gameLedger = gameState.gameLedger;
+  if(!validateBackupShape(payload)) throw new Error('auto backup payload validation failed');
+  await dbPut(key, JSON.stringify(payload));
   list.push({key, ts});
   while(list.length > AUTO_BACKUP_MAX){
     const old = list.shift();
-    try{ await dbDelete(old.key); }catch(e){ /* نبود یا حذف نشد، مهم نیست */ }
+    try{ await dbDelete(old.key); }catch(e){ /* retain metadata even if old blob is already gone */ }
   }
   await dbPut(AUTO_BACKUP_LIST_KEY, JSON.stringify(list));
 }
@@ -471,20 +943,9 @@ async function restoreFromAutoBackup(key){
   try{
     const snap = await dbGet(key);
     if(!snap || !snap.value){ showToast('این نسخه‌ی بکاپ پیدا نشد'); return; }
-    // مثل بازیابی از فایل: قبل از جایگزینی، وضعیت فعلی هم نگه داشته می‌شود
-    await dbPut(PRERESTORE_KEY, JSON.stringify(data));
-    // FIX 4: keep the previous in-memory data so a failed save doesn't leave
-    // the app running on an unsaved/half-applied dataset.
-    const previousData = data;
-    data = normalizeData(JSON.parse(snap.value));
-    try{
-      await saveData();
-    }catch(saveErr){
-      data = previousData;
-      throw saveErr;
-    }
-    render();
-    showToast('از بکاپ خودکار بازیابی شد');
+    const parsed = JSON.parse(snap.value);
+    const blob = new Blob([JSON.stringify(parsed)], {type:'application/json'});
+    await importBackupJSON({ text: async()=>await blob.text() });
   }catch(e){
     console.error(e);
     showToast('بازیابی از بکاپ خودکار ممکن نشد');

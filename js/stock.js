@@ -171,25 +171,68 @@ function revertPurchaseStockEffects(purchase){
 function applyPurchaseReturnStockEffects(purchase, returnLines, supplierName, date){
   const d = date || todayISO();
   const planned = [];
+  // Phase 1 — validate ALL lines against accounting + FIFO + stock BEFORE any mutation
   for(const rl of (returnLines||[])){
     if(!(rl.qty>0) || !rl.productId) continue;
+    const need = Number(rl.qty)||0;
+
+    // 1) Purchase accounting remaining (same purchase/line)
+    let acctRem;
+    if(typeof purchaseLineActualReturnableQty === 'function' && rl.itemId){
+      // full three-cap helper already includes acct; we still compute pieces for clear errors
+    }
+    if(rl.itemId && Array.isArray(purchase.items)){
+      const it = purchase.items.find(x=>x.id===rl.itemId);
+      const purchased = it ? (Number(it.qty)||0) : 0;
+      let returned = 0;
+      (purchase.returns||[]).forEach(r=>{
+        if(Array.isArray(r.items)){
+          r.items.forEach(x=>{
+            if(x.itemId===rl.itemId || (!x.itemId && x.productId===rl.productId)) returned += Number(x.qty)||0;
+          });
+        }
+      });
+      acctRem = Math.max(0, purchased - returned);
+    } else {
+      const purchased = Number(purchase.qty)||0;
+      const returned = (purchase.returns||[]).reduce((a,r)=>a+(Number(r.qty)||0),0);
+      acctRem = Math.max(0, purchased - returned);
+    }
+    if(typeof purchaseReturnRemainingQty === 'function' && !rl.itemId && purchase.productId){
+      acctRem = purchaseReturnRemainingQty(purchase);
+    }
+
+    // 2) Open FIFO layers for THIS purchase/line
     const layers = layersForPurchase(purchase.id, rl.productId, rl.itemId)
       .filter(l=>l.status==='open' && (l.qtyRemaining||0)>0)
       .sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-    let need = rl.qty;
-    let available = layers.reduce((s,l)=>s+(l.qtyRemaining||0),0);
-    if(need > available + 1e-9){
-      return { ok:false, error: 'مقدار برگشتی از موجودی باقی\u200cمانده لایه خرید بیشتر است (حداکثر '+available+')' };
+    const fifoRem = layers.reduce((s,l)=>s+(l.qtyRemaining||0),0);
+
+    // 3) Current product stock
+    const prod = data.products.find(x=>x.id===rl.productId);
+    const stockRem = prod ? Math.max(0, Number(prod.stockQty)||0) : 0;
+
+    const allowedQty = Math.max(0, Math.min(acctRem, fifoRem, stockRem));
+    if(need > allowedQty + 1e-9){
+      return {
+        ok:false,
+        error: 'مقدار برگشتی از موجودی قابل‌برگشت بیشتر است (حداکثر '+allowedQty+
+          ' — حسابداری: '+acctRem+'، FIFO: '+fifoRem+'، انبار: '+stockRem+')'
+      };
     }
+
+    // Plan FIFO takes (same allocation as before; no mutation yet)
+    let needPlan = need;
     const takes = [];
     for(const layer of layers){
-      if(need<=0) break;
-      const take = Math.min(layer.qtyRemaining, need);
+      if(needPlan<=0) break;
+      const take = Math.min(layer.qtyRemaining, needPlan);
       takes.push({ layer, take });
-      need -= take;
+      needPlan -= take;
     }
     planned.push({ rl, takes });
   }
+  // Phase 2 — mutate only after all lines validated
   planned.forEach(({rl, takes})=>{
     takes.forEach(({layer, take})=>{
       layer.qtyRemaining = (layer.qtyRemaining||0) - take;
@@ -721,3 +764,76 @@ function manualStockAdjustAbsolute(productId, targetQty, note){
   }
   return { ok:true, delta };
 }
+
+
+/**
+ * G4 UI: actual returnable qty for a purchase line under existing FIFO rules.
+ * Canonical source = open inventory layers for this purchase (same as
+ * applyPurchaseReturnStockEffects). Also capped by product.stockQty and
+ * accounting remaining (purchase qty − prior returns) so UI never promises
+ * more than stock validation will allow.
+ * Does NOT change FIFO/accounting behavior — display/validation helper only.
+ */
+function purchaseLineActualReturnableQty(purchase, itemId){
+  if(!purchase) return 0;
+  let productId = null;
+  let acctRem = 0;
+  if(itemId && Array.isArray(purchase.items)){
+    const it = purchase.items.find(function(x){ return x.id===itemId; });
+    if(!it || !it.productId) return 0;
+    productId = it.productId;
+    const purchased = Number(it.qty)||0;
+    let returned = 0;
+    (purchase.returns||[]).forEach(function(r){
+      if(Array.isArray(r.items)){
+        r.items.forEach(function(x){
+          if(x.itemId===itemId || (!x.itemId && x.productId===productId)){
+            returned += Number(x.qty)||0;
+          }
+        });
+      }
+    });
+    acctRem = Math.max(0, purchased - returned);
+  } else if(purchase.productId){
+    productId = purchase.productId;
+    const purchased = Number(purchase.qty)||0;
+    const returned = (purchase.returns||[]).reduce(function(a,r){ return a+(Number(r.qty)||0); },0);
+    acctRem = Math.max(0, purchased - returned);
+  } else {
+    return 0;
+  }
+  if(!(acctRem>0) || !productId) return 0;
+
+  let fifoRem = acctRem;
+  if(typeof layersForPurchase === 'function'){
+    const layers = layersForPurchase(purchase.id, productId, itemId || null)
+      .filter(function(l){ return l.status==='open' && (l.qtyRemaining||0)>0; });
+    fifoRem = layers.reduce(function(s,l){ return s+(Number(l.qtyRemaining)||0); }, 0);
+  }
+
+  let stockRem = fifoRem;
+  const prod = (typeof data !== 'undefined' && data.products)
+    ? data.products.find(function(p){ return p.id===productId; })
+    : null;
+  if(prod){
+    stockRem = Math.max(0, Number(prod.stockQty)||0);
+  }
+
+  return Math.max(0, Math.min(acctRem, fifoRem, stockRem));
+}
+
+/** Single-product purchase: actual returnable qty (FIFO + stock + accounting). */
+function purchaseActualReturnableQty(purchase){
+  if(!purchase) return 0;
+  if(purchase.productId){
+    return purchaseLineActualReturnableQty(purchase, null);
+  }
+  // multi: sum of lines
+  if(Array.isArray(purchase.items)){
+    return purchase.items.reduce(function(s,it){
+      return s + purchaseLineActualReturnableQty(purchase, it.id);
+    }, 0);
+  }
+  return 0;
+}
+

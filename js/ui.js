@@ -15,6 +15,40 @@ function enToFaDigits(str){
   const map = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
   return String(str).replace(/[0-9]/g, ch=>map[ch]||ch);
 }
+
+/* Final UI consistency: render visible numeric text in Persian digits across the app.
+   Inputs and stored data are untouched; this is display-only. */
+function normalizeVisibleDigits(root){
+  const target = root || document.getElementById('main') || document.body;
+  if(!target || typeof document === 'undefined') return;
+  const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+  const skip = new Set(['SCRIPT','STYLE','INPUT','TEXTAREA']);
+  const nodes = [];
+  let node;
+  while((node = walker.nextNode())){
+    const el = node.parentElement;
+    if(el && !skip.has(el.tagName) && /[0-9]/.test(node.nodeValue) && !/[A-Za-z]/.test(node.nodeValue)) nodes.push(node);
+  }
+  nodes.forEach(function(n){ n.nodeValue = enToFaDigits(n.nodeValue); });
+}
+
+(function bindVisibleDigitNormalization(){
+  function start(){
+    const target = document.body;
+    if(!target || typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(function(mutations){
+      mutations.forEach(function(m){
+        m.addedNodes && Array.from(m.addedNodes).forEach(function(n){
+          if(n.nodeType === 1 || n.nodeType === 3) normalizeVisibleDigits(n.nodeType === 1 ? n : n.parentElement);
+        });
+      });
+    });
+    observer.observe(target, {childList:true,subtree:true});
+    normalizeVisibleDigits(target);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true});
+  else start();
+})();
 function numVal(el){
   if(!el) return 0;
   // faToEnDigits جداکننده‌ها را حذف می‌کند تا parseFloat روی "4,000,000" مقدار 4000000 بدهد

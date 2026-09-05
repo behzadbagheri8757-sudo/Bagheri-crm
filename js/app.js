@@ -261,7 +261,7 @@ function renderBackup(main){
     </div>
 
     <h2 class="section-title">بکاپ‌های خودکار (داخل همین دستگاه)</h2>
-    <div class="empty" style="padding:0 0 8px;text-align:right;">هر حدود ۱۲ ساعت یک نسخه خودکار گرفته می‌شه و فقط ۵ نسخه‌ی آخر نگه داشته می‌شه. اینا جایگزین بکاپ دستی (بالا) نیستن، فقط یه شبکه‌ی ایمنی اضافه‌ن.</div>
+    <div class="empty" style="padding:0 0 8px;text-align:right;">هر حدود ۱۲ ساعت یک نسخه خودکار از داده‌های CRM، FIFO، هدف فروش، ProspectScout و Intelligence گرفته می‌شه و فقط ۵ نسخه‌ی آخر نگه داشته می‌شه. اینا جایگزین بکاپ دستی (بالا) نیستن، فقط یه شبکه‌ی ایمنی اضافه‌ن.</div>
     <div id="auto-backup-list"><div class="empty">در حال بارگذاری…</div></div>
   `;
   document.getElementById('export-json').addEventListener('click', exportBackupJSON);
@@ -875,9 +875,20 @@ function invoiceReturnAvailableQty(invoice, productId){
   );
 }
 
+/* Phase 1 UX patch — method is chosen by a direct tap (chip) instead of a
+   dropdown, and the rest of the form only appears once a method is picked
+   (sequential one-tap feel). Same 5 methods, same stored values, same
+   return-flow logic as before — only the method-selection widget changed. */
+const TX_METHOD_CHIPS = [
+  { value:'cash', label:'نقدی' },
+  { value:'card', label:'کارت' },
+  { value:'transfer', label:'انتقال' },
+  { value:'discount', label:'تخفیف' },
+  { value:'return', label:'برگشت از فروش' },
+];
 function openAddTransaction(cid){
   // وضعیت فرم بین رندرهای مجدد شیت نگه داشته می‌شود.
-  let method = 'cash';
+  let method = '';
   let amountStr = '';
   let dateStr = todayISO();
   let noteStr = '';
@@ -974,32 +985,31 @@ function openAddTransaction(cid){
 
   function renderSheet(){
     openSheet(`
-      <h3>ثبت تراکنش جدید</h3>
-      <div class="field">
-        <label>نوع تراکنش</label>
-        <select id="f-method">
-          <option value="cash" ${method==='cash'?'selected':''}>دریافت نقدی</option>
-          <option value="card" ${method==='card'?'selected':''}>دریافت با کارت</option>
-          <option value="transfer" ${method==='transfer'?'selected':''}>انتقال بانکی</option>
-          <option value="discount" ${method==='discount'?'selected':''}>تخفیف (کاهش بدهی)</option>
-          <option value="return" ${method==='return'?'selected':''}>برگشت از فروش</option>
-        </select>
+      <h3>ثبت تراکنش</h3>
+      <div class="q-block">
+        <div class="q-title">روش پرداخت</div>
+        <div class="chip-wrap">${TX_METHOD_CHIPS.map(o=>`<button type="button" class="chip-opt${method===o.value?' selected':''}" data-tx-method="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div>
       </div>
-      <div class="field"><label>تاریخ</label>${shamsiDateInputHTML('f-date', dateStr)}</div>
-      <div class="field"><label>مبلغ (تومان)</label><input id="f-amount" type="text" inputmode="decimal" value="${amountStr}"></div>
-      <div class="field"><label>توضیح (اختیاری)</label><input id="f-note" value="${esc(noteStr)}"></div>
-      ${returnItemsSectionHtml()}
-      <div class="btn-row"><button class="btn" id="save-tx">ثبت</button></div>
+      ${method ? `
+        <div class="field"><label>تاریخ</label>${shamsiDateInputHTML('f-date', dateStr)}</div>
+        <div class="field"><label>مبلغ (تومان)</label><input id="f-amount" type="text" inputmode="decimal" value="${amountStr}"></div>
+        <div class="field"><label>توضیح (اختیاری)</label><input id="f-note" value="${esc(noteStr)}"></div>
+        ${returnItemsSectionHtml()}
+        <div class="btn-row"><button class="btn" id="save-tx">ثبت</button></div>
+      ` : ''}
     `);
 
-    document.getElementById('f-method').addEventListener('change', e=>{
-      method = e.target.value;
-      if(method!=='return'){
-        selectedInvoiceId = '';
-        returnRows = [];
-      }
-      renderSheet();
+    document.querySelectorAll('[data-tx-method]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        method = btn.getAttribute('data-tx-method');
+        if(method!=='return'){
+          selectedInvoiceId = '';
+          returnRows = [];
+        }
+        renderSheet();
+      });
     });
+    if(!method) return;
     document.getElementById('f-date').addEventListener('input', e=>{ dateStr = e.target.value; });
     document.getElementById('f-amount').addEventListener('input', e=>{ amountStr = e.target.value; });
     document.getElementById('f-note').addEventListener('input', e=>{ noteStr = e.target.value; });
@@ -1134,6 +1144,62 @@ function openAddTransaction(cid){
   }
 
   renderSheet();
+}
+
+function openEditStandalonePayment(cid, paymentId){
+  const p = (data.payments||[]).find(x=>x.id===paymentId && x.customerId===cid);
+  if(!p || p.invoiceId || p.method==='return' || !['cash','card','transfer','discount'].includes(p.method)) return;
+  let method = p.method;
+  let dateStr = p.date || todayISO();
+  let amountStr = String(p.amount || '');
+  let noteStr = p.note || '';
+  openSheet(`
+    <h3>ویرایش دریافت</h3>
+    <div class="field"><label>نوع</label><select id="ep-method">
+      <option value="cash" ${method==='cash'?'selected':''}>دریافت نقدی</option>
+      <option value="card" ${method==='card'?'selected':''}>دریافت با کارت</option>
+      <option value="transfer" ${method==='transfer'?'selected':''}>انتقال بانکی</option>
+      <option value="discount" ${method==='discount'?'selected':''}>تخفیف</option>
+    </select></div>
+    <div class="field"><label>تاریخ</label>${shamsiDateInputHTML('ep-date', dateStr)}</div>
+    <div class="field"><label>مبلغ (تومان)</label><input id="ep-amount" type="text" inputmode="decimal" value="${esc(amountStr)}"></div>
+    <div class="field"><label>توضیح (اختیاری)</label><input id="ep-note" value="${esc(noteStr)}"></div>
+    <div class="btn-row"><button class="btn" id="ep-save">ذخیره</button><button class="btn danger secondary" id="ep-delete">حذف دریافت</button></div>
+  `);
+  document.getElementById('ep-method').addEventListener('change', e=>{ method=e.target.value; });
+  document.getElementById('ep-date').addEventListener('input', e=>{ dateStr=e.target.value; });
+  document.getElementById('ep-amount').addEventListener('input', e=>{ amountStr=e.target.value; });
+  document.getElementById('ep-note').addEventListener('input', e=>{ noteStr=e.target.value; });
+  document.getElementById('ep-save').addEventListener('click', async e=>{
+    await withSubmitGuard(e.currentTarget, async()=>{
+      const amount=numVal(document.getElementById('ep-amount'));
+      if(amount<=0){ showToast('مبلغ باید بیشتر از صفر باشد'); throw new Error('validation'); }
+      const previousData=JSON.parse(JSON.stringify(data));
+      try{
+        p.method=method; p.date=dateStr||todayISO(); p.amount=amount; p.note=(noteStr||'').trim();
+        await saveData();
+      }catch(err){ data=previousData; throw err; }
+      openCustomerDetail(cid); render(); showToast('دریافت ویرایش شد');
+    });
+  });
+  document.getElementById('ep-delete').addEventListener('click', async e=>{
+    await withSubmitGuard(e.currentTarget, async()=>{
+      if(!confirm('این دریافت از حساب مشتری حذف شود؟')) throw new Error('validation');
+      const previousData=JSON.parse(JSON.stringify(data));
+      try{
+        data.payments=data.payments.filter(x=>x.id!==paymentId);
+        await saveData();
+      }catch(err){ data=previousData; throw err; }
+      if (typeof gameOnPaymentDeleted === 'function') {
+        try {
+          await gameOnPaymentDeleted(paymentId);
+        } catch (e) {
+          console.warn('Game hook failed:', e);
+        }
+      }
+      openCustomerDetail(cid); render(); showToast('دریافت حذف شد');
+    });
+  });
 }
 
 function openAddCheck(cid){
@@ -1290,108 +1356,386 @@ function bindNoPurchasePrompt(cid){
   });
 }
 
+/* G1–G3 Visit capture: one-active-question cards.
+   Card1 Result → Card2 Product (direct chips) → Card3 Reaction →
+   (if rejected) Card4 Rejection reason →
+   (if still_stock) Card4b Stock source → Card «محصول دیگری؟».
+   offeredProducts only stores complete entries (product + reaction;
+   rejected requires rejectionReason; still_stock also requires stockSource).
+   Partial in-progress product is dropped on Save & Finish.
+   Backward-compatible: old visits without offeredProducts / stockSource OK.
+   Does not touch invoice/stock/FIFO. */
 function openAddVisit(cid){
-  const reasonOpts = (typeof VISIT_REASONS !== 'undefined' ? VISIT_REASONS : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
-  const oppOpts = (typeof VISIT_OPPORTUNITIES !== 'undefined' ? VISIT_OPPORTUNITIES : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
-  const threatOpts = (typeof VISIT_THREATS !== 'undefined' ? VISIT_THREATS : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
-  const nextOpts = (typeof VISIT_NEXT_ACTIONS !== 'undefined' ? VISIT_NEXT_ACTIONS : []).map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
-  const nprCandidates = getNoPurchaseCandidates(cid, null, 3);
-  const nprHtml = noPurchasePromptHtml(nprCandidates, 'visit', 'این مشتری معمولاً این محصول را می‌خرد — علت عدم خرید؟');
-  openSheet(`
-    <h3>ثبت ویزیت مشتری</h3>
-    <div class="field"><label>تاریخ</label>${shamsiDateInputHTML('f-date', todayISO())}</div>
-    <div class="field"><label>ساعت</label><input id="f-time" type="time" value="${nowHHMM()}"></div>
-    <div class="field">
-      <label>نتیجه ویزیت</label>
-      <select id="f-result">${VISIT_RESULTS.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select>
-    </div>
-    <div class="field"><label>یادداشت کوتاه (اختیاری)</label><input id="f-visit-note" placeholder="اختیاری" autocomplete="off"></div>
-    ${nprHtml}
-    <div class="btn-row" style="margin-bottom:8px;">
-      <button type="button" class="btn small secondary" id="toggle-visit-detail">جزئیات بیشتر</button>
-    </div>
-    <div id="visit-detail-block" style="display:none;">
-      <div class="field"><label>دلیل (مشاهده)</label>
-        <select id="f-visit-reason"><option value="">—</option>${reasonOpts}</select>
-      </div>
-      <div class="field"><label>فرصت (مشاهده)</label>
-        <select id="f-visit-opportunity"><option value="">—</option>${oppOpts}</select>
-      </div>
-      <div class="field"><label>تهدید (مشاهده)</label>
-        <select id="f-visit-threat"><option value="">—</option>${threatOpts}</select>
-      </div>
-      <div class="field"><label>اقدام بعدی</label>
-        <select id="f-visit-next"><option value="">—</option>${nextOpts}</select>
-      </div>
-      <div class="field"><label>برچسب‌ها (اختیاری، با ویرگول جدا کنید)</label>
-        <input id="f-visit-tags" placeholder="مثال: قیمت‌حساس، رقیب‌فعال" autocomplete="off">
-      </div>
-    </div>
-    <div class="btn-row"><button class="btn" id="save-visit">ثبت ویزیت</button></div>
-  `);
-  bindNoPurchasePrompt(cid);
-  const detailBtn = document.getElementById('toggle-visit-detail');
-  if(detailBtn){
-    detailBtn.addEventListener('click', ()=>{
-      const block = document.getElementById('visit-detail-block');
-      if(!block) return;
-      const open = block.style.display === 'none';
-      block.style.display = open ? 'block' : 'none';
-      detailBtn.textContent = open ? 'بستن جزئیات' : 'جزئیات بیشتر';
+  const RESULT_CHIPS = [
+    { value: VISIT_RESULTS[0], label: 'سفارش گرفته شد' },
+    { value: VISIT_RESULTS[1], label: 'سفارش گرفته نشد' },
+    { value: VISIT_RESULTS[2], label: 'بسته بود' },
+    { value: VISIT_RESULTS[3], label: 'سرکشی' },
+  ];
+  const REACTION_CHIPS = [
+    { value: 'accepted', label: 'قبول کرد' },
+    { value: 'rejected', label: 'رد کرد' },
+    { value: 'deferred', label: 'بعداً تصمیم می‌گیرد' },
+  ];
+  const REJECTION_REASON_CHIPS = [
+    { value: 'price', label: 'قیمت' },
+    { value: 'quality', label: 'کیفیت' },
+    { value: 'competitor', label: 'رقیب' },
+    { value: 'unavailable', label: 'موجود نبود' },
+    { value: 'no_need', label: 'نیاز نداشت' },
+    { value: 'still_stock', label: 'موجود داشت' },
+    { value: 'other', label: 'سایر' },
+  ];
+  const STOCK_SOURCE_CHIPS = [
+    { value: 'ours', label: 'از ما' },
+    { value: 'competitor', label: 'از رقیب' },
+    { value: 'unknown', label: 'نمی‌دانم' },
+  ];
+
+  const activeProducts = (data.products || []).filter(function (p) {
+    return p && p.active !== false && p.id;
+  });
+
+  const visitCustomer = (data.customers || []).find(function (x) { return x && x.id === cid; }) || null;
+  let visitBehavior = {};
+  try {
+    if (typeof customerBehavior === 'function') visitBehavior = customerBehavior(cid) || {};
+  } catch (eVisitContext) { visitBehavior = {}; }
+  let visitWatchCount = 0;
+  try {
+    if (typeof getActiveWatchOccurrences === 'function') {
+      visitWatchCount = (getActiveWatchOccurrences(cid) || []).length;
+    }
+  } catch (eVisitWatch) { visitWatchCount = 0; }
+  const lastVisitDate = visitBehavior.lastVisit && visitBehavior.lastVisit.date
+    ? faDate(visitBehavior.lastVisit.date)
+    : '—';
+  const lastInvoiceDate = visitBehavior.lastInvoiceDate
+    ? faDate(visitBehavior.lastInvoiceDate)
+    : '—';
+
+  function chipBtn(group, value, label){
+    return '<button type="button" class="chip-opt" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
+  }
+
+  openSheet(
+    '<h3>ثبت ویزیت</h3>' +
+    '<div class="visit-precontext">' +
+      '<div class="visit-precontext-title">' + esc(visitCustomer ? visitCustomer.name : 'مشتری') + '</div>' +
+      '<div class="visit-precontext-grid">' +
+        '<span>آخرین خرید: ' + esc(lastInvoiceDate) + '</span>' +
+        '<span>آخرین ویزیت: ' + esc(lastVisitDate) + '</span>' +
+        '<span>هشدار فعال: ' + esc(String(visitWatchCount)) + ' مورد</span>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;">' +
+      '<div class="field" style="flex:1;"><label>تاریخ</label>' + shamsiDateInputHTML('f-date', todayISO()) + '</div>' +
+      '<div class="field" style="flex:1;"><label>ساعت</label><input id="f-time" type="time" value="' + nowHHMM() + '"></div>' +
+    '</div>' +
+    '<div id="visit-card-stage" class="visit-card-stage" aria-live="polite"></div>' +
+    '<div class="field" style="margin-top:12px;"><label>یادداشت کوتاه (اختیاری)</label><input id="f-visit-note" placeholder="اختیاری" autocomplete="off"></div>' +
+    '<div class="btn-row visit-save-actions" style="margin-top:8px;">' +
+      '<button type="button" class="btn" id="save-visit">ثبت و پایان</button>' +
+      '<button type="button" class="btn secondary" id="save-visit-invoice">ثبت و ایجاد فاکتور</button>' +
+    '</div>'
+  );
+
+  const state = {
+    result: null,
+    offeredProducts: [], // complete only
+    pendingProductId: null,
+    pendingReaction: null,
+    pendingRejectionReason: null,
+    step: 'result', // result | product | reaction | rejectReason | stockSource | another | done
+  };
+  const stage = document.getElementById('visit-card-stage');
+
+  function validOffered(){
+    return (state.offeredProducts || []).filter(function (op) {
+      if (!op || !op.productId) return false;
+      if (op.reaction !== 'accepted' && op.reaction !== 'rejected' && op.reaction !== 'deferred') return false;
+      if (op.reaction === 'rejected' && !op.rejectionReason) return false;
+      // stockSource only valid/required with still_stock; other reasons must not carry it
+      if (op.reaction === 'rejected' && op.rejectionReason === 'still_stock') {
+        if (op.stockSource !== 'ours' && op.stockSource !== 'competitor' && op.stockSource !== 'unknown') return false;
+      }
+      return true;
+    }).map(function (op) {
+      // Data integrity: strip stockSource unless still_stock
+      if (op.reaction === 'rejected' && op.rejectionReason === 'still_stock') {
+        return {
+          productId: op.productId,
+          reaction: 'rejected',
+          rejectionReason: 'still_stock',
+          stockSource: op.stockSource,
+        };
+      }
+      if (op.reaction === 'rejected') {
+        return {
+          productId: op.productId,
+          reaction: 'rejected',
+          rejectionReason: op.rejectionReason,
+        };
+      }
+      return { productId: op.productId, reaction: op.reaction };
     });
   }
-  document.getElementById('save-visit').addEventListener('click', async (e)=>{
-    await withSubmitGuard(e.currentTarget, async ()=>{
-      const c = data.customers.find(x=>x.id===cid);
-      if(!c){ showToast('مشتری پیدا نشد'); return; }
-      const date = document.getElementById('f-date').value || todayISO();
-      const time = document.getElementById('f-time').value || nowHHMM();
-      const result = document.getElementById('f-result').value;
-      const noteEl = document.getElementById('f-visit-note');
-      const note = noteEl ? (noteEl.value || '').trim() : '';
-      const reasonEl = document.getElementById('f-visit-reason');
-      const oppEl = document.getElementById('f-visit-opportunity');
-      const threatEl = document.getElementById('f-visit-threat');
-      const nextEl = document.getElementById('f-visit-next');
-      const tagsEl = document.getElementById('f-visit-tags');
-      const reason = reasonEl ? (reasonEl.value || '').trim() : '';
-      const opportunity = oppEl ? (oppEl.value || '').trim() : '';
-      const threat = threatEl ? (threatEl.value || '').trim() : '';
-      const nextAction = nextEl ? (nextEl.value || '').trim() : '';
-      let tags = [];
-      if(tagsEl && tagsEl.value){
-        tags = String(tagsEl.value).split(/[,،]/).map(t=>t.trim()).filter(Boolean);
-      }
-      const visit = {
-        id: uid(),
-        date,
-        time,
-        result,
-        ordered: result === VISIT_RESULTS[0],
-      };
-      if(note) visit.note = note;
-      if(reason) visit.reason = reason;
-      if(opportunity) visit.opportunity = opportunity;
-      if(threat) visit.threat = threat;
-      if(nextAction) visit.nextAction = nextAction;
-      if(tags.length) visit.tags = tags;
-      c.visits = c.visits || [];
-      c.visits.push(visit);
-      await saveData();
-      // Game Center hook (derived only — never rolls back CRM)
-      if (typeof gameOnCustomerVisit === 'function') {
-        try {
-          await gameOnCustomerVisit(cid, visit.id, visit.date);
-        } catch (e) {
-          console.warn('Game hook failed:', e);
+
+  function productLabel(pid){
+    const p = (data.products || []).find(function (x) { return x.id === pid; });
+    return p ? (p.name || '—') : '—';
+  }
+
+  function renderStage(){
+    if (!stage) return;
+    let html = '';
+    const step = state.step;
+
+    if (step === 'result') {
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="result">' +
+          '<div class="q-title">نتیجه ویزیت؟</div>' +
+          '<div class="chip-wrap">' + RESULT_CHIPS.map(function (o) {
+            return chipBtn('result', o.value, o.label);
+          }).join('') + '</div>' +
+        '</div>';
+    } else if (step === 'product') {
+      const chosen = {};
+      (state.offeredProducts || []).forEach(function (op) { chosen[op.productId] = true; });
+      const avail = activeProducts.filter(function (p) { return !chosen[p.id]; });
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="product">' +
+          '<div class="q-title">چه محصولی پیشنهاد/بررسی شد؟</div>' +
+          (avail.length
+            ? '<div class="chip-wrap">' + avail.map(function (p) {
+                return chipBtn('product', p.id, p.name || '—');
+              }).join('') + '</div>'
+            : '<div class="empty" style="padding:12px 0;">همه محصولات فعال قبلاً ثبت شدند یا کالایی نیست.</div>') +
+        '</div>';
+    } else if (step === 'reaction') {
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="reaction">' +
+          '<div class="q-title">واکنش مشتری؟ <span class="sub" style="display:inline;font-weight:500;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
+          '<div class="chip-wrap">' + REACTION_CHIPS.map(function (o) {
+            return chipBtn('reaction', o.value, o.label);
+          }).join('') + '</div>' +
+        '</div>';
+    } else if (step === 'rejectReason') {
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="rejectReason">' +
+          '<div class="q-title">چرا نخرید؟ <span class="sub" style="display:inline;font-weight:500;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
+          '<div class="chip-wrap">' + REJECTION_REASON_CHIPS.map(function (o) {
+            return chipBtn('rejectReason', o.value, o.label);
+          }).join('') + '</div>' +
+        '</div>';
+    } else if (step === 'stockSource') {
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="stockSource">' +
+          '<div class="q-title">این موجودی از کجا بود؟ <span class="sub" style="display:inline;font-weight:500;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
+          '<div class="chip-wrap">' + STOCK_SOURCE_CHIPS.map(function (o) {
+            return chipBtn('stockSource', o.value, o.label);
+          }).join('') + '</div>' +
+        '</div>';
+    } else if (step === 'another') {
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="another">' +
+          '<div class="q-title">محصول دیگری هم مطرح شد؟</div>' +
+          '<div class="chip-wrap">' +
+            chipBtn('another', 'yes', 'بله') +
+            chipBtn('another', 'no', 'خیر') +
+          '</div>' +
+        '</div>';
+    } else if (step === 'done') {
+      const n = validOffered().length;
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="done">' +
+          '<div class="q-title">آماده ثبت</div>' +
+          '<div class="empty" style="padding:8px 0;text-align:right;">' +
+            (state.result ? ('نتیجه: ' + esc(state.result) + '<br>') : '') +
+            (n ? (n + ' محصول با واکنش کامل ثبت می‌شود.') : 'بدون محصول پیشنهادی (اختیاری).') +
+            '<br>برای ذخیره روی «ثبت و پایان» بزنید.' +
+          '</div>' +
+        '</div>';
+    }
+
+    stage.innerHTML = html;
+    bindStageChips();
+  }
+
+  function bindStageChips(){
+    if (!stage) return;
+    stage.querySelectorAll('.chip-opt').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const group = btn.getAttribute('data-vgroup');
+        const value = btn.getAttribute('data-value');
+        if (!group || value == null) return;
+
+        if (group === 'result') {
+          state.result = value;
+          state.pendingProductId = null;
+          state.pendingReaction = null;
+          state.step = 'product';
+          renderStage();
+          return;
         }
+        if (group === 'product') {
+          state.pendingProductId = value;
+          state.pendingReaction = null;
+          state.step = 'reaction';
+          renderStage();
+          return;
+        }
+        if (group === 'reaction') {
+          state.pendingReaction = value;
+          state.pendingRejectionReason = null;
+          if (value === 'rejected') {
+            state.step = 'rejectReason';
+            renderStage();
+            return;
+          }
+          if (state.pendingProductId && (value === 'accepted' || value === 'deferred')) {
+            state.offeredProducts.push({
+              productId: state.pendingProductId,
+              reaction: value,
+            });
+          }
+          state.pendingProductId = null;
+          state.pendingReaction = null;
+          state.pendingRejectionReason = null;
+          state.step = 'another';
+          renderStage();
+          return;
+        }
+        if (group === 'rejectReason') {
+          if (value === 'still_stock') {
+            state.pendingRejectionReason = 'still_stock';
+            state.step = 'stockSource';
+            renderStage();
+            return;
+          }
+          if (state.pendingProductId && state.pendingReaction === 'rejected' && value) {
+            // Non-still_stock reasons: never attach stockSource
+            state.offeredProducts.push({
+              productId: state.pendingProductId,
+              reaction: 'rejected',
+              rejectionReason: value,
+            });
+          }
+          state.pendingProductId = null;
+          state.pendingReaction = null;
+          state.pendingRejectionReason = null;
+          state.step = 'another';
+          renderStage();
+          return;
+        }
+        if (group === 'stockSource') {
+          if (
+            state.pendingProductId &&
+            state.pendingReaction === 'rejected' &&
+            state.pendingRejectionReason === 'still_stock' &&
+            (value === 'ours' || value === 'competitor' || value === 'unknown')
+          ) {
+            state.offeredProducts.push({
+              productId: state.pendingProductId,
+              reaction: 'rejected',
+              rejectionReason: 'still_stock',
+              stockSource: value,
+            });
+          }
+          state.pendingProductId = null;
+          state.pendingReaction = null;
+          state.pendingRejectionReason = null;
+          state.step = 'another';
+          renderStage();
+          return;
+        }
+        if (group === 'another') {
+          if (value === 'yes') {
+            state.pendingProductId = null;
+            state.pendingReaction = null;
+            state.pendingRejectionReason = null;
+            state.step = 'product';
+            renderStage();
+            return;
+          }
+          state.step = 'done';
+          renderStage();
+          persistVisit(true);
+          return;
+        }
+      });
+    });
+  }
+
+  async function persistVisit(auto){
+    const c = data.customers.find(function (x) { return x.id === cid; });
+    if (!c) {
+      showToast('مشتری پیدا نشد');
+      return false;
+    }
+    if (!state.result) {
+      showToast('نتیجه ویزیت را انتخاب کنید');
+      return false;
+    }
+    const dateEl = document.getElementById('f-date');
+    const timeEl = document.getElementById('f-time');
+    const noteEl = document.getElementById('f-visit-note');
+    const date = (dateEl && dateEl.value) || todayISO();
+    const time = (timeEl && timeEl.value) || nowHHMM();
+    const note = noteEl ? String(noteEl.value || '').trim() : '';
+
+    const offered = validOffered();
+
+    const visit = {
+      id: uid(),
+      date: date,
+      time: time,
+      result: state.result,
+      ordered: state.result === VISIT_RESULTS[0],
+    };
+    if (note) visit.note = note;
+    if (offered.length) visit.offeredProducts = offered;
+
+    c.visits = c.visits || [];
+    c.visits.push(visit);
+    try {
+      await saveData();
+    } catch (e) {
+      console.error(e);
+      showToast('ذخیره نشد');
+      return false;
+    }
+    if (typeof gameOnCustomerVisit === 'function') {
+      try {
+        await gameOnCustomerVisit(cid, visit.id, visit.date);
+      } catch (e) {
+        console.warn('Game hook failed:', e);
       }
-      closeModal();
-      if(typeof openCustomerDetail === 'function') openCustomerDetail(cid);
-      if(typeof render === 'function') render();
-      showToast('ویزیت ثبت شد');
+    }
+    closeModal();
+    if (typeof openCustomerDetail === 'function') openCustomerDetail(cid);
+    if (typeof ViewHost !== 'undefined' && ViewHost.refreshCurrent) ViewHost.refreshCurrent();
+    else if (typeof render === 'function') render();
+    showToast('ویزیت ثبت شد');
+    return true;
+  }
+
+  document.getElementById('save-visit').addEventListener('click', function (e) {
+    withSubmitGuard(e.currentTarget, function () {
+      return persistVisit(false);
     });
   });
+
+  document.getElementById('save-visit-invoice').addEventListener('click', function (e) {
+    withSubmitGuard(e.currentTarget, async function () {
+      const saved = await persistVisit(false);
+      if (saved && typeof openAddInvoice === 'function') {
+        openAddInvoice(cid);
+      }
+    });
+  });
+
+  renderStage();
 }
 
 function openCustomerDetail(cid){
@@ -1445,9 +1789,10 @@ function openCustomerDetail(cid){
     `).join('')}
 
     <h2 class="section-title">تراکنش‌ها</h2>
-    ${pays.length===0?`<div class="empty">تراکنشی ثبت نشده</div>`:pays.map(p=>`
-      <div class="ledger-row"><span class="name">${paymentMethodLabel(p.method)}${p.note?` <span class="sub" style="display:inline;">(${esc(p.note)})</span>`:''}</span><span class="filler"></span><span class="amount">${faDate(p.date)} — ${toman(p.amount)} ت</span></div>
-    `).join('')}
+    ${pays.length===0?`<div class="empty">تراکنشی ثبت نشده</div>`:pays.map(p=>{
+      const standalone = !p.invoiceId && p.method!=='return' && ['cash','card','transfer','discount'].includes(p.method);
+      return `<div class="ledger-row"><span class="name">${paymentMethodLabel(p.method)}${p.note?` <span class="sub" style="display:inline;">(${esc(p.note)})</span>`:''}</span><span class="filler"></span><span class="amount">${faDate(p.date)} — ${toman(p.amount)} ت${standalone?`<br><button class="btn secondary small" data-edit-standalone-payment="${esc(p.id)}">ویرایش</button><button class="btn danger small" data-delete-standalone-payment="${esc(p.id)}">حذف</button>`:''}</span></div>`;
+    }).join('')}
 
     <h2 class="section-title">چک‌ها</h2>
     ${checks.length===0?`<div class="empty">چکی ثبت نشده</div>`:checks.map(c2=>`
@@ -1480,6 +1825,28 @@ function openCustomerDetail(cid){
   });
   document.querySelectorAll('[data-open-invoice]').forEach(row=>{
     row.addEventListener('click', ()=>openInvoiceDetail(row.dataset.openInvoice, cid));
+  });
+  document.querySelectorAll('[data-edit-standalone-payment]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openEditStandalonePayment(cid, btn.dataset.editStandalonePayment));
+  });
+  document.querySelectorAll('[data-delete-standalone-payment]').forEach(btn=>{
+    btn.addEventListener('click', async e=>{
+      await withSubmitGuard(e.currentTarget, async()=>{
+        const p=data.payments.find(x=>x.id===btn.dataset.deleteStandalonePayment && x.customerId===cid);
+        if(!p || p.invoiceId || p.method==='return') return;
+        if(!confirm('این دریافت از حساب مشتری حذف شود؟')) throw new Error('validation');
+        const previousData=JSON.parse(JSON.stringify(data));
+        try{ data.payments=data.payments.filter(x=>x.id!==p.id); await saveData(); }catch(err){ data=previousData; throw err; }
+        if (typeof gameOnPaymentDeleted === 'function') {
+          try {
+            await gameOnPaymentDeleted(p.id);
+          } catch (e) {
+            console.warn('Game hook failed:', e);
+          }
+        }
+        openCustomerDetail(cid); render(); showToast('دریافت حذف شد');
+      });
+    });
   });
   document.querySelectorAll('[data-toggle-check]').forEach(row=>{
     row.addEventListener('click', async ()=>{
@@ -1672,7 +2039,9 @@ function openInvoiceForm(cid, editInv){
 
   function productDropListHtml(idx, query){
     const q = (query||'').trim();
-    const list = (q ? data.products.filter(p=>(p.name||'').includes(q)) : data.products).slice(0, 40);
+    // Inactive products (active===false) excluded from NEW invoice product selector only.
+    const activeOnly = data.products.filter(p=>p.active!==false);
+    const list = (q ? activeOnly.filter(p=>(p.name||'').includes(q)) : activeOnly).slice(0, 40);
     if(!list.length) return `<div class="prod-drop-empty">کالایی پیدا نشد</div>`;
     return list.map(p=>`
       <div class="prod-drop-item" data-row="${idx}" data-pid="${esc(p.id)}">
@@ -2279,6 +2648,38 @@ function openAddSupplier(){
   });
 }
 
+
+  /** G4: one-tap purchase-return reason (metadata only; no stock/FIFO impact). */
+function openPurchaseReturnReasonPicker(onPick){
+  const REASONS = [
+    { value: 'defective', label: 'خرابی' },
+    { value: 'deliveryError', label: 'اشتباه در ارسال' },
+    { value: 'overstock', label: 'مازاد کالا' },
+    { value: 'changeMind', label: 'تغییر نظر' },
+    { value: 'complaint', label: 'شکایت' },
+    { value: 'other', label: 'سایر' },
+  ];
+  openSheet(
+    '<h3>برگشت خرید</h3>' +
+    '<div class="visit-card visit-card-enter">' +
+      '<div class="q-title">علت مرجوعی؟</div>' +
+      '<div class="chip-wrap">' +
+        REASONS.map(function(r){
+          return '<button type="button" class="chip-opt" data-pr-reason="' + esc(r.value) + '">' + esc(r.label) + '</button>';
+        }).join('') +
+      '</div>' +
+    '</div>'
+  );
+  const root = document.getElementById('modalRoot');
+  root.querySelectorAll('[data-pr-reason]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const v = btn.getAttribute('data-pr-reason');
+      if(typeof onPick === 'function') onPick(v);
+    });
+  });
+}
+
+
 function openSupplierDetail(sid){
   if (typeof isSpaShell === 'function' && isSpaShell() && typeof AppRouter !== 'undefined' && AppRouter.navigate) {
     AppRouter.navigate('/supplier', { id: sid });
@@ -2349,7 +2750,7 @@ function openSupplierDetail(sid){
           <label>کالای مرتبط (اختیاری — برای افزایش خودکار موجودی)</label>
           <select id="f-product">
             <option value="">— بدون کالای مشخص —</option>
-            ${data.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+            ${data.products.filter(p=>p.active!==false).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>تعداد کالا (در صورت انتخاب کالا)</label><input id="f-qty" type="text" inputmode="decimal"></div>
@@ -2360,7 +2761,7 @@ function openSupplierDetail(sid){
         <div class="field" style="display:flex;gap:6px;">
           <select id="mi-product" style="flex:2;">
             <option value="">انتخاب کالا</option>
-            ${data.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+            ${data.products.filter(p=>p.active!==false).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}
           </select>
           <input id="mi-qty" type="text" inputmode="decimal" placeholder="تعداد" style="flex:1;">
           <input id="mi-price" type="text" inputmode="decimal" placeholder="قیمت واحد" style="flex:1;">
@@ -2661,10 +3062,18 @@ function openSupplierDetail(sid){
           <div class="field"><label>تاریخ برگشت</label>${shamsiDateInputHTML('f-ret-date', todayISO())}</div>
           <div id="ret-item-rows">
           ${p.items.map(it=>{
-            const remLineQty = purchaseLineRemainingQty(p, it.id);
+            const remLineQty = (typeof purchaseLineActualReturnableQty === 'function')
+              ? purchaseLineActualReturnableQty(p, it.id)
+              : purchaseLineRemainingQty(p, it.id);
+            if(remLineQty<=0){
+              return `<div class="field" style="opacity:.55;">
+              <label>${esc(it.name)} (خریداری‌شده: ${it.qty} — ۰ قابل‌برگشت؛ موجودی این خرید مصرف شده)</label>
+              <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="0" type="text" inputmode="decimal" disabled>
+            </div>`;
+            }
             return `<div class="field">
               <label>${esc(it.name)} (خریداری‌شده: ${it.qty}، حداکثر قابل‌برگشت: ${remLineQty})</label>
-              <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)" ${remLineQty<=0?'disabled':''}>
+              <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)">
             </div>`;
           }).join('')}
           </div>
@@ -2707,33 +3116,46 @@ function openSupplierDetail(sid){
           if(!confirm('با ثبت این برگشت، موجودی انبار و بدهی به تامین‌کننده اصلاح خواهد شد. ادامه می‌دهید؟')) throw new Error('validation');
           const totalQty = lineReturns.reduce((a,l)=>a+l.qty,0);
           const retLines = lineReturns.map(l=>({productId:l.productId, qty:l.qty, itemId:l.itemId}));
-          // اسنپ‌شات کامل قبل از هر mutation — همان الگوی ثبت/ویرایش فاکتور.
-          const previousData = JSON.parse(JSON.stringify(data));
-          const retResult = applyPurchaseReturnStockEffects(p, retLines, s.name, date);
-          if(!retResult.ok){ alert(retResult.error||'برگشت خرید ممکن نشد'); throw new Error('validation'); }
-          p.returns = p.returns||[];
-          p.returns.push({
-            id:uid(), date, qty:totalQty, amount:totalAmount,
-            items: lineReturns.map(l=>({itemId:l.itemId, productId:l.productId, qty:l.qty, amount:Math.round(l.qty*l.unitCost)})),
+          const lineItemsSnap = lineReturns.map(l=>({itemId:l.itemId, productId:l.productId, qty:l.qty, amount:Math.round(l.qty*l.unitCost)}));
+          // G4: reason required for NEW purchase returns (one reason per return transaction)
+          openPurchaseReturnReasonPicker(async function(returnReason){
+            await withSubmitGuard(document.getElementById('save-return'), async ()=>{
+              const previousData = JSON.parse(JSON.stringify(data));
+              const retResult = applyPurchaseReturnStockEffects(p, retLines, s.name, date);
+              if(!retResult.ok){ alert(retResult.error||'برگشت خرید ممکن نشد'); throw new Error('validation'); }
+              p.returns = p.returns||[];
+              p.returns.push({
+                id:uid(), date, qty:totalQty, amount:totalAmount,
+                items: lineItemsSnap,
+                returnReason: returnReason,
+              });
+              try{
+                await saveData();
+              }catch(saveErr){
+                data = previousData;
+                throw saveErr;
+              }
+              openSupplierDetail(sid); render(); showToast('برگشت خرید ثبت شد');
+            });
           });
-          try{
-            await saveData();
-          }catch(saveErr){
-            data = previousData;
-            throw saveErr;
-          }
-          openSupplierDetail(sid); render(); showToast('برگشت خرید ثبت شد');
           });
         });
         return;
       }
+      // G4: single-item max = actual returnable (accounting ∩ FIFO ∩ stock), same as SPA
+      const remainingQtyActual = (typeof purchaseActualReturnableQty === 'function')
+        ? purchaseActualReturnableQty(p)
+        : remainingQty;
       openSheet(`
         <h3>برگشت خرید از ${esc(s.name)}</h3>
         <div class="empty" style="padding:0 0 8px;text-align:right;">${faDate(p.date)}${p.productId?` — ${esc((data.products.find(x=>x.id===p.productId)||{}).name||'')}`:''}${retLinesLabel} — مبلغ کل: ${toman(p.amount)} ت${p.productId?` (${p.qty})`:''}${returnedAmountSoFar>0?` — قبلاً برگشت‌شده: ${toman(returnedAmountSoFar)} ت`:''}</div>
         <div class="field"><label>تاریخ برگشت</label>${shamsiDateInputHTML('f-ret-date', todayISO())}</div>
-        ${p.productId?`<div class="field"><label>مقدار برگشتی (حداکثر ${remainingQty})</label><input id="f-ret-qty" type="text" inputmode="decimal"></div>`:''}
-        <div class="field"><label>مبلغ برگشتی (تومان، حداکثر ${toman(remainingAmount)})</label><input id="f-ret-amount" type="text" inputmode="decimal"></div>
-        <div class="btn-row"><button class="btn" id="save-return">ثبت برگشت</button></div>
+        ${p.productId?(remainingQtyActual>0
+          ?`<div class="field"><label>مقدار برگشتی (حداکثر ${remainingQtyActual})</label><input id="f-ret-qty" type="text" inputmode="decimal"></div>`
+          :`<div class="empty" style="padding:8px 0;text-align:right;">موجودی قابل‌برگشت از این خرید: ۰ (همه مصرف/فروخته شده)</div>`)
+          :''}
+        <div class="field"><label>مبلغ برگشتی (تومان، حداکثر ${toman(remainingAmount)})</label><input id="f-ret-amount" type="text" inputmode="decimal" ${p.productId&&remainingQtyActual<=0?'disabled':''}></div>
+        <div class="btn-row"><button class="btn" id="save-return" ${p.productId&&remainingQtyActual<=0?'disabled':''}>ثبت برگشت</button></div>
       `);
       if(p.productId){
         document.getElementById('f-ret-qty').addEventListener('input', ()=>{
@@ -2749,7 +3171,9 @@ function openSupplierDetail(sid){
         if(amount<=0){ showToast('مبلغ برگشتی رو وارد کن'); throw new Error('validation'); }
         if(p.productId && qty<=0){ showToast('مقدار برگشتی رو وارد کن'); throw new Error('validation'); }
         // اعتبارسنجی یکسان با helper مشترک (تک‌قلمی و چندقلمی)
-        const liveRemainingQty = purchaseReturnRemainingQty(p);
+        const liveRemainingQty = (typeof purchaseActualReturnableQty === 'function' && p.productId)
+          ? purchaseActualReturnableQty(p)
+          : purchaseReturnRemainingQty(p);
         const liveRemainingAmount = purchaseReturnRemainingAmount(p);
         if(qty>0 && qty>liveRemainingQty){
           alert('مقدار برگشتی از باقیمانده‌ی قابل‌برگشت این خرید بیشتره.\n\nباقیمانده قابل‌برگشت: '+liveRemainingQty);
@@ -2764,21 +3188,25 @@ function openSupplierDetail(sid){
         }
         if(amount>liveRemainingAmount){ alert('مبلغ برگشتی از مبلغ باقیمانده‌ی این خرید بیشتره.\n\nمبلغ باقیمانده قابل‌برگشت: '+toman(liveRemainingAmount)+' تومان'); throw new Error('validation'); }
         if(!confirm((p.productId?'با ثبت این برگشت، موجودی انبار و بدهی به تامین‌کننده اصلاح خواهد شد.':'با ثبت این برگشت، فقط بدهی به تامین‌کننده کم می‌شود (موجودی خودکار اصلاح نمی‌شود).')+' ادامه می‌دهید؟')) throw new Error('validation');
-        // اسنپ‌شات کامل قبل از هر mutation — همان الگوی ثبت/ویرایش فاکتور.
-        const previousData = JSON.parse(JSON.stringify(data));
-        if(p.productId && qty>0){
-          const retResult = applyPurchaseReturnStockEffects(p, [{productId:p.productId, qty}], s.name, date);
-          if(!retResult.ok){ alert(retResult.error||'برگشت خرید ممکن نشد'); throw new Error('validation'); }
-        }
-        p.returns = p.returns||[];
-        p.returns.push({id:uid(), date, qty, amount});
-        try{
-          await saveData();
-        }catch(saveErr){
-          data = previousData;
-          throw saveErr;
-        }
-        openSupplierDetail(sid); render(); showToast('برگشت خرید ثبت شد');
+        // G4: reason required for NEW purchase returns (one reason per return transaction)
+        openPurchaseReturnReasonPicker(async function(returnReason){
+          await withSubmitGuard(document.getElementById('save-return'), async ()=>{
+            const previousData = JSON.parse(JSON.stringify(data));
+            if(p.productId && qty>0){
+              const retResult = applyPurchaseReturnStockEffects(p, [{productId:p.productId, qty}], s.name, date);
+              if(!retResult.ok){ alert(retResult.error||'برگشت خرید ممکن نشد'); throw new Error('validation'); }
+            }
+            p.returns = p.returns||[];
+            p.returns.push({id:uid(), date, qty, amount, returnReason: returnReason});
+            try{
+              await saveData();
+            }catch(saveErr){
+              data = previousData;
+              throw saveErr;
+            }
+            openSupplierDetail(sid); render(); showToast('برگشت خرید ثبت شد');
+          });
+        });
         });
       });
     });
@@ -2885,19 +3313,19 @@ function openSupplierDetail(sid){
         border:1px dashed #bbb; background:transparent; color:#bbb;
         font-size:11px; cursor:pointer; opacity:0.25;
       }
-      #qa-dev-btn:hover{ opacity:0.85; border-color:var(--gold,#B08D3D); color:var(--olive-dark,#5c4a30); }
+      #qa-dev-btn:hover{ opacity:0.85; border-color:var(--gold,#FF5C35); color:var(--olive-dark,#1F2937); }
       #qa-panel.overlay{ z-index:9999; }
       #qa-panel .sheet{ max-height:92vh; }
-      #qa-panel .qa-pass{ color:var(--olive-dark,#5c4a30); font-weight:700; }
-      #qa-panel .qa-fail{ color:var(--red,#9B3B2E); font-weight:700; }
+      #qa-panel .qa-pass{ color:var(--olive-dark,#1F2937); font-weight:700; }
+      #qa-panel .qa-fail{ color:var(--red,#FA3946); font-weight:700; }
       #qa-panel .qa-log{
         max-height:280px; overflow:auto; font-size:.75rem;
-        background:#fff; border:1px solid var(--line,#E7DDC7);
+        background:#fff; border:1px solid var(--line,#E0E4E8);
         border-radius:8px; padding:8px; direction:ltr; text-align:left;
         white-space:pre-wrap; font-family:ui-monospace,monospace;
       }
       #qa-panel .qa-stat{ display:inline-block; margin:4px 8px 4px 0; padding:4px 10px;
-        border-radius:12px; background:#f3efe4; font-size:.8rem; }
+        border-radius:12px; background:#F0F2F5; font-size:.8rem; }
     `;
     document.head.appendChild(style);
 
