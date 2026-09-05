@@ -169,12 +169,70 @@
     return rec;
   }
 
+  /**
+   * BUG-01: Episode relevance for seller feedback.
+   *
+   * Intelligence already treats customerId|category|productId continuity via
+   * persistence's rolling window (PERSISTENCE_PARAMS.windowDays, default 60).
+   * Occurrences outside that window are pruned; a signal that returns after the
+   * window has cleared is a new episode.
+   *
+   * Feedback is relevant only when its createdAt falls inside that same window
+   * relative to the signal's evaluation date (detectedAt / today). That binds
+   * feedback to the current episode without inventing a separate TTL or
+   * requiring schema migration.
+   *
+   * Legacy records without createdAt cannot prove episode membership → not applied.
+   */
+  function _feedbackDay(iso) {
+    if (!iso) return null;
+    var s = String(iso).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  }
+
+  function _daysBetweenFeedback(later, earlier) {
+    var a = new Date(String(later).slice(0, 10)).getTime();
+    var b = new Date(String(earlier).slice(0, 10)).getTime();
+    if (isNaN(a) || isNaN(b)) return null;
+    return Math.round((a - b) / 86400000);
+  }
+
+  function _persistenceWindowDays() {
+    if (typeof PERSISTENCE_PARAMS !== 'undefined' &&
+        PERSISTENCE_PARAMS &&
+        typeof PERSISTENCE_PARAMS.windowDays === 'number' &&
+        isFinite(PERSISTENCE_PARAMS.windowDays) &&
+        PERSISTENCE_PARAMS.windowDays > 0) {
+      return PERSISTENCE_PARAMS.windowDays;
+    }
+    return 60; // same default as persistence.js PERSISTENCE_PARAMS.windowDays
+  }
+
+  /**
+   * True when feedback still belongs to the signal's current episode window.
+   * Safe default for missing metadata: false (do not apply stale/unknown).
+   */
+  function _isFeedbackRelevantToSignal(fb, signal) {
+    if (!fb || !signal) return false;
+    var fbDay = _feedbackDay(fb.createdAt);
+    if (!fbDay) return false; // legacy without createdAt → cannot prove episode link
+
+    var asOf = _feedbackDay(signal.detectedAt) ||
+      _feedbackDay(typeof todayISO === 'function' ? todayISO() : null) ||
+      _feedbackDay(new Date().toISOString());
+    if (!asOf) return false;
+
+    var age = _daysBetweenFeedback(asOf, fbDay);
+    if (age == null || age < 0) return false;
+    return age <= _persistenceWindowDays();
+  }
+
   function getFeedbackForSignal(signal) {
     if (!signal || !signal.customerId || !signal.category) return null;
     var cid = signal.customerId;
     var cat = signal.category;
     var pid = signal.productId != null ? signal.productId : null;
-    // latest matching feedback (most recent createdAt)
+    // latest matching feedback that is still relevant to the current episode
     var best = null;
     for (var i = 0; i < _mem.length; i++) {
       var f = _mem[i];
@@ -186,6 +244,7 @@
       } else {
         if (fPid != null && fPid !== '') continue;
       }
+      if (!_isFeedbackRelevantToSignal(f, signal)) continue;
       if (!best || String(f.createdAt) > String(best.createdAt)) best = f;
     }
     return best;

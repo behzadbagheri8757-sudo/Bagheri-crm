@@ -994,10 +994,21 @@
       var pair = map[keys[i]];
       if (!pair.purchases.length) continue;
 
+      // W-BUG-01 fix: apply the same product eligibility gate used by
+      // Confirmed SKU Intelligence (_analyzePair, line ~619). A product the
+      // business no longer carries must not generate a Watch — the
+      // underlying "delay"/"drop" would never be able to resolve.
+      if (!_productActive(pair.productId)) continue;
+
       var historical = _computeBaseline(pair.purchases, null);
       if (historical.purchaseCount < 1) continue;
       var recent = _computeBaseline(pair.purchases, SKU_PARAMS.recentWindowSize);
       var current = _computeCurrent(pair, historical, recent, custInvs);
+      // Same stock-context semantics as Confirmed: only used to suppress
+      // timing/quantity-style dims below, never a full exclusion (unlike
+      // the active gate above).
+      var stockQty = _productStock(pair.productId);
+      var stockOut = (stockQty != null && stockQty <= 0);
 
       var eventRatio = null;
       if (historical.typicalQuantity != null && historical.typicalQuantity > 0 && recent.typicalQuantity != null) {
@@ -1028,7 +1039,8 @@
         presenceDrop: presenceDrop,
         historicalPresenceRate: current.historicalPresenceRate,
         currentBasketPresence: current.currentBasketPresence,
-        purchaseCount: historical.purchaseCount
+        purchaseCount: historical.purchaseCount,
+        stockOut: stockOut
       });
     }
     return out;
@@ -1052,7 +1064,12 @@
       var components = [];
 
       // A) SKU_DELAY_WATCH
+      // Stock-context suppression mirrors Confirmed (_analyzePair): if we
+      // are out of stock ourselves, a purchase delay is explained by our
+      // own stock-out, not customer churn, so timing/quantity dims are
+      // skipped (frequency/basket dims are left ungated, same as Confirmed).
       if (
+        !m.stockOut &&
         m.purchaseCount >= SKU_PARAMS.minimumPurchaseCountForTiming &&
         m.typicalCycle != null && m.typicalCycle > 0 &&
         m.currentGap != null && m.currentGap > 0
@@ -1069,7 +1086,7 @@
       }
 
       // B) SKU_QUANTITY_DROP_WATCH
-      if (m.purchaseCount >= SKU_PARAMS.minimumPurchaseCountForQuantity && m.eventRatio != null && m.eventRatio < 0.85) {
+      if (!m.stockOut && m.purchaseCount >= SKU_PARAMS.minimumPurchaseCountForQuantity && m.eventRatio != null && m.eventRatio < 0.85) {
         components.push({
           category: 'SKU_QUANTITY_DROP_WATCH',
           level: m.eventRatio < 0.75 ? 'medium' : 'low',
@@ -1089,7 +1106,22 @@
       }
 
       // D) LINE_DROP_WATCH
-      if (m.presenceDrop != null && m.presenceDrop >= 0.30) {
+      // W-LINE-DROP-TIMING fix: Confirmed (LINE_DROP) fires on a *relative*
+      // drop of currentBasketPresence <= 0.5 * historicalPresenceRate, i.e.
+      // an absolute-point drop of (0.5 * historicalPresenceRate). The old
+      // fixed 0.30 gate here could exceed that for any product with
+      // historicalPresenceRate < 0.60, letting Confirmed fire before Watch
+      // ever did. Using min(0.30, 0.4 * historicalPresenceRate) keeps the
+      // original 0.30 threshold unchanged for higher-presence products
+      // (rate >= 0.75, where 0.4*rate already exceeds 0.30) while scaling
+      // the gate down proportionally below that, so it is always strictly
+      // below Confirmed's 0.5*rate threshold. Level bands/deviationStrength
+      // are left untouched.
+      var lineDropGate = 0.30;
+      if (m.historicalPresenceRate != null) {
+        lineDropGate = Math.min(0.30, 0.4 * m.historicalPresenceRate);
+      }
+      if (m.presenceDrop != null && m.presenceDrop >= lineDropGate) {
         components.push({
           category: 'LINE_DROP_WATCH',
           level: m.presenceDrop >= 0.45 ? 'medium' : 'low',
