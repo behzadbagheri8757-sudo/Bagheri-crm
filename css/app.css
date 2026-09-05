@@ -4188,3 +4188,71 @@ nav#nav button.active,nav#nav a.nav-link.active{background:var(--color-primary);
 .rank-pill-B  { background: #F5A131; }
 .rank-pill-C  { background: #FF5C35; }
 .rank-pill-D  { background: #6F767C; }
+
+/* ============================================================
+   UI ALIGNMENT FINAL — verified polish pass
+   Visual/layout only. No business logic changes.
+   ============================================================ */
+.biz-status-secondary{margin-bottom:20px;}
+.dashboard-block.dash-quick-actions-block{margin-bottom:20px;}
+.dmt-bar{height:10px;}
+.dmt-bar>span{background:#FF5C35;}
+
+/* Products / Invoices sorting toolbar */
+.tx-toolbar{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:8px;
+  margin:12px 0 14px;
+  min-height:44px;
+}
+.tx-toolbar-label{
+  flex:0 0 auto;
+  font-size:.72rem;
+  font-weight:700;
+  color:var(--color-text-muted);
+  line-height:1.2;
+}
+.tx-toolbar-select{
+  width:auto;
+  min-width:112px;
+  max-width:150px;
+  min-height:44px;
+  margin:0;
+  padding-inline:10px 28px;
+  flex:0 0 auto;
+}
+.tx-list{margin-top:0;}
+
+/* Reports: separate summary, period controls, and sections visually. */
+.report-summary{margin-bottom:20px;}
+.report-period-note{margin-bottom:16px;}
+.report-section{margin-bottom:20px;}
+.report-note{margin-top:8px;}
+
+/* Settings warning: one visual emphasis, no second outline. */
+.settings-warn{border-color:transparent;box-shadow:none;}
+
+/* Modal/sheet backdrop: subtle iOS-like depth without changing layout. */
+.overlay{backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+
+/* Targeted readability only; do not change global typography. */
+a.dash-tile .dash-sub{font-size:.62rem;}
+.dash-activity .ledger-row .sub{font-size:.70rem;}
+.report-summary-meta{font-size:.66rem;}
+.report-period-note{font-size:.70rem;}
+.report-note{font-size:.74rem;}
+.product-row-label,.invoice-row-label{font-size:.66rem;}
+
+
+/* Customer Detail invoice rows: consistent vertical alignment. */
+.customer-invoice-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:56px;
+}
+.customer-invoice-row > *{align-self:center;}
+.customer-invoice-row .name{min-width:0;display:flex;flex-direction:column;justify-content:center;line-height:1.3;}
+.customer-invoice-row .amount{margin-inline-start:auto;white-space:nowrap;}
