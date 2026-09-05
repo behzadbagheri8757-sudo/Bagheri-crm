@@ -109,21 +109,20 @@
       const ch = r.ch;
       const partyHref = '#/customer?id=' + encodeURIComponent(ch.customerId);
       const invLink = ch.invoiceId
-        ? ` <a href="#/invoice?id=${encodeURIComponent(ch.invoiceId)}" style="color:var(--olive-dark);">فاکتور #${esc(String(r.inv ? r.inv.number : '—'))}</a>`
+        ? ` · <a href="#/invoice?id=${encodeURIComponent(ch.invoiceId)}" class="tx-inline-link">فاکتور #${esc(String(r.inv ? r.inv.number : '—'))}</a>`
         : '';
       const dueCls = r.dueSoon ? 'accent-rust' : '';
-      return `<div class="ledger-row" style="cursor:default;align-items:flex-start;">
+      const statusCls = r.st.key === 'cleared' ? 'accent-olive' : (r.dueSoon ? 'accent-rust' : 'accent-amber');
+      return `<div class="ledger-row tx-row" style="cursor:default;align-items:flex-start;">
         <span class="name" style="flex:1;min-width:0;">
-          <a href="${partyHref}" style="text-decoration:none;color:inherit;font-weight:700;">${esc(r.partyName)}</a>
-          <span class="sub">${ch.checkNumber ? 'شماره: ' + esc(ch.checkNumber) + ' — ' : ''}سررسید: <span class="${dueCls}">${faDate(ch.dueDate)}</span>${invLink}</span>
-          ${r.dueSoon && r.st.key === 'pending' ? '<span class="sub accent-rust">سررسید نزدیک (۳ روز)</span>' : ''}
+          <a href="${partyHref}" class="tx-row-title" style="text-decoration:none;color:inherit;">${esc(r.partyName)}</a>
+          <span class="sub">${ch.checkNumber ? 'ش ' + esc(ch.checkNumber) + ' · ' : ''}سررسید <span class="${dueCls}">${faDate(ch.dueDate)}</span>${invLink}</span>
+          ${r.dueSoon && r.st.key === 'pending' ? '<span class="sub accent-rust">سررسید نزدیک</span>' : ''}
         </span>
         <span class="filler"></span>
-        <span class="amount" style="text-align:left;">
-          ${toman(ch.amount)} ت
-          <span class="sub" style="display:block;margin-top:4px;">
-            <button type="button" class="btn small secondary" data-toggle-check="${esc(ch.id)}" style="padding:4px 8px;font-size:.7rem;">${r.st.label}</button>
-          </span>
+        <span class="amount tx-row-amount">
+          <span class="tx-row-total">${toman(ch.amount)} ت</span>
+          <button type="button" class="btn small secondary tx-status-btn ${statusCls}" data-toggle-check="${esc(ch.id)}">${r.st.label}</button>
         </span>
       </div>`;
     }).join('');
@@ -162,9 +161,9 @@
         ${chip('cleared','وصول‌شده')}
         ${chip('dueSoon','سررسید نزدیک')}
       </div>
-      <div class="field">
-        <label>مرتب‌سازی</label>
-        <select id="check-sort">
+      <div class="tx-toolbar">
+        <label class="tx-toolbar-label" for="check-sort">مرتب‌سازی</label>
+        <select id="check-sort" class="tx-toolbar-select">
           <option value="dueAsc" ${chkSort === 'dueAsc' ? 'selected' : ''}>نزدیک‌ترین سررسید</option>
           <option value="dueDesc" ${chkSort === 'dueDesc' ? 'selected' : ''}>دورترین سررسید</option>
           <option value="amountDesc" ${chkSort === 'amountDesc' ? 'selected' : ''}>بیشترین مبلغ</option>
@@ -172,8 +171,8 @@
         </select>
       </div>
       <div id="check-summary" class="cards" style="margin-bottom:12px;"></div>
-      <div class="empty" style="padding:0 0 8px;text-align:right;font-size:.78rem;">برای تغییر وضعیت وصول، روی دکمه وضعیت هر چک بزنید (همان منطق فعلی برنامه).</div>
-      <div id="check-list"></div>
+      <p class="tx-hint">برای تغییر وضعیت وصول، روی دکمه وضعیت هر چک بزنید.</p>
+      <div id="check-list" class="tx-list"></div>
     `;
 
     const searchEl = document.getElementById('check-search');

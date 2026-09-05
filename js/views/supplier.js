@@ -49,10 +49,19 @@
             <div class="field"><label>تاریخ برگشت</label>${shamsiDateInputHTML('f-ret-date', todayISO())}</div>
             <div id="ret-item-rows">
             ${(purchase.items || []).map(it => {
-              const remLineQty = purchaseLineRemainingQty(purchase, it.id);
+              // G4: display actual returnable under FIFO+stock (not merely purchase−returned)
+              const remLineQty = (typeof purchaseLineActualReturnableQty === 'function')
+                ? purchaseLineActualReturnableQty(purchase, it.id)
+                : purchaseLineRemainingQty(purchase, it.id);
+              if (remLineQty <= 0) {
+                return `<div class="field" style="opacity:.55;">
+                  <label>${esc(it.name)} (خریداری‌شده: ${it.qty} — <span class="accent-rust">۰ قابل‌برگشت</span>؛ موجودی این خرید مصرف شده)</label>
+                  <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="0" type="text" inputmode="decimal" disabled value="">
+                </div>`;
+              }
               return `<div class="field">
                 <label>${esc(it.name)} (خریداری‌شده: ${it.qty}، حداکثر قابل‌برگشت: ${remLineQty})</label>
-                <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)" ${remLineQty <= 0 ? 'disabled' : ''}>
+                <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)">
               </div>`;
             }).join('')}
             </div>
@@ -97,35 +106,57 @@
               if (!confirm('با ثبت این برگشت، موجودی انبار و بدهی به تامین‌کننده اصلاح خواهد شد. ادامه می‌دهید؟')) throw new Error('validation');
               const totalQty = lineReturns.reduce((a, l) => a + l.qty, 0);
               const retLines = lineReturns.map(l => ({ productId: l.productId, qty: l.qty, itemId: l.itemId }));
-              const previousData = JSON.parse(JSON.stringify(data));
-              const retResult = applyPurchaseReturnStockEffects(purchase, retLines, s.name, date);
-              if (!retResult.ok) { alert(retResult.error || 'برگشت خرید ممکن نشد'); throw new Error('validation'); }
-              purchase.returns = purchase.returns || [];
-              purchase.returns.push({
-                id: uid(),
-                date: date,
-                qty: totalQty,
-                amount: totalAmount,
-                items: lineReturns.map(l => ({ itemId: l.itemId, productId: l.productId, qty: l.qty, amount: Math.round(l.qty * l.unitCost) })),
-              });
-              try { await saveData(); } catch (saveErr) { data = previousData; throw saveErr; }
-              closeModal();
-              drawSupplierPage(rootEl);
-              showToast('برگشت خرید ثبت شد');
+              const lineItemsSnap = lineReturns.map(l => ({ itemId: l.itemId, productId: l.productId, qty: l.qty, amount: Math.round(l.qty * l.unitCost) }));
+              function commitMultiReturn(returnReason) {
+                return (async function () {
+                  const previousData = JSON.parse(JSON.stringify(data));
+                  const retResult = applyPurchaseReturnStockEffects(purchase, retLines, s.name, date);
+                  if (!retResult.ok) { alert(retResult.error || 'برگشت خرید ممکن نشد'); throw new Error('validation'); }
+                  purchase.returns = purchase.returns || [];
+                  const rec = {
+                    id: uid(),
+                    date: date,
+                    qty: totalQty,
+                    amount: totalAmount,
+                    items: lineItemsSnap,
+                  };
+                  if (returnReason) rec.returnReason = returnReason;
+                  purchase.returns.push(rec);
+                  try { await saveData(); } catch (saveErr) { data = previousData; throw saveErr; }
+                  closeModal();
+                  drawSupplierPage(rootEl);
+                  showToast('برگشت خرید ثبت شد');
+                })();
+              }
+              if (typeof openPurchaseReturnReasonPicker === 'function') {
+                openPurchaseReturnReasonPicker(function (returnReason) {
+                  withSubmitGuard(document.getElementById('save-return'), function () {
+                    return commitMultiReturn(returnReason);
+                  });
+                });
+              } else {
+                await commitMultiReturn(null);
+              }
             });
           });
           return;
         }
 
         // Single-item return
-        const remainingQty = purchaseReturnRemainingQty(purchase);
+        const remainingQtyAcct = purchaseReturnRemainingQty(purchase);
+        const remainingQty = (typeof purchaseActualReturnableQty === 'function')
+          ? purchaseActualReturnableQty(purchase)
+          : remainingQtyAcct;
         openSheet(`
           <h3>برگشت خرید از ${esc(s.name)}</h3>
           <div class="empty" style="padding:0 0 8px;text-align:right;">${faDate(purchase.date)} — مبلغ کل: ${toman(purchase.amount)} ت${returnedAmountSoFar > 0 ? ` — قبلاً برگشت‌شده: ${toman(returnedAmountSoFar)} ت` : ''}</div>
           <div class="field"><label>تاریخ برگشت</label>${shamsiDateInputHTML('f-ret-date', todayISO())}</div>
-          ${purchase.productId ? `<div class="field"><label>مقدار برگشتی (حداکثر ${remainingQty})</label><input id="f-ret-qty" type="text" inputmode="decimal"></div>` : ''}
-          <div class="field"><label>مبلغ برگشتی (تومان، حداکثر ${toman(remainingAmount)})</label><input id="f-ret-amount" type="text" inputmode="decimal"></div>
-          <div class="btn-row"><button class="btn" id="save-return">ثبت برگشت</button></div>
+          ${purchase.productId ? (remainingQty > 0
+            ? `<div class="field"><label>مقدار برگشتی (حداکثر ${remainingQty})</label><input id="f-ret-qty" type="text" inputmode="decimal"></div>`
+            : `<div class="empty" style="padding:8px 0;text-align:right;color:var(--color-danger);">موجودی قابل‌برگشت از این خرید: ۰ (همه مصرف/فروخته شده)</div>`)
+            : ''}
+          <div class="field"><label>مبلغ برگشتی (تومان، حداکثر ${toman(remainingAmount)})</label><input id="f-ret-amount" type="text" inputmode="decimal" ${purchase.productId && remainingQty <= 0 ? 'disabled' : ''}></div>
+          <div class="btn-row"><button class="btn" id="save-return" ${purchase.productId && remainingQty <= 0 ? 'disabled' : ''}>ثبت برگشت</button></div>
         `);
         if (purchase.productId) {
           document.getElementById('f-ret-qty').addEventListener('input', function () {
@@ -159,17 +190,32 @@
               throw new Error('validation');
             }
             if (!confirm((purchase.productId ? 'با ثبت این برگشت، موجودی انبار و بدهی به تامین‌کننده اصلاح خواهد شد.' : 'با ثبت این برگشت، فقط بدهی به تامین‌کننده کم می‌شود (موجودی خودکار اصلاح نمی‌شود).') + ' ادامه می‌دهید؟')) throw new Error('validation');
-            const previousData = JSON.parse(JSON.stringify(data));
-            if (purchase.productId && qty > 0) {
-              const retResult = applyPurchaseReturnStockEffects(purchase, [{ productId: purchase.productId, qty: qty }], s.name, date);
-              if (!retResult.ok) { alert(retResult.error || 'برگشت خرید ممکن نشد'); throw new Error('validation'); }
+            function commitSingleReturn(returnReason) {
+              return (async function () {
+                const previousData = JSON.parse(JSON.stringify(data));
+                if (purchase.productId && qty > 0) {
+                  const retResult = applyPurchaseReturnStockEffects(purchase, [{ productId: purchase.productId, qty: qty }], s.name, date);
+                  if (!retResult.ok) { alert(retResult.error || 'برگشت خرید ممکن نشد'); throw new Error('validation'); }
+                }
+                purchase.returns = purchase.returns || [];
+                const rec = { id: uid(), date: date, qty: qty, amount: amount };
+                if (returnReason) rec.returnReason = returnReason;
+                purchase.returns.push(rec);
+                try { await saveData(); } catch (saveErr) { data = previousData; throw saveErr; }
+                closeModal();
+                drawSupplierPage(rootEl);
+                showToast('برگشت خرید ثبت شد');
+              })();
             }
-            purchase.returns = purchase.returns || [];
-            purchase.returns.push({ id: uid(), date: date, qty: qty, amount: amount });
-            try { await saveData(); } catch (saveErr) { data = previousData; throw saveErr; }
-            closeModal();
-            drawSupplierPage(rootEl);
-            showToast('برگشت خرید ثبت شد');
+            if (typeof openPurchaseReturnReasonPicker === 'function') {
+              openPurchaseReturnReasonPicker(function (returnReason) {
+                withSubmitGuard(document.getElementById('save-return'), function () {
+                  return commitSingleReturn(returnReason);
+                });
+              });
+            } else {
+              await commitSingleReturn(null);
+            }
           });
         });
       });
@@ -341,7 +387,7 @@
 
     function renderMultiRows() {
       document.getElementById('multi-item-rows').innerHTML = multiItems.map((it, idx) => `
-        <div class="ledger-row"><span class="name">${esc((data.products.find(x => x.id === it.productId) || {}).name || '?')} × ${it.qty} @ ${toman(it.unitCost)} ت</span><span class="filler"></span><span class="amount">${toman(it.qty * it.unitCost)} ت<br><button class="btn danger small" data-del-item="${idx}" type="button">حذف</button></span></div>
+        <div class="ledger-row supplier-purchase-item-row"><span class="name"><span class="tx-row-title">${esc((data.products.find(x => x.id === it.productId) || {}).name || '?')}</span><span class="sub">${it.qty} ${esc(String((data.products.find(x => x.id === it.productId) || {}).packageWeight ? 'بسته' : 'واحد'))}${(data.products.find(x => x.id === it.productId) || {}).packageWeight ? ' · وزن بسته ' + enToFaDigits(String((data.products.find(x => x.id === it.productId) || {}).packageWeight)) : ''} · قیمت واحد ${toman(it.unitCost)} ت</span></span><span class="filler"></span><span class="amount"><span class="tx-row-total">${toman(it.qty * it.unitCost)} ت</span><br><button class="btn danger small" data-del-item="${idx}" type="button">حذف</button></span></div>
       `).join('');
       document.getElementById('multi-item-total').textContent = toman(multiItems.reduce((s2, it) => s2 + it.qty * it.unitCost, 0));
       document.querySelectorAll('[data-del-item]').forEach(btn => {
@@ -551,63 +597,104 @@
     const purchaseRows = purchases.length ? purchases.map(p => {
       const ret = (p.returns || []).reduce((a, r) => a + (r.amount || 0), 0);
       const net = (p.amount || 0) - ret;
+      const remainingAmount = (typeof purchaseReturnRemainingAmount === 'function')
+        ? purchaseReturnRemainingAmount(p)
+        : Math.max(0, (p.amount || 0) - ret);
+      // G4: for stocked purchases, only show return if FIFO/stock still allows return
+      let canReturn = remainingAmount > 0;
+      if (canReturn && (p.productId || (p.items && p.items.length)) && typeof purchaseActualReturnableQty === 'function') {
+        canReturn = purchaseActualReturnableQty(p) > 0;
+      }
       const itemsHint = (p.items && p.items.length) ? (p.items.length + ' قلم') :
         (p.productId ? ((data.products.find(x => x.id === p.productId) || {}).name || 'کالا') : (p.desc || 'خرید'));
-      return `<div class="ledger-row">
-        <span class="name">${esc(String(itemsHint))}
-          <span class="sub">${faDate(p.date)}${ret ? ' — برگشت: ' + toman(ret) + ' ت' : ''}</span>
+      const retBtn = canReturn
+        ? '<button type="button" class="btn secondary small tx-status-btn" data-return-purchase="' + esc(p.id) + '">برگشت</button>'
+        : '';
+      return `<div class="ledger-row tx-row">
+        <span class="name">
+          <span class="tx-row-title">${esc(String(itemsHint))}</span>
+          <span class="sub">${faDate(p.date)}${ret ? ' · برگشت ' + toman(ret) + ' ت' : ''}</span>
         </span>
         <span class="filler"></span>
-        <span class="amount">${toman(net)} ت</span>
+        <span class="amount tx-row-amount">
+          <span class="tx-row-total">${toman(net)} ت</span>
+          ${retBtn}
+        </span>
       </div>`;
     }).join('') : '<div class="empty" style="padding:12px 0;">خریدی ثبت نشده</div>';
 
-    const payRows = payments.length ? payments.map(p => `
-      <div class="ledger-row">
-        <span class="name">پرداخت<span class="sub">${faDate(p.date)}</span></span>
+    const payRows = payments.length ? payments.map((p, pidx) => {
+      const isCheck = p.method === 'check';
+      const face = isCheck && typeof p.faceAmount === 'number' ? p.faceAmount : p.amount;
+      const stLabel = isCheck
+        ? ((p.status === 'cleared') ? 'پرداخت‌شده' : (p.status === 'bounced') ? 'برگشتی' : 'در جریان')
+        : (p.method === 'cash' ? 'نقد/کارت/انتقال' : 'پرداخت');
+      const stCls = isCheck
+        ? (p.status === 'cleared' ? 'accent-olive' : (p.status === 'bounced' ? 'accent-rust' : 'accent-amber'))
+        : '';
+      const checkMeta = isCheck
+        ? ((p.checkNumber ? 'ش ' + p.checkNumber : '') +
+           (p.dueDate ? (p.checkNumber ? ' · ' : '') + 'سررسید ' + faDate(p.dueDate) : ''))
+        : '';
+      const delBtn = '<button type="button" class="btn small danger tx-status-btn" data-sup-pay-del="' + pidx + '">حذف</button>';
+      const checkBtns = isCheck
+        ? ('<button type="button" class="btn small secondary tx-status-btn ' + stCls + '" data-sup-check-status="' + pidx + '">' + stLabel + '</button>' +
+           '<button type="button" class="btn small secondary tx-status-btn" data-sup-check-edit="' + pidx + '">ویرایش</button>')
+        : ('<span class="tx-row-meta">' + stLabel + '</span>');
+      return `<div class="ledger-row tx-row" style="cursor:default;align-items:flex-start;">
+        <span class="name">
+          <span class="tx-row-title">${isCheck ? 'چک' : 'پرداخت'}</span>
+          <span class="sub">${faDate(p.date)}${checkMeta ? ' · ' + esc(checkMeta) : ''}${p.note ? ' · ' + esc(p.note) : ''}</span>
+        </span>
         <span class="filler"></span>
-        <span class="amount">${toman(p.amount)} ت</span>
-      </div>
-    `).join('') : '<div class="empty" style="padding:12px 0;">پرداختی ثبت نشده</div>';
+        <span class="amount tx-row-amount">
+          <span class="tx-row-total">${toman(isCheck ? face : p.amount)} ت</span>
+          ${checkBtns}
+          ${delBtn}
+        </span>
+      </div>`;
+    }).join('') : '<div class="empty" style="padding:12px 0;">پرداختی ثبت نشده</div>';
 
     root.innerHTML = `
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="${suppliersHref()}">← تامین‌کنندگان</a>
       </div>
 
-      <div class="card" style="margin-bottom:12px;">
-        <div style="font-size:1.15rem;font-weight:800;color:var(--olive-dark);margin-bottom:8px;">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}</div>
-        <div style="font-size:.88rem;line-height:1.85;">
-          ${s.phone ? '<div>تلفن: ' + esc(s.phone) + '</div>' : ''}
-        </div>
-        <div style="margin-top:12px;padding-top:10px;border-top:1px dotted var(--line);">
-          <div class="label">مانده حساب</div>
-          <div class="value ${color}" style="font-size:1.25rem;">${balanceLine}</div>
+      <!-- IDENTITY -->
+      <div class="tx-identity card">
+        <div class="tx-identity-title">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}</div>
+        <div class="tx-identity-meta">
+          ${s.phone ? '<span>تلفن: ' + esc(s.phone) + '</span>' : '<span class="sub">بدون تلفن</span>'}
         </div>
       </div>
 
-      <div class="cards" style="margin-bottom:14px;">
+      <!-- FINANCIAL SUMMARY -->
+      <div class="tx-finance cards">
+        <div class="card wide">
+          <div class="label">مانده حساب</div>
+          <div class="value ${color}">${balanceLine}</div>
+        </div>
         <div class="card"><div class="label">جمع خرید</div><div class="value">${toman(t.purchaseTotal)} ت</div></div>
         <div class="card"><div class="label">پرداخت‌ها</div><div class="value">${toman(t.payTotal)} ت</div></div>
         <div class="card"><div class="label">برگشت از خرید</div><div class="value">${toman(t.returnTotal)} ت</div></div>
         <div class="card"><div class="label">مانده اولیه</div><div class="value">${toman(t.openingBalance)} ت</div></div>
-        <div class="card"><div class="label">تعداد خرید</div><div class="value">${purchases.length}</div></div>
-        <div class="card"><div class="label">تعداد پرداخت</div><div class="value">${payments.length}</div></div>
       </div>
 
-      <h3 class="sub-title">عملیات سریع</h3>
-      <div class="btn-row" style="margin-bottom:16px;">
+      <!-- PRIMARY ACTIONS -->
+      <div class="btn-row tx-actions-primary" style="margin-bottom:14px;">
         <button type="button" class="btn small" id="add-purchase">+ خرید جدید</button>
         <button type="button" class="btn small secondary" id="add-suppay">+ پرداخت</button>
         <button type="button" class="btn small secondary" id="edit-supplier">ویرایش</button>
-        <button type="button" class="btn small secondary" id="toggle-supplier-active">${s.active === false ? 'فعال‌سازی تأمین‌کننده' : 'غیرفعال‌سازی تأمین‌کننده'}</button>
+        <button type="button" class="btn small secondary" id="toggle-supplier-active">${s.active === false ? 'فعال‌سازی' : 'غیرفعال‌سازی'}</button>
       </div>
 
+      <!-- PURCHASES -->
       <h3 class="sub-title">خریدها (${purchases.length})</h3>
-      ${purchaseRows}
+      <div class="tx-list">${purchaseRows}</div>
 
+      <!-- PAYMENTS -->
       <h3 class="sub-title">پرداخت‌ها (${payments.length})</h3>
-      ${payRows}
+      <div class="tx-list">${payRows}</div>
     `;
 
     // Re-attach all dynamic buttons

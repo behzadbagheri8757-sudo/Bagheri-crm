@@ -109,23 +109,189 @@
      business logic) is shown alongside the new Watch list. This is an
      explicitly reported interpretation, not a silent guess. No action
      buttons are added for either list. */
+  /* ============================================================
+     PRODUCT REJECTION INSIGHT (UI-only, read-only)
+     Source: customerBehavior(cid).offeredProductStats
+     Not a Watch / Alert / Score / Recommendation / Action.
+     Threshold configurable via localStorage key below.
+     ============================================================ */
+  var PRODUCT_REJECTION_THRESHOLD_KEY = 'baqeri_product_rejection_threshold_v1';
+  var PRODUCT_REJECTION_THRESHOLD_DEFAULT = 3;
+
+  function getProductRejectionThreshold() {
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage) {
+        var raw = localStorage.getItem(PRODUCT_REJECTION_THRESHOLD_KEY);
+        if (raw != null && raw !== '') {
+          var n = Number(raw);
+          if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return PRODUCT_REJECTION_THRESHOLD_DEFAULT;
+  }
+
+  function setProductRejectionThreshold(value) {
+    var n = Math.floor(Number(value));
+    if (!Number.isFinite(n) || n < 1) n = PRODUCT_REJECTION_THRESHOLD_DEFAULT;
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage) {
+        localStorage.setItem(PRODUCT_REJECTION_THRESHOLD_KEY, String(n));
+      }
+    } catch (e) { /* ignore */ }
+    return n;
+  }
+
+  var REJECTION_REASON_LABELS = {
+    price: 'قیمت',
+    quality: 'کیفیت',
+    competitor: 'رقیب',
+    unavailable: 'ناموجود',
+    no_need: 'عدم نیاز',
+    other: 'سایر'
+  };
+
+  function rejectionReasonLabel(code) {
+    if (!code) return '—';
+    return REJECTION_REASON_LABELS[code] || String(code);
+  }
+
+  /**
+   * Build rejection insights for ONE customer from offeredProductStats.
+   * Only products with rejectedCount >= threshold are returned.
+   * Pure / read-only — does not write DB or mutate CRM.
+   */
+  function buildProductRejectionInsights(customerId, threshold) {
+    var out = [];
+    if (!customerId || typeof customerBehavior !== 'function') return out;
+    var thr = (threshold != null && Number.isFinite(Number(threshold)))
+      ? Math.floor(Number(threshold))
+      : getProductRejectionThreshold();
+    if (thr < 1) thr = PRODUCT_REJECTION_THRESHOLD_DEFAULT;
+
+    var b;
+    try { b = customerBehavior(customerId); } catch (e) { return out; }
+    if (!b || !Array.isArray(b.offeredProductStats)) return out;
+
+    for (var i = 0; i < b.offeredProductStats.length; i++) {
+      var st = b.offeredProductStats[i];
+      if (!st || st.productId == null) continue;
+      var rejected = Number(st.rejectedCount) || 0;
+      var offered = Number(st.offeredCount) || 0;
+      if (rejected < thr) continue; // 1st and 2nd never shown
+      if (offered < 1) continue;
+
+      var ratio = rejected / offered;
+      // Contract from calc.js: use st.rejectionReasons only (not topRejectionReason/reasonCounts)
+      var topReason = null;
+      if (st.rejectionReasons && typeof st.rejectionReasons === 'object') {
+        var bestCode = null;
+        var bestN = -1;
+        var codes = Object.keys(st.rejectionReasons).sort(); // alphabetical deterministic tie-break
+        for (var c = 0; c < codes.length; c++) {
+          var n = Number(st.rejectionReasons[codes[c]]);
+          if (!Number.isFinite(n) || n <= 0) continue;
+          if (n > bestN) { bestN = n; bestCode = codes[c]; }
+        }
+        topReason = bestCode;
+      }
+
+      var name = st.productName || null;
+      if (!name && typeof data !== 'undefined' && Array.isArray(data.products)) {
+        var p = data.products.find(function (x) { return x && x.id === st.productId; });
+        if (p) name = p.name;
+      }
+
+      out.push({
+        productId: st.productId,
+        productName: name || String(st.productId),
+        offeredCount: offered,
+        rejectedCount: rejected,
+        rejectionRatio: ratio,
+        topRejectionReason: topReason,
+        lastOfferedDate: st.lastOfferedDate || null
+      });
+    }
+
+    // Sort: most rejections first, then name (deterministic)
+    out.sort(function (a, b) {
+      if (b.rejectedCount !== a.rejectedCount) return b.rejectedCount - a.rejectedCount;
+      return String(a.productName || '').localeCompare(String(b.productName || ''), 'fa');
+    });
+    return out;
+  }
+
+  function productRejectionInsightsHtml(customerId) {
+    var items = [];
+    try {
+      items = buildProductRejectionInsights(customerId);
+    } catch (e) {
+      return '';
+    }
+    if (!items.length) return ''; // rule 15: hide section entirely
+
+    var rows = items.map(function (it) {
+      var reasonTxt = it.topRejectionReason
+        ? ('دلیل غالب: ' + rejectionReasonLabel(it.topRejectionReason))
+        : 'دلیل غالب: —';
+      return '<div class="ledger-row" style="cursor:default;">' +
+        '<span class="name">' + esc(it.productName) +
+          '<span class="sub">' + reasonTxt + '</span></span>' +
+        '<span class="filler"></span>' +
+        '<span class="amount" style="font-size:.85rem;font-weight:600;">' +
+          esc(String(it.rejectedCount)) + ' بار رد شده</span></div>';
+    }).join('');
+
+    return '<h3 class="sub-title">کالاهای ردشده توسط مشتری</h3>' +
+      '<div class="dash-activity" style="margin-bottom:14px;">' + rows + '</div>';
+  }
+
   function intelligenceWatchHtml(cid) {
-    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function') return '';
+    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function' && typeof getActiveWatchOccurrences !== 'function') return '';
 
     var confirmed = [];
     if (typeof extractCustomerSignals === 'function') {
       try { confirmed = extractCustomerSignals(cid) || []; } catch (e) { confirmed = []; }
     }
-    var watches = [];
-    if (typeof extractWatchObservations === 'function') {
-      try { watches = extractWatchObservations(cid, confirmed) || []; } catch (e2) { watches = []; }
-    }
     var activeConfirmed = confirmed.filter(function (s) { return s && s.status === 'active'; });
 
-    if (!watches.length && !activeConfirmed.length) return '';
+    // Lifecycle occurrences (preferred) — already reconciled by caller when possible
+    var occs = [];
+    if (typeof getActiveWatchOccurrences === 'function') {
+      try { occs = getActiveWatchOccurrences(cid) || []; } catch (eOcc) { occs = []; }
+    }
+    // Fallback to raw generation if lifecycle absent. Guarded against
+    // inactive customers too (W-BUG-02): this path bypasses
+    // reconcileWatchLifecycle's own active-customer check entirely, so an
+    // inactive customer must never reach it even as a display-only fallback.
+    var custIsActive = true;
+    if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
+      var custRec = data.customers.find(function (x) { return x && x.id === cid; });
+      custIsActive = !!(custRec && custRec.active !== false);
+    }
+    if (!occs.length && custIsActive && typeof extractWatchObservations === 'function') {
+      try {
+        var raw = extractWatchObservations(cid, confirmed) || [];
+        occs = raw.map(function (w, idx) {
+          return {
+            id: null,
+            customerId: cid,
+            productId: w.productId,
+            productName: w.productName,
+            watchCategory: w.category,
+            level: w.level,
+            generatedReason: w.reason,
+            reason: null,
+            status: 'active'
+          };
+        });
+      } catch (e2) { occs = []; }
+    }
 
-    function levelColor(level) {
-      return level === 'critical' ? '#8E1F13' : level === 'high' ? '#B3261E' : level === 'medium' ? '#C77700' : '#6B7280';
+    if (!occs.length && !activeConfirmed.length) return '';
+
+    function levelClass(level) {
+      return level === 'critical' ? 'watch-level-critical' : level === 'high' ? 'watch-level-high' : level === 'medium' ? 'watch-level-medium' : 'watch-level-low';
     }
     function levelLabel(level) {
       return level === 'critical' ? 'بحرانی' : level === 'high' ? 'زیاد' : level === 'medium' ? 'متوسط' : 'کم';
@@ -137,7 +303,7 @@
         var label = (s.productName ? ('«' + esc(s.productName) + '» — ') : '') + esc(s.reason || '');
         return '<div style="font-size:.85rem;line-height:1.9;display:flex;justify-content:space-between;gap:8px;">' +
           '<span>• ' + label + '</span>' +
-          '<span style="color:' + levelColor(s.severity) + ';font-weight:600;white-space:nowrap;">' + esc(levelLabel(s.severity)) + '</span>' +
+          '<span class="watch-level-label ' + levelClass(s.severity) + '" style="font-weight:600;white-space:nowrap;">' + esc(levelLabel(s.severity)) + '</span>' +
           '</div>';
       }).join('');
       confirmedHtml = '<div class="card wide" style="margin-bottom:10px;">' +
@@ -146,20 +312,117 @@
     }
 
     var watchHtml = '';
-    if (watches.length) {
-      var wrows = watches.map(function (w) {
-        var label = (w.productName ? ('«' + esc(w.productName) + '» — ') : '') + esc(w.reason || '');
-        return '<div style="font-size:.85rem;line-height:1.9;display:flex;justify-content:space-between;gap:8px;">' +
-          '<span>• ' + label + '</span>' +
-          '<span style="color:' + levelColor(w.level) + ';font-weight:600;white-space:nowrap;">' + esc(levelLabel(w.level)) + '</span>' +
-          '</div>';
+    if (occs.length) {
+      var wrows = occs.map(function (o) {
+        var label = (o.productName ? ('«' + esc(o.productName) + '» — ') : '') + esc(o.generatedReason || '');
+        var reviewed = !!(o.reason);
+        var badge = reviewed
+          ? '<span style="color:var(--olive-dark);font-weight:600;font-size:.78rem;">بررسی شده</span>'
+          : '<span class="watch-level-unreviewed" style="font-weight:600;font-size:.78rem;">بررسی نشده</span>';
+        var reasonBit = '';
+        if (reviewed && o.reason) {
+          var rlabel = (typeof watchReasonLabel === 'function') ? watchReasonLabel(o.reason.code) : (o.reason.code || '');
+          reasonBit = '<div style="font-size:.78rem;color:var(--ink-soft);margin-top:2px;">علت: ' + esc(rlabel) +
+            (o.reason.comment ? (' — ' + esc(o.reason.comment)) : '') + '</div>';
+        }
+        var clickable = o.id
+          ? (' data-watch-occ="' + esc(o.id) + '" role="button" tabindex="0" style="cursor:pointer;"')
+          : '';
+        return '<div class="watch-occ-row"' + clickable + ' style="font-size:.85rem;line-height:1.7;padding:8px 0;border-bottom:1px dotted var(--line);">' +
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">' +
+            '<span>• ' + label + '</span>' +
+            '<span style="text-align:left;white-space:nowrap;">' + badge +
+              '<div class="watch-level-label ' + levelClass(o.level) + '" style="font-weight:600;font-size:.78rem;">' + esc(levelLabel(o.level)) + '</div>' +
+            '</span>' +
+          '</div>' + reasonBit +
+        '</div>';
       }).join('');
-      watchHtml = '<div class="card wide" style="margin-bottom:10px;">' +
-        '<div class="label">هشدار زودهنگام (WATCH / EARLY WARNING)</div>' +
+      watchHtml = '<div class="card wide" style="margin-bottom:10px;" id="watch-lifecycle-card">' +
+        '<div class="label">هشدارهای زودهنگام</div>' +
+        '<div class="report-note" style="margin:4px 0 8px;">برای ثبت علت، روی مورد بزنید. ثبت علت، هشدار را حذف نمی‌کند.</div>' +
         '<div style="margin-top:6px;">' + wrows + '</div></div>';
     }
 
     return confirmedHtml + watchHtml;
+  }
+
+  function openWatchReasonSheet(occurrenceId, onDone) {
+    if (!occurrenceId || typeof recordWatchReason !== 'function') return;
+    var options = (typeof WATCH_REASON_OPTIONS !== 'undefined' && Array.isArray(WATCH_REASON_OPTIONS))
+      ? WATCH_REASON_OPTIONS
+      : [
+          { code: 'still_stock', label: 'موجودی مشتری هنوز کافی است' },
+          { code: 'price', label: 'قیمت' },
+          { code: 'competitor', label: 'خرید از رقیب' },
+          { code: 'no_need', label: 'فعلاً نیاز ندارد' },
+          { code: 'quality', label: 'مشکل کیفیت' },
+          { code: 'other', label: 'سایر' }
+        ];
+    var optsHtml = options.map(function (o) {
+      return '<button type="button" class="btn secondary small" data-watch-reason="' + esc(o.code) + '" style="width:100%;margin-bottom:6px;text-align:right;">' +
+        esc(o.label) + '</button>';
+    }).join('');
+    if (typeof openSheet !== 'function') return;
+    openSheet(
+      '<div class="sheet-title">ثبت علت هشدار</div>' +
+      '<div class="report-note" style="margin-bottom:10px;">علت فقط مشاهده است و هشدار را حل‌شده نمی‌کند.</div>' +
+      '<div id="watch-reason-list">' + optsHtml + '</div>' +
+      '<div class="field" style="margin-top:10px;"><label>یادداشت (اختیاری)</label>' +
+      '<input type="text" id="watch-reason-note" autocomplete="off" placeholder="توضیح کوتاه..."></div>' +
+      '<div class="btn-row" style="margin-top:12px;justify-content:space-between;">' +
+      '<button type="button" class="btn secondary" id="watch-dismiss-btn">بستن هشدار</button>' +
+      '<button type="button" class="btn secondary" id="watch-reason-cancel">انصراف</button></div>'
+    );
+    var cancel = document.getElementById('watch-reason-cancel');
+    if (cancel) cancel.onclick = function () { if (typeof closeModal === 'function') closeModal(); };
+    var dismissBtn = document.getElementById('watch-dismiss-btn');
+    if (dismissBtn) {
+      dismissBtn.onclick = function () {
+        if (typeof dismissWatchOccurrence !== 'function') return;
+        var noteEl = document.getElementById('watch-reason-note');
+        var note = noteEl ? noteEl.value : '';
+        try {
+          dismissWatchOccurrence(occurrenceId, note);
+          if (typeof showToast === 'function') showToast('هشدار بسته شد');
+        } catch (err) {
+          console.error(err);
+          if (typeof showToast === 'function') showToast('بستن هشدار ممکن نشد');
+        }
+        if (typeof closeModal === 'function') closeModal();
+        if (typeof onDone === 'function') onDone();
+      };
+    }
+    var list = document.getElementById('watch-reason-list');
+    if (list) {
+      list.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-watch-reason]');
+        if (!btn) return;
+        var code = btn.getAttribute('data-watch-reason');
+        var noteEl = document.getElementById('watch-reason-note');
+        var note = noteEl ? noteEl.value : '';
+        try {
+          recordWatchReason(occurrenceId, code, note);
+          if (typeof showToast === 'function') showToast('علت ثبت شد');
+        } catch (err) {
+          console.error(err);
+          if (typeof showToast === 'function') showToast('ثبت علت ممکن نشد');
+        }
+        if (typeof closeModal === 'function') closeModal();
+        if (typeof onDone === 'function') onDone();
+      });
+    }
+  }
+
+  function bindWatchLifecycleRows(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-watch-occ]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var id = el.getAttribute('data-watch-occ');
+        openWatchReasonSheet(id, function () {
+          if (typeof drawCustomerPage === 'function') drawCustomerPage(rootEl || root);
+        });
+      });
+    });
   }
 
   function drawCustomerPage(root) {
@@ -191,6 +454,29 @@
     const word = balanceStatusWord(t.balance);
     const color = t.balance > 0 ? 'accent-rust' : t.balance < 0 ? 'accent-olive' : 'accent-olive';
     const balanceLine = t.balance === 0 ? word : word + ': ' + toman(Math.abs(t.balance)) + ' ت';
+
+    /* Unified Summary — visually combines three EXISTING, already-frozen
+       outputs (calculateCustomerPriority → riskLevel + customerStory,
+       and calculateCustomerAction → next action) into ONE decision block.
+       No new score, no new health model, no new thresholds: this is a
+       read-only merge of data the system already computes elsewhere
+       (the same functions power the Dashboard Action Queue). */
+    let unifiedSummaryHtml = '';
+    let recommendedAction = null;
+    {
+      let priority = null, action = null;
+      try { if (typeof calculateCustomerPriority === 'function') priority = calculateCustomerPriority(c.id); } catch (eP) { priority = null; }
+      try { if (typeof calculateCustomerAction === 'function') action = calculateCustomerAction(c.id); } catch (eA) { action = null; }
+      recommendedAction = action && action.actionType !== 'no_action' ? action : null;
+      const riskLevel = priority ? priority.riskLevel : null;
+      const storyText = (priority && priority.customerStory && priority.customerStory.summary) ? priority.customerStory.summary : '';
+      if (storyText) {
+        unifiedSummaryHtml =
+          '<div class="cust-summary ' + (riskLevel ? 'radar-risk-' + esc(riskLevel) : '') + '">' +
+          '<div class="cust-summary-story">' + esc(storyText) + '</div>' +
+          '</div>';
+      }
+    }
 
     const invs = customerInvoices(c.id)
       .slice()
@@ -294,6 +580,18 @@
             if (v.threat) extraBits.push('تهدید (مشاهده): ' + v.threat);
             if (v.nextAction) extraBits.push('اقدام بعدی: ' + v.nextAction);
             if (Array.isArray(v.tags) && v.tags.length) extraBits.push('برچسب: ' + v.tags.join('، '));
+            if (Array.isArray(v.offeredProducts) && v.offeredProducts.length) {
+              var rxMap = { accepted: 'قبول', rejected: 'رد', deferred: 'بعداً' };
+              var rrMap = { price: 'قیمت', quality: 'کیفیت', competitor: 'رقیب', unavailable: 'ناموجود', no_need: 'عدم نیاز', other: 'سایر' };
+              var bits = v.offeredProducts.map(function (op) {
+                var prod = (data.products || []).find(function (p) { return p.id === op.productId; });
+                var name = prod ? prod.name : (op.productId || '—');
+                var s = name + ' (' + (rxMap[op.reaction] || op.reaction || '—') + ')';
+                if (op.reaction === 'rejected' && op.rejectionReason) s += ' — ' + (rrMap[op.rejectionReason] || op.rejectionReason);
+                return s;
+              });
+              extraBits.push('پیشنهاد: ' + bits.join('؛ '));
+            }
             if (v.note) extraBits.push(v.note);
             const extraHtml = extraBits
               .map(function (x) {
@@ -326,12 +624,16 @@
     let behaviorHtml = '';
     if (typeof customerBehavior === 'function') {
       const b = customerBehavior(c.id);
+      // customerBehaviorSummary's own bullet lines now render lower on the
+      // page, inside "جزئیات کامل رفتار خرید" progressive disclosure —
+      // the headline decision (risk/opportunity + next action) already
+      // moved up into the Unified Summary block above the fold.
       let summaryHtml = '';
       const summary = customerBehaviorSummary(b);
       if (summary && summary.level === 'insufficient') {
         summaryHtml =
           '<div class="card wide" style="margin-bottom:10px;">' +
-          '<div class="label">خلاصهٔ وضعیت</div>' +
+          '<div class="label">خلاصهٔ رفتار خرید</div>' +
           '<div class="value" style="font-size:.9rem;">' +
           esc(summary.lines[0]) +
           '</div></div>';
@@ -347,7 +649,7 @@
         const extraLines = [summary.reminder, summary.action].filter(Boolean);
         summaryHtml =
           '<div class="card wide" style="margin-bottom:10px;">' +
-          '<div class="label">خلاصهٔ وضعیت</div>' +
+          '<div class="label">خلاصهٔ رفتار خرید</div>' +
           '<div class="value ' +
           bm[1] +
           '" style="font-size:1.05rem;">' +
@@ -434,12 +736,17 @@
             ? '—'
             : 'ویزیتی ثبت نشده';
 
+      const watchHtmlBlock = intelligenceWatchHtml(c.id);
       behaviorHtml =
-        '<h3 class="sub-title">رفتار خرید مشتری</h3>' +
-        summaryHtml +
-        intelligenceWatchHtml(c.id) +
+        '<h3 class="sub-title">رفتار خرید و هوش تجاری</h3>' +
+        (watchHtmlBlock
+          ? '<details open style="margin-bottom:12px;">' +
+            '<summary style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">نشانه‌ها و هشدارها ▾</summary>' +
+            '<div style="margin-top:8px;">' + watchHtmlBlock + '</div></details>'
+          : '') +
         '<details style="margin-bottom:12px;">' +
-        '<summary style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">جزئیات کامل رفتار خرید ▾</summary>' +
+        '<summary style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">تحلیل رفتار خرید ▾</summary>' +
+        summaryHtml +
         '<div class="cards" style="margin-top:10px;margin-bottom:10px;">' +
         '<div class="card"><div class="label">اولین خرید</div><div class="value" style="font-size:.95rem;">' +
         (b.firstInvoiceDate ? faDate(b.firstInvoiceDate) : '—') +
@@ -511,7 +818,7 @@
       esc(c.name) +
       '</div>' +
       '<div style="font-size:.88rem;line-height:1.85;color:var(--ink);">' +
-      (c.ownerName ? '<div>صاحب: ' + esc(c.ownerName) + '</div>' : '') +
+      (c.ownerName ? '<div>مسئول فروشگاه: ' + esc(c.ownerName) + '</div>' : '') +
       (c.phone ? '<div>تلفن: ' + esc(c.phone) + '</div>' : '') +
       (c.locationId
         ? '<div>موقعیت: ' + esc(getLocationDisplayString(c.locationId)) + '</div>'
@@ -527,6 +834,27 @@
       '" style="font-size:1.25rem;">' +
       balanceLine +
       '</div></div></div>' +
+      unifiedSummaryHtml +
+      (recommendedAction
+        ? '<div class="cust-recommended-action">' +
+          '<div class="cust-recommended-action-label">اقدام پیشنهادی</div>' +
+          '<button type="button" class="btn cust-recommended-action-btn" id="cust-recommended-action">' +
+          esc(recommendedAction.action) +
+          '</button></div>'
+        : '') +
+      '<h3 class="sub-title">عملیات</h3>' +
+      '<div class="btn-row cust-actions-primary" style="margin-bottom:8px;">' +
+      '<button type="button" class="btn" id="act-invoice">ثبت فاکتور</button>' +
+      '<button type="button" class="btn secondary" id="act-pay">ثبت پرداخت</button>' +
+      '<button type="button" class="btn secondary" id="act-visit">ثبت ویزیت</button>' +
+      '</div>' +
+      '<div class="btn-row cust-actions-secondary" style="margin-bottom:16px;">' +
+      '<button type="button" class="btn small secondary" id="act-check">ثبت چک</button>' +
+      '<button type="button" class="btn small secondary" id="act-edit">ویرایش مشتری</button>' +
+      '<button type="button" class="btn small secondary" id="act-location">اختصاص موقعیت</button>' +
+      '<button type="button" class="btn small secondary" id="act-print-statement">🖨️ صورت‌حساب</button>' +
+      '<button type="button" class="btn small secondary" id="act-toggle-active">' + (c.active === false ? 'فعال‌سازی مشتری' : 'غیرفعال‌سازی مشتری') + '</button>' +
+      '</div>' +
       '<div class="cards" style="margin-bottom:14px;">' +
       '<div class="card"><div class="label">مجموع خرید (فاکتورها)</div><div class="value">' +
       toman(t.invTotal) +
@@ -548,16 +876,7 @@
       ' ت</div></div>' +
       '</div>' +
       behaviorHtml +
-      '<h3 class="sub-title">عملیات سریع</h3>' +
-      '<div class="btn-row" style="margin-bottom:16px;">' +
-      '<button type="button" class="btn small" id="act-invoice">ثبت فاکتور</button>' +
-      '<button type="button" class="btn small secondary" id="act-pay">ثبت پرداخت</button>' +
-      '<button type="button" class="btn small secondary" id="act-visit">ثبت ویزیت</button>' +
-      '<button type="button" class="btn small secondary" id="act-check">ثبت چک</button>' +
-      '<button type="button" class="btn small secondary" id="act-edit">ویرایش مشتری</button>' +
-      '<button type="button" class="btn small secondary" id="act-location">اختصاص موقعیت</button>' +
-      '<button type="button" class="btn small secondary" id="act-print-statement">🖨️ صورت‌حساب</button>' +
-      '</div>' +
+      productRejectionInsightsHtml(c.id) +
       '<h3 class="sub-title">فاکتورها (' +
       invs.length +
       ')</h3>' +
@@ -616,6 +935,46 @@
         if (typeof printCustomerStatement === 'function') printCustomerStatement(c.id);
       };
     }
+    const recommendedBtn = document.getElementById('cust-recommended-action');
+    if (recommendedBtn && recommendedAction) {
+      recommendedBtn.onclick = function () {
+        const type = recommendedAction.actionType;
+        if (type === 'visit' || type === 'follow_up') {
+          openAddVisit(c.id);
+        } else if (type === 'check_followup') {
+          openAddCheck(c.id);
+        } else if (type === 'payment_followup') {
+          openAddTransaction(c.id);
+        } else {
+          // For action types without a dedicated existing form (e.g. investigate,
+          // manager_review, call), expose the existing explanation rather than
+          // inventing a new workflow.
+          const target = root.querySelector('details');
+          if (target) target.open = true;
+          if (target && typeof target.scrollIntoView === 'function') {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+      };
+    }
+
+    const toggleActiveBtn = document.getElementById('act-toggle-active');
+    if (toggleActiveBtn) {
+      toggleActiveBtn.onclick = async function (ev) {
+        await withSubmitGuard(ev.currentTarget, async () => {
+          const willDeactivate = c.active !== false;
+          const msg = willDeactivate
+            ? 'این مشتری غیرفعال شود؟ اطلاعات، فاکتورها، پرداخت‌ها، چک‌ها و سوابق او حذف نخواهد شد.'
+            : 'مشتری «' + c.name + '» دوباره فعال شود؟';
+          if (!confirm(msg)) throw new Error('validation');
+          c.active = (c.active === false) ? true : false;
+          await saveData();
+          drawCustomerPage(rootEl || root);
+          showToast(c.active === false ? 'مشتری غیرفعال شد' : 'مشتری فعال شد');
+        });
+      };
+    }
+    bindWatchLifecycleRows(root);
   }
 
   function mount(root, params) {
@@ -627,10 +986,16 @@
     if (nav) nav.style.display = '';
 
     currentCustomerId = params && params.id ? params.id : null;
-    // Register the view refresh callback for mutation-driven UI updates.
-drawCustomerPage(root);
-
-    refreshToken = ViewHost.setRefresh(()=>drawCustomerPage(rootEl));
+    function refreshCustomer() {
+      function paint() { drawCustomerPage(rootEl || root); }
+      if (typeof reconcileWatchLifecycle === 'function' && currentCustomerId) {
+        reconcileWatchLifecycle(currentCustomerId).then(paint).catch(function () { paint(); });
+      } else {
+        paint();
+      }
+    }
+    refreshCustomer();
+    refreshToken = ViewHost.setRefresh(refreshCustomer);
 
     return function unmount() {
       ViewHost.clearRefresh(refreshToken);
@@ -642,4 +1007,9 @@ drawCustomerPage(root);
   }
 
   global.CustomerView = { mount: mount, unmount: function () {} };
+  // Test / settings seams for Product Rejection Insight (UI-only)
+  global.getProductRejectionThreshold = getProductRejectionThreshold;
+  global.setProductRejectionThreshold = setProductRejectionThreshold;
+  global.buildProductRejectionInsights = buildProductRejectionInsights;
+
 })(typeof window !== 'undefined' ? window : this);

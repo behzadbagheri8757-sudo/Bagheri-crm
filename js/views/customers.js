@@ -35,10 +35,27 @@
     }
   }
 
+  /* Priority/story lookup — cached for the current view state and only
+     recomputed when the underlying data actually changes (mount, or a
+     ViewHost data-refresh), never on every keystroke/filter/sort click.
+     Read-only use of the existing frozen Priority Engine; no new
+     scoring, no new thresholds (see spec §9.6 performance rule). */
+  let custPriorityMap = null;
+  function buildPriorityLookup() {
+    const map = Object.create(null);
+    if (typeof calculateAllCustomerPriorities !== 'function') return map;
+    let list = [];
+    try { list = calculateAllCustomerPriorities() || []; } catch (e) { return map; }
+    list.forEach(function (p) { if (p && p.customerId) map[p.customerId] = p; });
+    return map;
+  }
+
   function renderCustomerListOnly() {
     const listEl = document.getElementById('customer-list');
     if (!listEl) return;
 
+    if (!custPriorityMap) custPriorityMap = buildPriorityLookup();
+    const priorityMap = custPriorityMap;
     let rows = (data.customers || []).slice();
     const q = (custQuery || '').trim().toLowerCase();
     if (q) {
@@ -96,28 +113,55 @@
         const c = x.c;
         const t = x.t;
         const word = balanceStatusWord(t.balance);
-        const color = t.balance > 0 ? 'accent-rust' : t.balance < 0 ? 'accent-olive' : '';
-        const amt = t.balance === 0 ? word : word + ': ' + toman(Math.abs(t.balance)) + ' ت';
-        const subParts = [];
-        if (c.phone) subParts.push(c.phone);
-        if (c.region) subParts.push(c.region);
-        if (c.address) subParts.push(c.address);
-        const sub = subParts.join(' — ');
+        const color = t.balance > 0 ? 'accent-rust' : t.balance < 0 ? 'accent-olive' : 'accent-olive';
+
+        // One compact status badge + one activity metric. These are read-only
+        // presentations of existing frozen outputs; no new scoring/thresholds.
+        const pr = priorityMap[c.id] || null;
+        const riskLevel = pr ? pr.riskLevel : null;
+        const riskCls = riskLevel ? 'radar-risk-' + riskLevel : '';
+        const behavior = (typeof customerBehavior === 'function')
+          ? (function(){ try { return customerBehavior(c.id) || {}; } catch(e){ return {}; } })()
+          : {};
+        const watchCount = (typeof getActiveWatchOccurrences === 'function')
+          ? (function(){ try { return (getActiveWatchOccurrences(c.id) || []).length; } catch(e){ return 0; } })()
+          : 0;
+        const status = (typeof customerStatus === 'function') ? customerStatus(c.id) : null;
+
+        let badgeLabel = 'فعال';
+        let badgeTone = 'neutral';
+        if (riskLevel === 'critical') { badgeLabel = 'فوری'; badgeTone = 'danger'; }
+        else if (riskLevel === 'high') { badgeLabel = 'پیگیری'; badgeTone = 'warning'; }
+        else if (behavior.behindPattern === true) { badgeLabel = 'عقب‌افتاده'; badgeTone = 'warning'; }
+        else if (status === 'lost') { badgeLabel = 'از دست رفته'; badgeTone = 'muted'; }
+        else if (status === 'inactive') { badgeLabel = 'غیرفعال'; badgeTone = 'muted'; }
+        else if (status === 'new') { badgeLabel = 'جدید'; badgeTone = 'neutral'; }
+        else if (status === 'active') { badgeLabel = 'فعال'; badgeTone = 'success'; }
+
+        const days = (typeof customerStats === 'function')
+          ? (function(){ try { return customerStats(c.id).daysSinceLast; } catch(e){ return Infinity; } })()
+          : Infinity;
+        const daysText = Number.isFinite(days)
+          ? ('آخرین خرید: ' + Math.max(0, Math.round(days)) + ' روز پیش')
+          : 'هنوز خریدی ثبت نشده';
+        const watchTitle = watchCount > 0 ? 'هشدار فعال: ' + watchCount + ' مورد' : '';
+
         return (
-          '<a class="ledger-row" data-open-customer="' +
+          '<a class="ledger-row customer-list-row ' + riskCls + '" data-open-customer="' +
           esc(c.id) +
           '" href="' +
           customerHref(c.id) +
-          '" style="text-decoration:none;color:inherit;">' +
+          '" style="text-decoration:none;color:inherit;"' +
+          (watchTitle ? ' title="' + esc(watchTitle) + '"' : '') + '>' +
           '<span class="name">' +
           esc(c.name) +
-          (sub ? '<span class="sub">' + esc(sub) + '</span>' : '') +
+          '<span class="sub customer-row-meta">' + esc(daysText) + '</span>' +
           '</span>' +
-          '<span class="filler"></span>' +
-          '<span class="amount ' +
-          color +
-          '">' +
-          amt +
+          '<span class="customer-row-status badge tone-' + badgeTone + '">' + esc(badgeLabel) + '</span>' +
+          (watchCount > 0 ? '<span class="customer-row-watch" aria-label="هشدار فعال" title="' + esc(watchTitle) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 8.5v4.5M12 16.5h.01"></path></svg></span>' : '<span class="customer-row-watch-placeholder" aria-hidden="true"></span>') +
+          '<span class="customer-row-balance ' + color + '">' +
+          '<span class="customer-row-balance-label">' + esc(word) + '</span>' +
+          (t.balance !== 0 ? '<span class="customer-row-balance-value">' + toman(Math.abs(t.balance)) + ' ت</span>' : '') +
           '</span></a>'
         );
       })
@@ -266,9 +310,16 @@
     custFilter = (params && ['debt', 'settled', 'credit'].indexOf(params.filter) !== -1) ? params.filter : 'all';
     custSortByDebt = false;
     locFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
+    custPriorityMap = null; // fresh on entering the page
     drawCustomersPage(root);
 
-    refreshToken = ViewHost.setRefresh(renderCustomerListOnly);
+    // A real data refresh (invoice/payment/visit recorded elsewhere) can
+    // change risk/story output — invalidate the cache then, not on every
+    // keystroke render.
+    refreshToken = ViewHost.setRefresh(function () {
+      custPriorityMap = null;
+      renderCustomerListOnly();
+    });
 
     // openAddCustomer/openAddTransaction/etc. call render() after save — bind to list-only refresh.
     return function unmount() {

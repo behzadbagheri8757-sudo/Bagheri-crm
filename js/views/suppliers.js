@@ -60,11 +60,19 @@
         const word = balanceStatusWord(t.balance);
         const color = t.balance > 0 ? 'accent-rust' : (t.balance < 0 ? 'accent-olive' : '');
         const amt = t.balance === 0 ? word : (word + ': ' + toman(Math.abs(t.balance)) + ' ت');
-        const sub = [s.phone, purchaseCount ? (purchaseCount + ' خرید') : ''].filter(Boolean).join(' — ');
-        return `<a class="ledger-row" data-open-supplier="${esc(s.id)}" style="text-decoration:none;color:inherit;">
-          <span class="name">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>
+        const metaBits = [];
+        if (s.phone) metaBits.push(s.phone);
+        if (purchaseCount) metaBits.push(purchaseCount + ' خرید');
+        const meta = metaBits.length ? `<span class="sub">${esc(metaBits.join(' · '))}</span>` : '';
+        return `<a class="ledger-row tx-row" data-open-supplier="${esc(s.id)}" style="text-decoration:none;color:inherit;">
+          <span class="name">
+            <span class="tx-row-title">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}</span>
+            ${meta}
+          </span>
           <span class="filler"></span>
-          <span class="amount ${color}">${amt}</span>
+          <span class="amount tx-row-amount ${color}">
+            <span class="tx-row-total" style="font-size:.88rem;">${amt}</span>
+          </span>
         </a>`;
       }).join('');
     }
@@ -83,15 +91,15 @@
         ${chip('settled', 'تسویه')}
         ${chip('credit', 'بستانکار')}
       </div>
-      <div class="field">
-        <label>مرتب‌سازی</label>
-        <select id="supplier-sort">
+      <div class="tx-toolbar">
+        <label class="tx-toolbar-label" for="supplier-sort">مرتب‌سازی</label>
+        <select id="supplier-sort" class="tx-toolbar-select">
           <option value="name" ${supSort === 'name' ? 'selected' : ''}>نام</option>
           <option value="debtDesc" ${supSort === 'debtDesc' ? 'selected' : ''}>بیشترین بدهی</option>
           <option value="debtAsc" ${supSort === 'debtAsc' ? 'selected' : ''}>کمترین بدهی</option>
         </select>
       </div>
-      <div id="supplier-list"></div>
+      <div id="supplier-list" class="tx-list"></div>
     `;
 
     const searchEl = document.getElementById('supplier-search');

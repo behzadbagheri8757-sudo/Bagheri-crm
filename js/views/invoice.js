@@ -90,6 +90,23 @@
     const st = invoicePayStatus(inv);
     const hasSnapshot = typeof inv.prevBalance === 'number';
 
+    /* G5: optional Visit↔Invoice relationship (invoice side only; independent workflows) */
+    let linkedVisitLabel = '';
+    if (inv.visitId && cust) {
+      const lv = (cust.visits || []).find(function (v) { return v.id === inv.visitId; });
+      if (lv) {
+        linkedVisitLabel = (typeof faDate === 'function' ? faDate(lv.date) : lv.date) +
+          (lv.time ? ' ' + lv.time : '') +
+          (lv.result ? ' — ' + lv.result : '');
+      } else {
+        linkedVisitLabel = 'ویزیت مرتبط (شناسه ثبت‌شده)';
+      }
+    }
+    const customerVisits = (cust && Array.isArray(cust.visits)) ? cust.visits.slice().sort(function (a, b) {
+      return (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || '');
+    }) : [];
+
+
     const invProfit = (inv.items || []).reduce(function (a, it) {
       return a + ((it.price || 0) - (it.buyPrice || 0)) * (it.qty || 0) - (it.discount || 0);
     }, 0) - ((inv.discountType === 'percent') ? 0 : (inv.discount || 0));
@@ -123,43 +140,90 @@
         ${cust ? `<a class="btn secondary small" href="#/customer?id=${encodeURIComponent(cust.id)}">مشتری</a>` : ''}
       </div>
 
-      <div class="card" style="margin-bottom:12px;">
-        <div style="font-size:1.15rem;font-weight:800;color:var(--olive-dark);">فاکتور #${esc(String(inv.number || ''))}</div>
-        <div style="font-size:.88rem;line-height:1.85;margin-top:8px;">
-          <div>مشتری: <b>${esc(cust ? cust.name : '—')}</b></div>
-          <div>تاریخ: ${faDate(inv.date)}</div>
-          <div>وضعیت: <span class="${st.cls}">${st.label}</span></div>
+      <!-- IDENTITY -->
+      <div class="tx-identity card">
+        <div class="tx-identity-title">فاکتور #${esc(String(inv.number || ''))}</div>
+        <div class="tx-identity-meta">
+          <span>${esc(cust ? cust.name : '—')}</span>
+          <span class="tx-dot">·</span>
+          <span>${faDate(inv.date)}</span>
+          <span class="tx-dot">·</span>
+          <span class="${st.cls}">${st.label}</span>
         </div>
       </div>
 
-      <h3 class="sub-title">اقلام</h3>
-      ${itemRows}
-
-      <div class="cards" style="margin-top:12px;margin-bottom:14px;">
-        <div class="card wide"><div class="label">مبلغ کل فاکتور</div><div class="value">${toman(inv.total)} ت</div></div>
-        ${inv.discount ? `<div class="card"><div class="label">تخفیف فاکتور${inv.discountType === 'percent' ? ' (%)' : ''}</div><div class="value">${toman(inv.discount)}${inv.discountType === 'percent' ? ' %' : ' ت'}</div></div>` : ''}
-        <div class="card"><div class="label">پرداخت‌شده روی فاکتور</div><div class="value">${toman(paid)} ت</div></div>
-        <div class="card"><div class="label">مانده فاکتور</div><div class="value ${remain > 0.5 ? 'accent-rust' : 'accent-olive'}">${toman(Math.max(0, remain))} ت</div></div>
-        <div class="card"><div class="label">نقد</div><div class="value" style="font-size:1rem;">${toman(inv.cashPaid || 0)}</div></div>
-        <div class="card"><div class="label">کارت</div><div class="value" style="font-size:1rem;">${toman(inv.cardPaid || 0)}</div></div>
-        <div class="card"><div class="label">انتقال</div><div class="value" style="font-size:1rem;">${toman(inv.transferPaid || 0)}</div></div>
-        <div class="card"><div class="label">چک</div><div class="value" style="font-size:1rem;">${toman(inv.checkPaid || 0)}</div></div>
-        ${hasSnapshot ? `
-          <div class="card"><div class="label">مانده قبلی مشتری</div><div class="value" style="font-size:1rem;">${toman(inv.prevBalance)} ت</div></div>
-          <div class="card"><div class="label">مانده بعد از فاکتور</div><div class="value" style="font-size:1rem;">${toman(Math.abs(inv.newBalance || 0))} ت ${balanceStatusWord(inv.newBalance || 0)}</div></div>
-        ` : ''}
-        <div class="card wide"><div class="label">سود اقلام این فاکتور (قیمت − buyPrice تاریخی)</div><div class="value accent-amber">${toman(invProfit)} ت</div></div>
+      <!-- FINANCIAL SUMMARY -->
+      <div class="tx-finance cards">
+        <div class="card wide">
+          <div class="label">مبلغ کل</div>
+          <div class="value">${toman(inv.total)} ت</div>
+        </div>
+        <div class="card">
+          <div class="label">پرداخت‌شده</div>
+          <div class="value">${toman(paid)} ت</div>
+        </div>
+        <div class="card">
+          <div class="label">مانده</div>
+          <div class="value ${remain > 0.5 ? 'accent-rust' : 'accent-olive'}">${toman(Math.max(0, remain))} ت</div>
+        </div>
       </div>
 
-      <h3 class="sub-title">عملیات</h3>
-      <div class="btn-row" style="margin-bottom:16px;">
-        <button type="button" class="btn small" data-inv-action="print">چاپ</button>
-        <button type="button" class="btn small secondary" data-inv-action="image">خروجی تصویر</button>
-        <button type="button" class="btn small secondary" data-inv-action="edit">ویرایش</button>
+      <!-- PRIMARY ACTIONS -->
+      <div class="btn-row tx-actions-primary" style="margin-bottom:14px;">
+        <button type="button" class="btn" data-inv-action="print">چاپ</button>
+        <button type="button" class="btn secondary" data-inv-action="edit">ویرایش</button>
+        <button type="button" class="btn secondary" data-inv-action="image">تصویر</button>
         <button type="button" class="btn small danger" data-inv-action="del">حذف</button>
       </div>
 
+      <!-- ITEMS -->
+      <h3 class="sub-title">اقلام</h3>
+      <div class="tx-items">${itemRows}</div>
+
+      <!-- PAYMENT DETAILS (progressive) -->
+      <details class="tx-details">
+        <summary>جزئیات پرداخت و سود</summary>
+        <div class="cards" style="margin-top:10px;margin-bottom:8px;">
+          ${inv.discount ? `<div class="card"><div class="label">تخفیف فاکتور${inv.discountType === 'percent' ? ' (%)' : ''}</div><div class="value">${toman(inv.discount)}${inv.discountType === 'percent' ? ' %' : ' ت'}</div></div>` : ''}
+          <div class="card"><div class="label">نقد</div><div class="value" style="font-size:1rem;">${toman(inv.cashPaid || 0)}</div></div>
+          <div class="card"><div class="label">کارت</div><div class="value" style="font-size:1rem;">${toman(inv.cardPaid || 0)}</div></div>
+          <div class="card"><div class="label">انتقال</div><div class="value" style="font-size:1rem;">${toman(inv.transferPaid || 0)}</div></div>
+          <div class="card"><div class="label">چک</div><div class="value" style="font-size:1rem;">${toman(inv.checkPaid || 0)}</div></div>
+          ${hasSnapshot ? `
+            <div class="card"><div class="label">مانده قبلی مشتری</div><div class="value" style="font-size:1rem;">${toman(inv.prevBalance)} ت</div></div>
+            <div class="card"><div class="label">مانده بعد از فاکتور</div><div class="value" style="font-size:1rem;">${toman(Math.abs(inv.newBalance || 0))} ت ${balanceStatusWord(inv.newBalance || 0)}</div></div>
+          ` : ''}
+          <div class="card wide"><div class="label">سود اقلام این فاکتور</div><div class="value accent-amber">${toman(invProfit)} ت</div></div>
+        </div>
+      </details>
+
+      <!-- SECONDARY: visit link -->
+      <details class="tx-details">
+        <summary>ارتباط با ویزیت (اختیاری)</summary>
+        <div class="card" style="margin-top:10px;margin-bottom:8px;">
+          <div class="label">ویزیت مرتبط با این فاکتور</div>
+          <div style="font-size:.88rem;margin-top:6px;line-height:1.7;">
+            ${inv.visitId
+              ? ('<b>' + esc(linkedVisitLabel) + '</b>' +
+                 ' <button type="button" class="btn small secondary" data-inv-action="unlink-visit" style="margin-right:8px;">حذف ارتباط</button>')
+              : '<span class="sub">متصل نیست — ویزیت و فاکتور رویدادهای مستقل‌اند؛ فقط در صورت نیاز وصل کنید.</span>'}
+          </div>
+          ${!inv.visitId && customerVisits.length ? (
+            '<div class="field" style="margin-top:10px;"><label>اتصال به ویزیت این مشتری</label>' +
+            '<select id="inv-link-visit"><option value="">— انتخاب ویزیت —</option>' +
+            customerVisits.map(function (v) {
+              const lab = (typeof faDate === 'function' ? faDate(v.date) : v.date) +
+                (v.time ? ' ' + v.time : '') + (v.result ? ' — ' + v.result : '');
+              return '<option value="' + esc(v.id) + '">' + esc(lab) + '</option>';
+            }).join('') +
+            '</select></div>' +
+            '<div class="btn-row"><button type="button" class="btn small secondary" data-inv-action="link-visit">ثبت ارتباط</button></div>'
+          ) : (!inv.visitId ? '<div class="empty" style="padding:8px 0;">برای این مشتری ویزیتی ثبت نشده</div>' : '')}
+        </div>
+      </details>
+
       ${hist}
+    
     `;
 
     // Action buttons (delegated)
@@ -201,6 +265,34 @@
               return;
             }
             openEditInvoice(inv.id, inv.customerId);
+          } else if (action === 'link-visit') {
+            (async function () {
+              const sel = document.getElementById('inv-link-visit');
+              const vid = sel && sel.value;
+              if (!vid) { showToast('یک ویزیت انتخاب کنید'); return; }
+              inv.visitId = vid;
+              try {
+                await saveData();
+                showToast('ارتباط با ویزیت ثبت شد');
+                drawInvoicePage(rootEl || root);
+              } catch (err) {
+                console.error(err);
+                showToast('ذخیره نشد');
+              }
+            })();
+          } else if (action === 'unlink-visit') {
+            (async function () {
+              if (!confirm('ارتباط این فاکتور با ویزیت حذف شود؟ (خود ویزیت و فاکتور حذف نمی‌شوند)')) return;
+              delete inv.visitId;
+              try {
+                await saveData();
+                showToast('ارتباط حذف شد');
+                drawInvoicePage(rootEl || root);
+              } catch (err) {
+                console.error(err);
+                showToast('ذخیره نشد');
+              }
+            })();
           } else if (action === 'del') {
             (async function () {
               if (typeof invoiceHasLinkedStockReturn === 'function' && invoiceHasLinkedStockReturn(inv.id)) {
@@ -217,6 +309,13 @@
               } catch (saveErr) {
                 data = previousData;
                 throw saveErr;
+              }
+              if (typeof gameOnInvoiceDeleted === 'function') {
+                try {
+                  await gameOnInvoiceDeleted(inv.id);
+                } catch (e) {
+                  console.warn('Game hook failed:', e);
+                }
               }
               showToast('فاکتور حذف شد؛ موجودی و حساب مشتری اصلاح شد');
               navigateToInvoices();

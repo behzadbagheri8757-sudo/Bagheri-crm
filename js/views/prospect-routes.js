@@ -26,14 +26,15 @@
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="#/prospects">← مغازه‌های بالقوه</a>
       </div>
-      <h2 class="section-title">مسیرها</h2>
+      <h2 class="section-title">مسیرها و محله‌ها</h2>
+      <p class="tx-hint">مسیر و محله برای برنامه‌ریزی ویزیت میدانی — جدا از ساختار موقعیت مکانی.</p>
       <div class="field"><label>مسیر جدید</label>
         <div class="btn-row">
           <input id="new-route" placeholder="مثلاً: مسیر غرب" style="flex:1;">
           <button type="button" class="btn small" id="add-route">افزودن</button>
         </div>
       </div>
-      <div id="route-list"></div>
+      <div id="route-list" class="field-route-list"></div>
     `;
 
     const list = document.getElementById('route-list');
@@ -42,13 +43,16 @@
     } else {
       list.innerHTML = routes.map(r => {
         const count = prospectState.shops.filter(s => s.routeId === r.id).length;
-        const neigh = (r.neighborhoods || []).map(n =>
-          `<span class="badge" style="margin:2px;">${esc(n.name)}</span>`
-        ).join(' ') || '<span class="sub">بدون محله</span>';
-        return `<div class="card" style="margin-bottom:10px;" data-route="${esc(r.id)}">
-          <div style="font-weight:800;">${esc(r.name)} <span class="sub">(${count} مغازه)</span></div>
-          <div style="margin:8px 0;">${neigh}</div>
-          <div class="btn-row">
+        const neighList = (r.neighborhoods || []);
+        const neigh = neighList.length
+          ? neighList.map(n =>
+              `<span class="field-neigh-chip">${esc(n.name)}</span>`
+            ).join('')
+          : '<span class="sub">بدون محله</span>';
+        return `<div class="card field-route-card" data-route="${esc(r.id)}">
+          <div class="field-route-title">${esc(r.name)} <span class="sub">(${count} مغازه)</span></div>
+          <div class="field-route-neighs">${neigh}</div>
+          <div class="btn-row" style="margin-top:8px;">
             <button type="button" class="btn small secondary" data-add-neigh="${esc(r.id)}">+ محله</button>
             <button type="button" class="btn small danger" data-del-route="${esc(r.id)}">حذف مسیر</button>
           </div>

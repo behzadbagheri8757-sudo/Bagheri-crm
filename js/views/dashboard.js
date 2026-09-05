@@ -92,7 +92,7 @@
     const gameShortcut = '<a class="section-action" href="#/game">Sales Game ←</a>';
     return '<div class="dashboard-block">' +
       '<div class="dashboard-block-head"><div class="dash-section-label"><span class="dash-section-ico" aria-hidden="true">' + ICO.quick + '</span><span>اقدام سریع</span></div>' + gameShortcut + '</div>' +
-      '<div class="dash-quick-actions">' +
+      '<div class="dash-quick-actions dash-qa-bar">' +
         '<button type="button" class="dash-qa-btn" data-qa="invoice"><span class="dash-qa-ico" aria-hidden="true">' + ICO.invoice + '</span><span class="dash-qa-label">فاکتور جدید</span></button>' +
         '<button type="button" class="dash-qa-btn" data-qa="payment"><span class="dash-qa-ico" aria-hidden="true">' + ICO.card + '</span><span class="dash-qa-label">ثبت دریافت</span></button>' +
         '<button type="button" class="dash-qa-btn" data-qa="visit"><span class="dash-qa-ico" aria-hidden="true">' + ICO.map + '</span><span class="dash-qa-label">ثبت ویزیت</span></button>' +
@@ -139,7 +139,7 @@
         dashSectionHead(ICO.actions, 'کارهای پیشنهادی امروز', '', '') +
         '<div class="dash-activity">' +
           '<div class="empty" style="padding:18px 8px;text-align:center;">' +
-            '<div style="font-weight:700;color:#1F2429;margin-bottom:4px;">امروز کار ضروری نداری</div>' +
+            '<div style="font-weight:700;color:#1F2937;margin-bottom:4px;">امروز کار ضروری نداری</div>' +
             '<div class="sub" style="opacity:.85;">وضعیت مشتری‌ها و پتانسیل‌ها تحت کنترل است.</div>' +
           '</div>' +
         '</div></div>';
@@ -195,7 +195,7 @@
       hiddenBlock =
         '<div class="dash-action-more" data-action-more hidden>' + hiddenRows + '</div>' +
         '<button type="button" class="dash-action-toggle" data-action-toggle aria-expanded="false">' +
-          '<span data-action-toggle-label>نمایش ' + hiddenItems.length + ' کار دیگر</span>' +
+          '<span data-action-toggle-label>نمایش ' + enToFaDigits(String(hiddenItems.length)) + ' کار دیگر</span>' +
           '<span class="dash-action-toggle-ico" aria-hidden="true">›</span>' +
         '</button>';
     }
@@ -234,85 +234,52 @@
     });
   }
 
-  /* --- Watch / Early Warning aggregation (frozen spec §16) ---
-     Read-only aggregation over extractWatchObservations() for active
-     customers only. Never enters calculateAllActions(). No action
-     buttons. Limits: max 2 per customer, max 2 per productId, max 5
-     total. Sort: level desc, then deviationStrength desc. */
-  var DASH_WATCH_LEVEL_RANK = { low: 1, medium: 2, high: 3 };
-  function _dashWatchSort(a, b) {
-    var la = DASH_WATCH_LEVEL_RANK[a.level] || 0;
-    var lb = DASH_WATCH_LEVEL_RANK[b.level] || 0;
-    if (lb !== la) return lb - la;
-    return (b.deviationStrength || 0) - (a.deviationStrength || 0);
+  /* --- Watch / Early Warning + Lifecycle (additive) ---
+     Generation still comes from extractWatchObservations via
+     reconcileWatchLifecycle. The Dashboard no longer lists individual
+     Watch rows here — it shows one compact summary card that links to
+     the full Watch List (#/watches). Per-occurrence rendering now lives
+     in js/views/watches.js (WatchesView / WatchDetailView), which reads
+     the same existing public Watch API used below. */
+  function faDigits(n) {
+    return String(n).replace(/[0-9]/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'[d]; });
   }
 
-  function collectDashboardWatches() {
-    var pool = [];
-    if (typeof extractWatchObservations !== 'function') return pool;
-    if (typeof data === 'undefined' || !Array.isArray(data.customers)) return pool;
-    var customers = data.customers.filter(function (c) { return c && c.active !== false; });
+  function watchSummaryHtml() {
+    var count = 0;
+    var haveCount = false;
 
-    for (var i = 0; i < customers.length; i++) {
-      var c = customers[i];
-      var watches;
-      try { watches = extractWatchObservations(c.id) || []; } catch (e) { watches = []; }
-      if (!watches.length) continue;
-      watches.sort(_dashWatchSort);
-      var capped = watches.slice(0, 2); // max 2 Watch per customer
-      for (var j = 0; j < capped.length; j++) {
-        var w = capped[j];
-        pool.push({
-          customerId: c.id,
-          customerName: c.name || '—',
-          productId: w.productId,
-          productName: w.productName,
-          category: w.category,
-          level: w.level,
-          reason: w.reason,
-          deviationStrength: w.deviationStrength
-        });
+    if (typeof getWatchLifecycleSummary === 'function') {
+      try {
+        var summary = getWatchLifecycleSummary();
+        if (summary && typeof summary.active === 'number') {
+          count = summary.active;
+          haveCount = true;
+        }
+      } catch (eS) { /* fall through to fallback below */ }
+    }
+
+    if (!haveCount && typeof extractWatchObservations === 'function' && typeof data !== 'undefined' && Array.isArray(data.customers)) {
+      // Fallback when lifecycle module not loaded (mirrors prior behavior)
+      var customers = data.customers.filter(function (c) { return c && c.active !== false; });
+      for (var ci = 0; ci < customers.length; ci++) {
+        try { count += (extractWatchObservations(customers[ci].id) || []).length; } catch (e) { /* skip */ }
       }
+      haveCount = true;
     }
 
-    pool.sort(_dashWatchSort);
+    if (!count) return '';
 
-    var productCounts = Object.create(null);
-    var out = [];
-    for (var k = 0; k < pool.length; k++) {
-      var item = pool[k];
-      if (item.productId) {
-        var cnt = productCounts[item.productId] || 0;
-        if (cnt >= 2) continue; // max 2 Watch per productId
-        productCounts[item.productId] = cnt + 1;
-      }
-      out.push(item);
-      if (out.length >= 5) break; // max 5 total
-    }
-    return out;
-  }
-
-  function earlyWarningHtml() {
-    var items = [];
-    try { items = collectDashboardWatches(); } catch (e) { items = []; }
-    if (!items.length) return '';
-    function levelColor(level) {
-      return level === 'high' ? '#B3261E' : level === 'medium' ? '#C77700' : '#6B7280';
-    }
-    function levelLabel(level) {
-      return level === 'high' ? 'زیاد' : level === 'medium' ? 'متوسط' : 'کم';
-    }
-    var rows = items.map(function (w) {
-      var sub = (w.productName ? ('«' + esc(w.productName) + '» — ') : '') + esc(w.reason || '');
-      var href = '#/customer?id=' + encodeURIComponent(w.customerId || '');
-      return '<a class="ledger-row" href="' + href + '">' +
-        '<span class="name">' + esc(w.customerName) + '<span class="sub">' + sub + '</span></span>' +
-        '<span class="filler"></span>' +
-        '<span class="amount" style="color:' + levelColor(w.level) + ';font-size:.8rem;font-weight:600;">' + esc(levelLabel(w.level)) + '</span>' +
-        '</a>';
-    }).join('');
-    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'هشدار زودهنگام (Watch)', '', '') +
-      '<div class="dash-activity">' + rows + '</div></div>';
+    return '<div class="dashboard-block">' + dashSectionHead(ICO.actions, 'هشدارهای زودهنگام', '', '') +
+      '<a class="dash-watch-compact" href="#/watches">' +
+        '<span class="dash-watch-compact-ico" aria-hidden="true">' + ICO.actions + '</span>' +
+        '<span class="dash-watch-compact-body">' +
+          '<span class="dash-watch-compact-count">' + faDigits(count) + ' مورد</span>' +
+          '<span class="dash-watch-compact-label">هشدارهای فعال</span>' +
+        '</span>' +
+        '<span class="dash-watch-compact-chevron" aria-hidden="true">‹</span>' +
+      '</a>' +
+      '</div>';
   }
 
   function recentInvoicesHtml() {
@@ -374,7 +341,7 @@
           if (daysLeft > 0) {
             const requiredDaily = Math.round(remaining / daysLeft);
             paceHtml = '<span class="dmt-pace">نیاز روزانه ' + toman(requiredDaily) + ' ت' +
-              ' <span class="dmt-pace-days">(' + daysLeft + ' روز مانده)</span></span>';
+              ' <span class="dmt-pace-days">(' + enToFaDigits(String(daysLeft)) + ' روز مانده)</span></span>';
           }
         }
         if (statusMeta) {
@@ -450,6 +417,10 @@
   }
 
   async function renderInto(root, isStale) {
+    // Lifecycle reconcile before painting Watch summary (additive; fail-open)
+    if (typeof reconcileWatchLifecycle === 'function') {
+      try { await reconcileWatchLifecycle(); } catch (eRec) { console.warn('watch lifecycle reconcile failed', eRec); }
+    }
     const metrics = typeof commandCenterMetrics === 'function' ? commandCenterMetrics(new Date()) : { mtdSales: globalTotals().monthSales, mtdProfit: 0, salesDeltaPct: null, profitDeltaPct: null };
     const g = globalTotals();
     const invVal = inventoryValue();
@@ -459,16 +430,15 @@
       '<div class="dashboard-shell">' +
       '<h2 class="section-title">داشبورد</h2>' +
       '<div class="dashboard-eyebrow">مرکز فرماندهی روزانه</div>' +
-      targetHtml(metrics) +
+      '<div class="biz-status">' +
+        targetHtml(metrics) +
+      '</div>' +
       todaysActionsHtml() +
-      earlyWarningHtml() +
-      '<div class="dashboard-block">' + dashSectionHead(ICO.summary, 'خلاصه وضعیت', '', '') +
-      '<div class="dash-kpis">' +
-      '<a class="dash-kpi sales dash-kpi-link" href="#/reports"><div class="dash-kpi-label">فروش این ماه</div><div class="dash-kpi-value sales">' + money(metrics.mtdSales) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.salesDeltaPct) + '</div><span class="dash-kpi-chevron" aria-hidden="true">‹</span></a>' +
-      '<div class="dash-kpi profit"><div class="dash-kpi-label">سود این ماه</div><div class="dash-kpi-value profit">' + money(metrics.mtdProfit) + '</div><div class="dash-kpi-sub">' + deltaHtml(metrics.profitDeltaPct) + '</div></div>' +
-      '<div class="dash-kpi inventory"><div class="dash-kpi-label">ارزش موجودی انبار</div><div class="dash-kpi-value">' + money(invVal) + '</div><div class="dash-kpi-sub">ارزش فعلی موجودی</div></div>' +
-      '<a class="dash-kpi debt dash-kpi-link" href="#/customers?filter=debt"><div class="dash-kpi-label">بدهی مشتریان</div><div class="dash-kpi-value debt">' + money(g.customerDebt) + '</div><div class="dash-kpi-sub">' + debtorList(9999).length + ' بدهکار فعال</div><span class="dash-kpi-chevron" aria-hidden="true">‹</span></a>' +
-      '</div></div>' +
+      '<div class="biz-status-secondary">' +
+        '<div class="biz-stat"><span class="biz-stat-label">سود این ماه</span><span class="biz-stat-value">' + money(metrics.mtdProfit) + '</span></div>' +
+        '<div class="biz-stat"><span class="biz-stat-label">ارزش موجودی</span><span class="biz-stat-value">' + money(invVal) + '</span></div>' +
+        '<a class="biz-stat biz-stat-link" href="#/customers?filter=debt"><span class="biz-stat-label">بدهی مشتریان</span><span class="biz-stat-value debt">' + money(g.customerDebt) + '</span></a>' +
+      '</div>' +
       quickActionsHtml() +
       recentInvoicesHtml() + recentVisitsHtml() +
       '</div>';

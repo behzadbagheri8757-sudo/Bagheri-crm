@@ -62,17 +62,35 @@
 
     const stockList =
       products
+        .slice()
+        .sort(function (a, b) {
+          const aOff = a.active === false ? 1 : 0;
+          const bOff = b.active === false ? 1 : 0;
+          if (aOff !== bOff) return aOff - bOff;
+          return (a.name || '').localeCompare(b.name || '', 'fa');
+        })
         .map(function (p) {
           const st = invStatus(p);
           const val = (typeof productInventoryValue === 'function') ? productInventoryValue(p.id) : (Number(p.stockQty) || 0) * (Number(p.buy) || 0);
           const unit = p.packageWeight ? 'بسته ' + p.packageWeight : 'عدد';
           const qtyCls = (Number(p.stockQty) || 0) < 0 ? 'accent-red' : '';
+          const isOff = p.active === false;
+          // Visual-only: dim row + compact OFF badge. No behavior change.
+          const inactiveBadge = isOff
+            ? ' <span class="badge pending" style="display:inline-block;vertical-align:middle;font-size:.72em;padding:1px 7px;margin-right:4px;opacity:1;">غیرفعال</span>'
+            : '';
+          const offStyle = isOff
+            ? 'cursor:pointer;opacity:.42;filter:grayscale(.35);'
+            : 'cursor:pointer;';
           return (
             '<div class="ledger-row" data-edit-product="' +
             esc(p.id) +
-            '" style="cursor:pointer;">' +
+            '" style="' +
+            offStyle +
+            '">' +
             '<span class="name">' +
             esc(p.name) +
+            inactiveBadge +
             '<span class="sub">واحد: ' +
             esc(String(unit)) +
             ' — <span class="' +
@@ -105,8 +123,8 @@
               '<span class="sub">' +
               faDate(l.date) +
               ' — ' +
-              esc(stockTypeLabel(l.type)) +
-              (l.note ? ' — ' + esc(l.note) : '') +
+              esc((l.type === 'sale' && /فروش \(فاکتور[^)]*null[^)]*\)/.test(String(l.note || ''))) ? 'فروش (فاکتور)' : stockTypeLabel(l.type)) +
+              (l.note && !(l.type === 'sale' && /null/.test(String(l.note))) ? ' — ' + esc(l.note) : '') +
               '</span></span><span class="filler"></span>' +
               '<span class="amount ' +
               signCls +

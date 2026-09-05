@@ -76,16 +76,25 @@
     if (!rows.length) {
       listEl.innerHTML = `<div class="empty">${(data.invoices||[]).length?'موردی پیدا نشد':'هنوز فاکتوری ثبت نشده. با + فاکتور جدید بزنید.'}</div>`;
     } else {
-      listEl.innerHTML = rows.map(({inv, st, paid, remain, custName}) => `
-        <a class="ledger-row" href="#/invoice?id=${encodeURIComponent(inv.id)}" style="text-decoration:none;color:inherit;">
-          <span class="name">#${esc(String(inv.number||''))}
-            <span class="sub">${esc(custName)} — ${faDate(inv.date)} — <span class="${st.cls}">${st.label}</span></span>
-            <span class="sub">پرداخت‌شده: ${toman(paid)} ت — مانده فاکتور: ${toman(Math.max(0, remain))} ت</span>
+      listEl.innerHTML = rows.map(({inv, st, paid, remain, custName}) => {
+        const remainBit = remain > 0.5
+          ? `<span class="tx-row-meta accent-rust">مانده ${toman(Math.max(0, remain))} ت</span>`
+          : `<span class="tx-row-meta accent-olive">تسویه</span>`;
+        return `
+        <a class="ledger-row tx-row" href="#/invoice?id=${encodeURIComponent(inv.id)}" style="text-decoration:none;color:inherit;">
+          <span class="name invoice-row-main">
+            <span class="tx-row-title">#${esc(String(inv.number||''))} · ${esc(custName)}</span>
+            <span class="sub">${faDate(inv.date)} — <span class="${st.cls}">${st.label}</span></span>
+            ${remain > 0.5 || paid > 0 ? `<span class="sub">پرداخت‌شده ${toman(paid)} ت</span>` : ''}
           </span>
           <span class="filler"></span>
-          <span class="amount">${toman(inv.total)} ت</span>
-        </a>
-      `).join('');
+          <span class="amount tx-row-amount invoice-row-summary">
+            <span class="invoice-row-total"><span class="invoice-row-label">جمع فاکتور</span><span class="tx-row-total">${toman(inv.total)} ت</span></span>
+            ${remain > 0.5 ? `<span class="invoice-row-remain"><span class="invoice-row-label">مانده</span>${remainBit}</span>` : ''}
+            ${paid > 0 ? `<span class="invoice-row-paid"><span class="invoice-row-label">پرداخت‌شده</span><span class="tx-row-meta accent-olive">${toman(paid)} ت</span></span>` : ''}
+          </span>
+        </a>`;
+      }).join('');
     }
   }
 
@@ -121,16 +130,16 @@
         ${chip('paid','پرداخت‌شده')}
         ${chip('debt','بدهکار')}
       </div>
-      <div class="field">
-        <label>مرتب‌سازی</label>
-        <select id="invoice-sort">
+      <div class="tx-toolbar">
+        <label class="tx-toolbar-label" for="invoice-sort">مرتب‌سازی</label>
+        <select id="invoice-sort" class="tx-toolbar-select">
           <option value="newest" ${invSort==='newest'?'selected':''}>جدیدترین</option>
           <option value="oldest" ${invSort==='oldest'?'selected':''}>قدیمی‌ترین</option>
           <option value="amountDesc" ${invSort==='amountDesc'?'selected':''}>بیشترین مبلغ</option>
           <option value="amountAsc" ${invSort==='amountAsc'?'selected':''}>کمترین مبلغ</option>
         </select>
       </div>
-      <div id="invoice-list"></div>
+      <div id="invoice-list" class="tx-list"></div>
     `;
 
     const searchEl = document.getElementById('invoice-search');

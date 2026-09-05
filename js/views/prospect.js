@@ -16,8 +16,8 @@
   // Does not affect the normal "re-evaluate an existing prospect" path.
   let cameFromNewEvaluation = false;
   function rankPill(rank) {
-    const info = PROSPECT_RANK_INFO[rank] || PROSPECT_RANK_INFO['D'];
-    return `<span class="rank-pill" style="background:${info.color}">${esc(rank)}</span>`;
+    const safeRank = (rank || 'D').toString().replace(/[^A-Z+\-]/g, '');
+    return `<span class="rank-pill rank-pill-${safeRank}">${esc(safeRank)}</span>`;
   }
 
   function navigateToProspects() {
@@ -125,12 +125,16 @@
         const t = PROSPECT_VISIT_TAGS.find(x => x.key === tk);
         return t ? t.label : tk;
       }).join('، ');
-      return `<div class="ledger-row" style="cursor:default;">
-        <span class="name">${prospectFaDateTime(v.date)}
+      return `<div class="ledger-row tx-row" style="cursor:default;">
+        <span class="name">
+          <span class="tx-row-title">${prospectFaDateTime(v.date)}</span>
           <span class="sub">${tags ? esc(tags) : 'بدون برچسب'}</span>
         </span>
         <span class="filler"></span>
-        <span class="amount">${v.score} ${rankPill(v.rank)}</span>
+        <span class="amount tx-row-amount">
+          <span class="tx-row-total">${v.score}</span>
+          <span class="tx-row-meta">${rankPill(v.rank)}</span>
+        </span>
       </div>`;
     }).join('') || '<div class="empty">ویزیتی ثبت نشده</div>';
 
@@ -139,37 +143,43 @@
         <a class="btn secondary small" href="#/prospects">← لیست مغازه‌ها</a>
       </div>
       ${shop.status === 'converted' ? `<div class="converted-banner">✅ این مغازه به مشتری تبدیل شده است.</div>` : ''}
-      <div class="prospect-info-card card">
-        <div class="prospect-info-main">
-          <div class="prospect-name">${esc(shop.name)}</div>
-          <div class="prospect-location-line">📍 ${esc(getLocationDisplayString(shop.locationId))}</div>
+
+      <!-- IDENTITY + SCORE -->
+      <div class="tx-identity card field-prospect-head">
+        <div class="tx-identity-title">${esc(shop.name)}</div>
+        <div class="tx-identity-meta">
+          <span>📍 ${esc(getLocationDisplayString(shop.locationId))}</span>
         </div>
-        <div class="prospect-score-block">
-          <div class="prospect-score-value">${shop.latestScore}</div>
-          <div class="prospect-score-meta">امتیاز · ${rankPill(shop.latestRank)}</div>
+        <div class="field-score-row">
+          <span class="field-score-value">${shop.latestScore}</span>
+          <span class="field-score-meta">امتیاز · ${rankPill(shop.latestRank)}</span>
         </div>
-        
-        <div class="prospect-rank-description sub">${esc(info.desc)}</div>
+        <div class="sub" style="margin-top:6px;">${esc(info.desc)}</div>
       </div>
-      <div class="btn-row" style="margin-bottom:14px;">
-        <button type="button" class="btn small" id="btn-add-visit">ثبت ویزیت / ارزیابی جدید</button>
-        <button type="button" class="btn small secondary" id="btn-assign-location">اختصاص موقعیت</button>
+
+      <!-- PRIMARY ACTIONS -->
+      <div class="btn-row tx-actions-primary" style="margin-bottom:14px;">
+        <button type="button" class="btn small" id="btn-add-visit">ثبت ویزیت / ارزیابی</button>
+        <button type="button" class="btn small secondary" id="btn-assign-location">موقعیت</button>
         ${shop.status !== 'converted'
           ? `<button type="button" class="btn small secondary" id="btn-convert">تبدیل به مشتری</button>`
           : (shop.linkedCustomerId
               ? `<button type="button" class="btn small secondary" id="btn-linked-customer">پرونده مشتری</button>`
               : '')}
       </div>
+
       ${last ? `
         <div class="prospect-result-card">
           <div class="prospect-result-title"><span aria-hidden="true">✓</span> نتیجه ویزیت</div>
           <div class="prospect-result-content">${latestResultHtml}</div>
         </div>
-        <h3 class="sub-title">پاسخ‌های آخرین ارزیابی</h3>
-        <div class="card evaluation-answers-card">${answersHtml}</div>
+        <details class="tx-details" open>
+          <summary>پاسخ‌های آخرین ارزیابی</summary>
+          <div class="card evaluation-answers-card" style="margin-top:8px;">${answersHtml}</div>
+        </details>
       ` : ''}
       <h3 class="sub-title">سوابق ویزیت / ارزیابی (${shop.visits.length})</h3>
-      ${visitRows}
+      <div class="tx-list">${visitRows}</div>
     `;
 
     const addVisitBtn = document.getElementById('btn-add-visit');

@@ -40,10 +40,10 @@
                         '<button type="button" class="btn small" data-add-neigh="' + esc(rt.id) + '">افزودن</button></div></div>' +
                         (neighs.length
                           ? neighs.map(function (n) {
-                              return '<div class="ledger-row" data-neigh="' + esc(n.id) + '">' +
-                                '<span class="name">' + esc(n.name) + '</span>' +
+                              return '<div class="ledger-row tx-row" data-neigh="' + esc(n.id) + '">' +
+                                '<span class="name"><span class="tx-row-title">' + esc(n.name) + '</span></span>' +
                                 '<span class="filler"></span>' +
-                                '<button type="button" class="btn small danger" data-del-neigh="' + esc(n.id) + '">حذف</button>' +
+                                '<button type="button" class="btn small danger tx-status-btn" data-del-neigh="' + esc(n.id) + '">حذف</button>' +
                                 '</div>';
                             }).join('')
                           : '<div class="empty" style="padding:6px 0;">هنوز محله‌ای نیست</div>') +
@@ -71,14 +71,12 @@
     root.innerHTML =
       '<div class="btn-row" style="margin-bottom:10px;">' +
       '<a class="btn secondary small" href="#/settings">← تنظیمات</a></div>' +
-      '<h2 class="section-title">مدیریت موقعیت مکانی</h2>' +
-      '<div class="sub" style="margin-bottom:10px;font-size:.82rem;">' +
-      'ساختار مشترک منطقه › مسیر › محله — هم برای مشتریان و هم برای مغازه‌های بالقوه.' +
-      '</div>' +
+      '<h2 class="section-title">موقعیت مکانی</h2>' +
+      '<p class="tx-hint">ساختار: منطقه › مسیر › محله — مشترک مشتریان و مغازه‌های بالقوه.</p>' +
       '<div class="field"><label>منطقه جدید</label>' +
       '<div class="btn-row"><input id="new-region-input" placeholder="مثلاً: نوشهر" style="flex:1;">' +
       '<button type="button" class="btn small" id="add-region-btn">افزودن</button></div></div>' +
-      '<div id="region-list">' + regionBlocks + '</div>';
+      '<div id="region-list" class="field-geo-list">' + regionBlocks + '</div>';
 
     const addRegionBtn = document.getElementById('add-region-btn');
     addRegionHandler = async function () {

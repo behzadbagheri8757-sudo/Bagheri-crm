@@ -80,9 +80,9 @@
     const totalAll = collectVisits().length;
     const orderedN = rows.filter(r => r.visit.result === VISIT_RESULTS[0] || r.visit.ordered).length;
     sumEl.innerHTML = `
-      <div class="card"><div class="label">تعداد (فیلتر)</div><div class="value">${rows.length}</div></div>
-      <div class="card"><div class="label">کل ویزیت‌ها</div><div class="value">${totalAll}</div></div>
-      <div class="card wide"><div class="label">سفارش‌گرفته در فیلتر فعلی</div><div class="value accent-olive">${orderedN}</div></div>
+      <div class="card"><div class="label">تعداد (فیلتر)</div><div class="value">${enToFaDigits(String(rows.length))}</div></div>
+      <div class="card"><div class="label">کل ویزیت‌ها</div><div class="value">${enToFaDigits(String(totalAll))}</div></div>
+      <div class="card wide"><div class="label">سفارش‌گرفته در فیلتر فعلی</div><div class="value accent-olive">${enToFaDigits(String(orderedN))}</div></div>
     `;
 
     if (!rows.length) {
@@ -93,26 +93,22 @@
     listEl.innerHTML = rows.map(r => {
       const v = r.visit;
       const cls = resultClass(v.result);
+      const ordered = v.ordered || v.result === VISIT_RESULTS[0];
+      const primaryCtx = v.nextAction || v.reason || v.note || '';
       const scoreBit = (typeof v.score === 'number')
-        ? `<span class="sub">امتیاز ارزیابی: ${v.score} از ۱۰۰</span>`
+        ? ` · امتیاز ${v.score}`
         : '';
-      const extraBits = [];
-      if (v.reason) extraBits.push('دلیل: ' + v.reason);
-      if (v.nextAction) extraBits.push('اقدام: ' + v.nextAction);
-      if (v.opportunity) extraBits.push('فرصت (مشاهده): ' + v.opportunity);
-      if (v.threat) extraBits.push('تهدید (مشاهده): ' + v.threat);
-      if (Array.isArray(v.tags) && v.tags.length) extraBits.push('برچسب: ' + v.tags.join('، '));
-      if (v.note) extraBits.push(v.note);
-      const extraHtml = extraBits.map(x => `<span class="sub">${esc(x)}</span>`).join('');
-      return `<a class="ledger-row" href="#/customer?id=${encodeURIComponent(r.customerId)}" style="text-decoration:none;color:inherit;">
-        <span class="name">${esc(r.customerName)}
-          <span class="sub">${faDate(v.date)}${v.time ? ' — ' + esc(v.time) : ''}${r.region ? ' — ' + esc(r.region) : ''}</span>
+      return `<a class="ledger-row tx-row" href="#/customer?id=${encodeURIComponent(r.customerId)}" style="text-decoration:none;color:inherit;">
+        <span class="name">
+          <span class="tx-row-title">${esc(r.customerName)}</span>
+          <span class="sub">${faDate(v.date)}${v.time ? ' ' + esc(v.time) : ''}${r.region ? ' · ' + esc(r.region) : ''}${scoreBit}</span>
           <span class="sub ${cls}">${esc(v.result || 'ویزیت')}</span>
-          ${scoreBit}
-          ${extraHtml}
+          ${primaryCtx ? `<span class="sub tx-row-ctx">${esc(primaryCtx)}</span>` : ''}
         </span>
         <span class="filler"></span>
-        <span class="amount ${cls}" style="font-size:.8rem;">${v.ordered || v.result === VISIT_RESULTS[0] ? 'سفارش' : 'ویزیت'}</span>
+        <span class="amount tx-row-amount ${cls}">
+          <span class="tx-row-total" style="font-size:.82rem;">${ordered ? 'سفارش' : 'ویزیت'}</span>
+        </span>
       </a>`;
     }).join('');
   }
@@ -142,7 +138,7 @@
       return `<button type="button" class="chip ${visitFilter === id ? 'active' : ''}" data-vf="${id}">${label}</button>`;
     };
     root.innerHTML = `
-      <h2 class="section-title">ویزیت و ارزیابی</h2>
+      <h2 class="section-title">ویزیت مشتریان</h2>
       <div class="field"><input id="visit-search" placeholder="جستجوی نام مشتری، منطقه، نتیجه..." value="${esc(visitQuery)}" autocomplete="off"></div>
       <div class="chip-row" id="visit-chips">
         ${chip('all','همه')}
@@ -151,15 +147,15 @@
         ${chip('closed','فروشگاه بسته بود')}
         ${chip('just','فقط بازدید')}
       </div>
-      <div class="field">
-        <label>مرتب‌سازی</label>
-        <select id="visit-sort">
+      <div class="tx-toolbar">
+        <label class="tx-toolbar-label" for="visit-sort">مرتب‌سازی</label>
+        <select id="visit-sort" class="tx-toolbar-select">
           <option value="newest" ${visitSort === 'newest' ? 'selected' : ''}>جدیدترین</option>
           <option value="oldest" ${visitSort === 'oldest' ? 'selected' : ''}>قدیمی‌ترین</option>
         </select>
       </div>
       <div id="visit-summary" class="cards" style="margin-bottom:12px;"></div>
-      <div id="visit-list"></div>
+      <div id="visit-list" class="tx-list"></div>
     `;
 
     const searchEl = document.getElementById('visit-search');

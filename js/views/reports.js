@@ -249,16 +249,16 @@
           topSellingProducts
             .map(function (p, idx) {
               return (
-                '<div class="rtp-row"><span class="rtp-rank">' +
+                '<div class="ledger-row tx-row rtp-row"><span class="rtp-rank">' +
                 (idx + 1) +
-                '</span><span class="rtp-info"><span class="rtp-name">' +
+                '</span><span class="name"><span class="tx-row-title">' +
                 esc(p.name) +
-                '</span><span class="rtp-qty">تعداد فروش: ' +
-                p.qty +
+                '</span><span class="sub">تعداد: ' +
+                enToFaDigits(String(p.qty)) +
                 (p.qtyUnit === 'kg' ? ' کیلوگرم' : '') +
-                '</span></span><span class="rtp-amount">' +
+                '</span></span><span class="filler"></span><span class="amount tx-row-amount"><span class="tx-row-total">' +
                 toman(p.revenue) +
-                ' ت</span></div>'
+                ' ت</span></span></div>'
               );
             })
             .join('') +
@@ -272,16 +272,16 @@
           topByValue
             .map(function (p, idx) {
               return (
-                '<div class="rtp-row"><span class="rtp-rank">' +
+                '<div class="ledger-row tx-row rtp-row"><span class="rtp-rank">' +
                 (idx + 1) +
-                '</span><span class="rtp-info"><span class="rtp-name">' +
+                '</span><span class="name"><span class="tx-row-title">' +
                 esc(p.name) +
-                '</span><span class="rtp-qty">تعداد فروش: ' +
-                p.qty +
+                '</span><span class="sub">تعداد: ' +
+                enToFaDigits(String(p.qty)) +
                 (p.qtyUnit === 'kg' ? ' کیلوگرم' : '') +
-                '</span></span><span class="rtp-amount">' +
+                '</span></span><span class="filler"></span><span class="amount tx-row-amount"><span class="tx-row-total">' +
                 toman(p.revenue) +
-                ' ت</span></div>'
+                ' ت</span></span></div>'
               );
             })
             .join('') +
@@ -314,7 +314,7 @@
               topDebtors
                 .map(function (x) {
                   return (
-                    '<a class="ledger-row debt-row" href="#/customer?id=' +
+                    '<a class="ledger-row tx-row debt-row" href="#/customer?id=' +
                     encodeURIComponent(x.c.id) +
                     '"><span class="name">' +
                     esc(x.c.name) +
@@ -346,7 +346,7 @@
             ? topSuppliers
                 .map(function (x) {
                   return (
-                    '<a class="ledger-row debt-row" href="#/supplier?id=' +
+                    '<a class="ledger-row tx-row debt-row" href="#/supplier?id=' +
                     encodeURIComponent(x.s.id) +
                     '"><span class="name">' +
                     esc(x.s.name) +
@@ -477,8 +477,9 @@
     };
     root.innerHTML =
       '<h2 class="section-title">گزارش‌ها</h2>' +
+      '<p class="tx-hint">خلاصه‌ای از فروش، سود، دریافت‌ها و وضعیت فعلی حساب‌ها و انبار.</p>' +
       '<div id="reports-summary"></div>' +
-      '<div class="field"><label>بازه زمانی (برای فروش و فاکتور)</label>' +
+      '<div class="field"><label>بازه زمانی (فروش و فاکتور)</label>' +
       '<div class="chip-row" id="report-period-chips">' +
       chip('today', 'امروز') +
       chip('week', 'این هفته') +
@@ -486,7 +487,7 @@
       chip('all', 'همه') +
       '</div>' +
       '<div class="report-note">مانده مشتری، تأمین‌کننده و ارزش انبار همیشه بر اساس وضعیت فعلی حساب است (وابسته به بازه نیست).</div></div>' +
-      '<div id="reports-body"></div>';
+      '<div id="reports-body" class="mgmt-reports-body"></div>';
 
     chipHandlers = [];
     document.querySelectorAll('#report-period-chips [data-rp]').forEach(function (btn) {

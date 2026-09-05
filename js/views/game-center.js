@@ -188,7 +188,7 @@
         monthlyBlock(snap.monthly) +
         continuityBlock(snap) +
         xpBlock(snap.xp) +
-        '<p class="gc-hint">صبح مأموریت را ببین → برو بازار. شب نتیجه را اینجا چک کن.</p>' +
+        '<p class="gc-hint tx-hint">صبح مأموریت را ببین → برو بازار. شب نتیجه را اینجا چک کن. امتیاز فقط بازتاب کار واقعی است.</p>' +
       '</div>'
     );
   }
@@ -286,7 +286,7 @@
             /* Use div, NOT <header>: global app.css styles ALL header tags as navy app bar */
             '<div class="gc-header">' +
               '<div class="gc-title-row">' +
-                '<h1 class="gc-title">Sales Game</h1>' +
+                '<h1 class="gc-title">مرکز انگیزه فروش</h1>' +
                 '<span class="gc-title-line" aria-hidden="true"></span>' +
                 '<span class="gc-title-mark" aria-hidden="true">' + ICO.brandMark + '</span>' +
               '</div>' +

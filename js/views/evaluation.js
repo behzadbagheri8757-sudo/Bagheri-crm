@@ -4,6 +4,7 @@
    prospectScoreToRank, prospectAnsweredCount, prospectState,
    createProspectShop, addProspectVisit, queueProspectTargetMilestoneMessage.
    No new financial logic.
+   UX: one question at a time with auto-advance on option tap.
 */
 'use strict';
 
@@ -17,6 +18,10 @@
     locationId: null,
     answers: {},
     tags: [],
+    // Presentation-only: which question is shown (0-based index into PROSPECT_QUESTIONS)
+    currentQuestionIndex: 0,
+    // After last question answered, show tags + save
+    showSummary: false,
   };
 
   let routeHandlers = [];
@@ -89,8 +94,11 @@
     const sub = document.getElementById('live-score-sub');
     const rk = document.getElementById('live-score-rank');
     if (val) val.textContent = score;
-    if (sub) sub.textContent = n + ' از ' + PROSPECT_QUESTIONS.length + ' سؤال';
-    if (rk) { rk.textContent = rank; rk.style.background = info.color; }
+    if (sub) sub.textContent = enToFaDigits(String(n)) + ' از ' + enToFaDigits(String(PROSPECT_QUESTIONS.length)) + ' سؤال';
+    if (rk) {
+      rk.textContent = rank;
+      rk.className = 'rank-badge rank-pill-' + rank;
+    }
     const btn = document.getElementById('save-eval');
     if (btn) {
       const nameOk = formState.mode === 'visit' ? true : formState.name.trim().length > 0;
@@ -100,31 +108,83 @@
     }
   }
 
+  function goToQuestion(index) {
+    const max = PROSPECT_QUESTIONS.length;
+    if (index < 0) index = 0;
+    if (index >= max) {
+      formState.showSummary = true;
+      formState.currentQuestionIndex = max - 1;
+    } else {
+      formState.showSummary = false;
+      formState.currentQuestionIndex = index;
+    }
+  }
+
   function drawEvaluation(root) {
     const shopId = formState.shopId;
-
     const isVisit = formState.mode === 'visit';
+    const totalQ = PROSPECT_QUESTIONS.length;
+    const qIdx = formState.currentQuestionIndex;
+    const showingSummary = formState.showSummary;
 
-    const qHtml = PROSPECT_QUESTIONS.map((q, idx) => {
-      const opts = q.options.map(o =>
-        `<button type="button" class="chip-opt ${formState.answers[q.id] === o.key ? 'selected' : ''}" data-group="${q.id}" data-value="${esc(o.key)}">${esc(o.label)}</button>`
-      ).join('');
-      return `<div class="q-block"><div class="q-title">${idx + 1}. ${esc(q.label)}</div><div class="chip-wrap">${opts}</div></div>`;
-    }).join('');
-
-    const tagHtml = PROSPECT_VISIT_TAGS.map(t =>
-      `<button type="button" class="chip-opt ${formState.tags.includes(t.key) ? 'selected' : ''}" data-group="tags" data-value="${esc(t.key)}" data-multi="1">${esc(t.label)}</button>`
-    ).join('');
-
+    // Live score always available from existing answers
     const score = prospectComputeScore(formState.answers);
     const rank = prospectScoreToRank(score);
     const info = PROSPECT_RANK_INFO[rank];
+    const nAnswered = prospectAnsweredCount(formState.answers);
+
+    let mainBodyHtml = '';
+
+    if (!showingSummary) {
+      // ONE question at a time
+      const q = PROSPECT_QUESTIONS[qIdx];
+      const opts = q.options.map(o =>
+        `<button type="button" class="chip-opt eval-q-opt ${formState.answers[q.id] === o.key ? 'selected' : ''}" data-group="${q.id}" data-value="${esc(o.key)}">${esc(o.label)}</button>`
+      ).join('');
+
+      mainBodyHtml = `
+        <div class="eval-progress-bar" aria-hidden="true">
+          <div class="eval-progress-fill" style="width:${((qIdx + (formState.answers[q.id] ? 1 : 0)) / totalQ) * 100}%"></div>
+        </div>
+        <div class="eval-one-q card visit-card-enter field-eval-card">
+          <div class="eval-q-progress">سؤال ${enToFaDigits(String(qIdx + 1))} از ${enToFaDigits(String(totalQ))}</div>
+          <div class="q-title">${esc(q.label)}</div>
+          <div class="chip-wrap eval-q-options field-eval-opts">${opts}</div>
+          ${qIdx > 0 ? `<div class="eval-back-row"><button type="button" class="btn secondary small" id="eval-q-back">سؤال قبلی</button></div>` : ''}
+        </div>
+      `;
+    } else {
+      // Summary: tags + live score + save (existing final flow)
+      const tagHtml = PROSPECT_VISIT_TAGS.map(t =>
+        `<button type="button" class="chip-opt ${formState.tags.includes(t.key) ? 'selected' : ''}" data-group="tags" data-value="${esc(t.key)}" data-multi="1">${esc(t.label)}</button>`
+      ).join('');
+
+      mainBodyHtml = `
+        <div class="eval-progress-bar" aria-hidden="true">
+          <div class="eval-progress-fill" style="width:100%"></div>
+        </div>
+        <div class="live-score">
+          <div><div class="num" id="live-score-value">${enToFaDigits(String(score))}</div>
+            <div class="sub" id="live-score-sub">${enToFaDigits(String(nAnswered))} از ${enToFaDigits(String(totalQ))} سؤال</div></div>
+          <div style="text-align:left"><span class="rank-badge rank-pill-${rank}" id="live-score-rank">${rank}</span>
+            <div class="sub" style="margin-top:4px;max-width:160px;">${esc(info.desc)}</div></div>
+        </div>
+        <div class="card" style="margin-top:12px;">
+          <div class="label" style="margin-bottom:8px;">نتیجه این ویزیت (اختیاری)</div>
+          <div class="chip-wrap">${tagHtml}</div>
+        </div>
+        <div class="btn-row tx-actions-primary" style="margin-top:14px;">
+          <button type="button" class="btn secondary small" id="eval-q-back">بازگشت به سؤالات</button>
+          <button type="button" class="btn" id="save-eval" disabled>${isVisit ? 'ثبت ویزیت' : 'ثبت مغازه'}</button>
+        </div>
+      `;
+    }
 
     root.innerHTML = `
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="#/prospects">← لیست</a>
       </div>
-      <h2 class="section-title">${isVisit ? 'ثبت ویزیت / ارزیابی' : 'ثبت مغازه + ارزیابی'}</h2>
+      <h2 class="section-title">${isVisit ? 'ثبت ویزیت / ارزیابی' : 'ارزیابی مشتری بالقوه'}</h2>
       ${isVisit
         ? `<div class="card" style="margin-bottom:12px;"><b>${esc(formState.name)}</b>
             <div class="sub">${esc(getLocationDisplayString(formState.locationId))}</div></div>`
@@ -137,20 +197,7 @@
              <button type="button" class="btn secondary small" id="eval-change-location">تغییر</button>
            </div>`
       }
-      <div class="live-score">
-        <div><div class="num" id="live-score-value">${score}</div>
-          <div class="sub" id="live-score-sub">${prospectAnsweredCount(formState.answers)} از ${PROSPECT_QUESTIONS.length} سؤال</div></div>
-        <div style="text-align:left"><span class="rank-badge" id="live-score-rank" style="background:${info.color}">${rank}</span>
-          <div class="sub" style="margin-top:4px;max-width:160px;">${esc(info.desc)}</div></div>
-      </div>
-      <div class="card">${qHtml}</div>
-      <div class="card" style="margin-top:12px;">
-        <div class="label" style="margin-bottom:8px;">نتیجه این ویزیت (اختیاری)</div>
-        <div class="chip-wrap">${tagHtml}</div>
-      </div>
-      <div class="btn-row" style="margin-top:14px;">
-        <button type="button" class="btn" id="save-eval" disabled>${isVisit ? 'ثبت ویزیت' : 'ثبت مغازه'}</button>
-      </div>
+      ${mainBodyHtml}
     `;
 
     // Name input (new mode only)
@@ -215,63 +262,95 @@
           return;
         }
         if (group.startsWith('q')) {
+          // Record answer using existing state
           formState.answers[group] = value;
+          // Visual select on current view
           root.querySelectorAll('[data-group="' + group + '"]').forEach(b =>
             b.classList.toggle('selected', b.getAttribute('data-value') === value)
           );
           updateLive();
+
+          // Auto-advance to next question (or summary after last)
+          const currentIdx = PROSPECT_QUESTIONS.findIndex(qq => qq.id === group);
+          if (currentIdx >= 0 && currentIdx < PROSPECT_QUESTIONS.length - 1) {
+            // Brief delay so selection is visible, then advance
+            setTimeout(function () {
+              goToQuestion(currentIdx + 1);
+              drawEvaluation(root);
+            }, 180);
+          } else if (currentIdx === PROSPECT_QUESTIONS.length - 1) {
+            setTimeout(function () {
+              formState.showSummary = true;
+              drawEvaluation(root);
+            }, 180);
+          }
         }
       };
       el.addEventListener('click', handler);
-      // Store for cleanup
-      if (el.getAttribute('data-group') === 'route') routeHandlers.push({ el, handler });
-      else if (el.getAttribute('data-group') === 'tags') tagHandlers.push({ el, handler });
-      else if (el.getAttribute('data-group') === 'neighborhood') routeHandlers.push({ el, handler });
+      if (el.getAttribute('data-group') === 'tags') tagHandlers.push({ el, handler });
       else if (el.getAttribute('data-group') && el.getAttribute('data-group').startsWith('q')) {
         questionHandlers.push({ el, handler });
       }
     });
 
-    // Save button
-    const saveBtn = document.getElementById('save-eval');
-    saveHandler = function () {
-      if (saveBtn.disabled) return;
-      saveBtn.disabled = true;
-      (async function () {
-        try {
-          if (formState.mode === 'visit') {
-            const shop = await addProspectVisit(formState.shopId, {
-              answers: formState.answers,
-              tags: formState.tags,
-            });
-            if (typeof queueProspectTargetMilestoneMessage === 'function') {
-              queueProspectTargetMilestoneMessage(prospectState.dailyTarget);
-            }
-            showToast('ویزیت ثبت شد');
-            navigateToProspect(shop.id);
-          } else {
-            const shop = await createProspectShop({
-              name: formState.name,
-              routeId: formState.routeId,
-              neighborhoodId: formState.neighborhoodId,
-              locationId: formState.locationId,
-              answers: formState.answers,
-              tags: formState.tags,
-            });
-            if (typeof queueProspectTargetMilestoneMessage === 'function') {
-              queueProspectTargetMilestoneMessage(prospectState.dailyTarget);
-            }
-            showToast('مغازه ثبت شد');
-            navigateToProspect(shop.id, { justCreated: true });
-          }
-        } catch (e) {
-          console.error(e);
-          showToast('خطا در ذخیره');
-          saveBtn.disabled = false;
+    // Back button (question or summary)
+    const backBtn = document.getElementById('eval-q-back');
+    if (backBtn) {
+      const backHandler = function () {
+        if (formState.showSummary) {
+          formState.showSummary = false;
+          formState.currentQuestionIndex = PROSPECT_QUESTIONS.length - 1;
+        } else if (formState.currentQuestionIndex > 0) {
+          formState.currentQuestionIndex -= 1;
         }
-      })();
-    };
-    saveBtn.onclick = saveHandler;
+        drawEvaluation(root);
+      };
+      backBtn.addEventListener('click', backHandler);
+      questionHandlers.push({ el: backBtn, handler: backHandler });
+    }
+
+    // Save button (only present on summary)
+    const saveBtn = document.getElementById('save-eval');
+    if (saveBtn) {
+      saveHandler = function () {
+        if (saveBtn.disabled) return;
+        saveBtn.disabled = true;
+        (async function () {
+          try {
+            if (formState.mode === 'visit') {
+              const shop = await addProspectVisit(formState.shopId, {
+                answers: formState.answers,
+                tags: formState.tags,
+              });
+              if (typeof queueProspectTargetMilestoneMessage === 'function') {
+                queueProspectTargetMilestoneMessage(prospectState.dailyTarget);
+              }
+              showToast('ویزیت ثبت شد');
+              navigateToProspect(shop.id);
+            } else {
+              const shop = await createProspectShop({
+                name: formState.name,
+                routeId: formState.routeId,
+                neighborhoodId: formState.neighborhoodId,
+                locationId: formState.locationId,
+                answers: formState.answers,
+                tags: formState.tags,
+              });
+              if (typeof queueProspectTargetMilestoneMessage === 'function') {
+                queueProspectTargetMilestoneMessage(prospectState.dailyTarget);
+              }
+              showToast('مغازه ثبت شد');
+              navigateToProspect(shop.id, { justCreated: true });
+            }
+          } catch (e) {
+            console.error(e);
+            showToast('خطا در ذخیره');
+            saveBtn.disabled = false;
+          }
+        })();
+      };
+      saveBtn.onclick = saveHandler;
+    }
 
     updateLive();
   }
@@ -312,6 +391,8 @@
     }
     formState.answers = {};
     formState.tags = [];
+    formState.currentQuestionIndex = 0;
+    formState.showSummary = false;
 
     drawEvaluation(root);
 

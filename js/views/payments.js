@@ -1,4 +1,4 @@
-/* js/views/payments.js — SPA Payments view (Phase 5).
+/* js/views/payments.js — SPA Payments view (Phase 5 + Phase 2 UI).
    Extracted from payments.html. Reuses paymentMethodLabel, customerTotals,
    openAddTransaction/openCustomerDetail as-is. No new financial logic.
 */
@@ -122,13 +122,14 @@
       0
     );
 
+    // Final Retouch: compact payment-summary (same totals; presentation only)
     sumEl.innerHTML = `
       <div class="card">
-        <div class="label">تعداد (فیلتر فعلی)</div>
+        <div class="label">تعداد</div>
         <div class="value">${rows.length}</div>
       </div>
       <div class="card">
-        <div class="label">جمع مبالغ</div>
+        <div class="label">جمع مبالغ (فیلتر فعلی)</div>
         <div class="value">${toman(totalAmount)} ت</div>
       </div>
     `;
@@ -158,33 +159,29 @@
             : '#/customer?id=' +
               encodeURIComponent(r.partyId);
 
-        const subParts = [r.methodLabel, faDate(r.date)];
-
-        if (r.invoiceNumber != null) {
-          subParts.push('فاکتور #' + r.invoiceNumber);
-        }
-
-        if (r.note) {
-          subParts.push(r.note);
-        }
+        const invBit = r.invoiceNumber != null
+          ? ' · فاکتور #' + r.invoiceNumber
+          : '';
+        const noteBit = r.note
+          ? '<span class="sub tx-row-ctx">' + esc(r.note) + '</span>'
+          : '';
 
         return `
           <a
-            class="ledger-row"
+            class="ledger-row tx-row"
             href="${href}"
             style="text-decoration:none;color:inherit;"
           >
             <span class="name">
-              ${esc(r.partyName)}
-              <span class="sub">
-                ${esc(subParts.join(' — '))}
-              </span>
+              <span class="tx-row-title">${esc(r.partyName)}</span>
+              <span class="sub">${esc(r.methodLabel)} · ${faDate(r.date)}${esc(invBit)}</span>
+              ${noteBit}
             </span>
 
             <span class="filler"></span>
 
-            <span class="amount">
-              ${toman(r.amount)} ت
+            <span class="amount tx-row-amount">
+              <span class="tx-row-total">${toman(r.amount)} ت</span>
             </span>
           </a>
         `;
@@ -291,10 +288,9 @@
         ${chip('supplier', 'تامین‌کننده')}
       </div>
 
-      <div class="field">
-        <label>مرتب‌سازی</label>
-
-        <select id="payment-sort">
+      <div class="tx-toolbar">
+        <label class="tx-toolbar-label" for="payment-sort">مرتب‌سازی</label>
+        <select id="payment-sort" class="tx-toolbar-select">
           <option
             value="newest"
             ${paySort === 'newest' ? 'selected' : ''}
@@ -331,7 +327,7 @@
         style="margin-bottom:12px;"
       ></div>
 
-      <div id="payment-list"></div>
+      <div id="payment-list" class="tx-list"></div>
     `;
 
     const searchEl =
