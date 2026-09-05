@@ -90,7 +90,7 @@
 
   function quickActionsHtml() {
     const gameShortcut = '<a class="section-action" href="#/game">Sales Game ←</a>';
-    return '<div class="dashboard-block">' +
+    return '<div class="dashboard-block dash-quick-actions-block">' +
       '<div class="dashboard-block-head"><div class="dash-section-label"><span class="dash-section-ico" aria-hidden="true">' + ICO.quick + '</span><span>اقدام سریع</span></div>' + gameShortcut + '</div>' +
       '<div class="dash-quick-actions dash-qa-bar">' +
         '<button type="button" class="dash-qa-btn" data-qa="invoice"><span class="dash-qa-ico" aria-hidden="true">' + ICO.invoice + '</span><span class="dash-qa-label">فاکتور جدید</span></button>' +

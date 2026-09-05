@@ -502,7 +502,7 @@
           .map(function (inv) {
             const st = invoicePayStatus(inv);
             return (
-              '<a class="ledger-row" href="#/invoice?id=' +
+              '<a class="ledger-row customer-invoice-row" href="#/invoice?id=' +
               encodeURIComponent(inv.id) +
               '" style="text-decoration:none;color:inherit;">' +
               '<span class="name">#' +
