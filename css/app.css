@@ -4256,3 +4256,14 @@ a.dash-tile .dash-sub{font-size:.62rem;}
 .customer-invoice-row > *{align-self:center;}
 .customer-invoice-row .name{min-width:0;display:flex;flex-direction:column;justify-content:center;line-height:1.3;}
 .customer-invoice-row .amount{margin-inline-start:auto;white-space:nowrap;}
+
+/* Customer list vertical alignment: keep name/status/watch at row start; preserve balance centering. */
+.customer-list-row{
+  align-items:start;
+}
+.customer-list-row > *{
+  align-self:start;
+}
+.customer-list-row .customer-row-balance{
+  align-self:center;
+}
