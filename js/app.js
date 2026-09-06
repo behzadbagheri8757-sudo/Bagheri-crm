@@ -102,7 +102,7 @@ function renderProducts(main){
     wrap.innerHTML = list.map(p=>{
       const low = (p.minStock||0)>0 && (p.stockQty||0)<=p.minStock;
       const isOff = p.active===false;
-      return `<div class="ledger-row" data-edit-product="${p.id}" style="${isOff?'opacity:.45;':''}">
+      return `<div class="ledger-row" data-edit-product="${esc(p.id)}" style="${isOff?'opacity:.45;':''}">
         <span class="name">${esc(p.name)}${p.category?` <span class="sub" style="display:inline;">(${esc(p.category)})</span>`:''}${isOff?' <span class="badge pending">غیرفعال</span>':''}</span>
         <span class="filler"></span>
         <span class="amount">موجودی: ${p.stockQty||0} ${low?'<span class="badge low">کم</span>':''}
@@ -159,7 +159,7 @@ function renderCustomers(main){
       const status = customerStatus(c.id);
       const statusLabel = {new:'جدید', active:'فعال', inactive:'بدون خرید اخیر', lost:'از دست رفته'}[status];
       const isOff = c.active===false;
-      return `<div class="ledger-row" data-open-customer="${c.id}" style="${isOff?'opacity:.45;':''}">
+      return `<div class="ledger-row" data-open-customer="${esc(c.id)}" style="${isOff?'opacity:.45;':''}">
         <span class="name">${esc(c.name)}${c.region?` <span class="sub" style="display:inline;">(${esc(c.region)}${c.route?' — '+esc(c.route):''})</span>`:''}${isOff?' <span class="badge pending">غیرفعال</span>':''}</span>
         <span class="filler"></span>
         <span class="amount" style="color:${color}">
@@ -205,19 +205,19 @@ function renderReports(main){
 
     <h2 class="section-title">بهترین مشتریان</h2>
     ${tc.length===0?`<div class="empty">هنوز فروشی ثبت نشده</div>`:tc.map(x=>`
-      <div class="ledger-row" data-open-customer="${x.c.id}"><span class="name">${esc(x.c.name)}</span><span class="filler"></span>
+      <div class="ledger-row" data-open-customer="${esc(x.c.id)}"><span class="name">${esc(x.c.name)}</span><span class="filler"></span>
       <span class="amount">${toman(x.t.invTotal)} ت</span></div>
     `).join('')}
 
     <h2 class="section-title">مشتریان بدهکار (به ترتیب بدهی)</h2>
     ${debtors.length===0?`<div class="empty">بدهکاری ثبت نشده</div>`:debtors.map(x=>`
-      <div class="ledger-row" data-open-customer="${x.c.id}"><span class="name">${esc(x.c.name)}</span><span class="filler"></span>
+      <div class="ledger-row" data-open-customer="${esc(x.c.id)}"><span class="name">${esc(x.c.name)}</span><span class="filler"></span>
       <span class="amount accent-rust">${toman(x.t.balance)} ت</span></div>
     `).join('')}
 
     <h2 class="section-title">مشتریان بدون خرید اخیر / از دست رفته</h2>
     ${inactives.length===0?`<div class="empty">همه‌ی مشتریان اخیراً خرید داشته‌اند</div>`:inactives.map(x=>`
-      <div class="ledger-row" data-open-customer="${x.c.id}"><span class="name">${esc(x.c.name)}</span><span class="filler"></span>
+      <div class="ledger-row" data-open-customer="${esc(x.c.id)}"><span class="name">${esc(x.c.name)}</span><span class="filler"></span>
       <span class="amount">${isFinite(x.st.daysSinceLast)? x.st.daysSinceLast+' روز پیش' : 'هرگز'}</span></div>
     `).join('')}
 
@@ -279,10 +279,10 @@ function renderBackup(main){
     if(!wrap) return; // کاربر قبل از رسیدن جواب، تب رو عوض کرده
     if(!list.length){ wrap.innerHTML = `<div class="empty">هنوز نسخه‌ی خودکاری گرفته نشده</div>`; return; }
     wrap.innerHTML = list.slice().reverse().map(item=>`
-      <div class="ledger-row" data-restore-auto="${item.key}">
+      <div class="ledger-row" data-restore-auto="${esc(item.key)}">
         <span class="name">${new Date(item.ts).toLocaleString('fa-IR')}</span>
         <span class="filler"></span>
-        <span class="amount"><button class="btn small secondary" data-restore-auto-btn="${item.key}">بازیابی</button></span>
+        <span class="amount"><button class="btn small secondary" data-restore-auto-btn="${esc(item.key)}">بازیابی</button></span>
       </div>
     `).join('');
     wrap.querySelectorAll('[data-restore-auto-btn]').forEach(btn=>{
@@ -302,7 +302,7 @@ function renderSuppliers(main){
   }
   main.innerHTML = data.suppliers.map(s=>{
     const t = supplierTotals(s.id);
-    return `<div class="ledger-row" data-open-supplier="${s.id}">
+    return `<div class="ledger-row" data-open-supplier="${esc(s.id)}">
       <span class="name">${esc(s.name)}</span>
       <span class="filler"></span>
       <span class="amount" style="color:${t.balance>0?'var(--red)':'var(--olive-dark)'}">
@@ -1781,7 +1781,7 @@ function openCustomerDetail(cid){
 
     <h2 class="section-title">فاکتورها</h2>
     ${invs.length===0?`<div class="empty">فاکتوری ثبت نشده</div>`:invs.map(i=>`
-      <div class="ledger-row" data-open-invoice="${i.id}">
+      <div class="ledger-row" data-open-invoice="${esc(i.id)}">
         <span class="name">#${i.number||'—'} — ${faDate(i.date)}</span>
         <span class="filler"></span>
         <span class="amount">${toman(i.total)} ت</span>
@@ -1796,7 +1796,7 @@ function openCustomerDetail(cid){
 
     <h2 class="section-title">چک‌ها</h2>
     ${checks.length===0?`<div class="empty">چکی ثبت نشده</div>`:checks.map(c2=>`
-      <div class="ledger-row" data-toggle-check="${c2.id}">
+      <div class="ledger-row" data-toggle-check="${esc(c2.id)}">
         <span class="name">سررسید ${faDate(c2.dueDate)} ${c2.checkNumber?`<span class="sub">شماره: ${esc(c2.checkNumber)}</span>`:''}</span>
         <span class="filler"></span>
         <span class="amount">${toman(c2.amount)} ت <span class="badge ${c2.status==='cleared'?'cleared':'pending'}">${c2.status==='cleared'?'وصول شده':'در جریان'}</span></span>
@@ -2714,7 +2714,7 @@ function openSupplierDetail(sid){
       const lines = purchaseLines(p);
       const linesLabel = lines.length ? lines.map(l=>`${esc(l.name)} × ${l.qty}`).join('، ') : '';
       return `
-      <div class="ledger-row"><span class="name">${faDate(p.date)} ${p.desc?`<span class="sub">${esc(p.desc)}</span>`:''}${linesLabel?`<span class="sub">${linesLabel}</span>`:''}${returnedAmount>0?`<span class="sub">برگشت‌شده: ${toman(returnedAmount)} ت${p.productId?` (${returnedQty} از ${p.qty})`:''}</span>`:''}</span><span class="filler"></span><span class="amount">${toman(p.amount)} ت${remainingAmount>0?`<br><button class="btn secondary small" data-return-purchase="${p.id}">برگشت</button>`:''}</span></div>
+      <div class="ledger-row"><span class="name">${faDate(p.date)} ${p.desc?`<span class="sub">${esc(p.desc)}</span>`:''}${linesLabel?`<span class="sub">${linesLabel}</span>`:''}${returnedAmount>0?`<span class="sub">برگشت‌شده: ${toman(returnedAmount)} ت${p.productId?` (${returnedQty} از ${p.qty})`:''}</span>`:''}</span><span class="filler"></span><span class="amount">${toman(p.amount)} ت${remainingAmount>0?`<br><button class="btn secondary small" data-return-purchase="${esc(p.id)}">برگشت</button>`:''}</span></div>
     `;}).join('')}
     <h2 class="section-title">پرداختی‌ها</h2>
     ${payments.length===0?`<div class="empty">پرداختی ثبت نشده</div>`:payments.map((p,pidx)=>{
@@ -3068,12 +3068,12 @@ function openSupplierDetail(sid){
             if(remLineQty<=0){
               return `<div class="field" style="opacity:.55;">
               <label>${esc(it.name)} (خریداری‌شده: ${it.qty} — ۰ قابل‌برگشت؛ موجودی این خرید مصرف شده)</label>
-              <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="0" type="text" inputmode="decimal" disabled>
+              <input class="ret-item-qty" data-item-id="${esc(it.id)}" data-product-id="${esc(it.productId)}" data-unit-cost="${it.unitCost}" data-max="0" type="text" inputmode="decimal" disabled>
             </div>`;
             }
             return `<div class="field">
               <label>${esc(it.name)} (خریداری‌شده: ${it.qty}، حداکثر قابل‌برگشت: ${remLineQty})</label>
-              <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)">
+              <input class="ret-item-qty" data-item-id="${esc(it.id)}" data-product-id="${esc(it.productId)}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)">
             </div>`;
           }).join('')}
           </div>

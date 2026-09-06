@@ -665,10 +665,21 @@ function validateBackupShape(parsed){
     for(const n of parsed.neighborhoods){ if(n.routeId==null || !routeIds.has(String(n.routeId))) return false; }
     for(const c of parsed.customers){ if(c.locationId!=null && !neighIds.has(String(c.locationId)) && !routeIds.has(String(c.locationId))) return false; }
     if(parsed.prospectScout != null && !_validateProspectBundle(parsed.prospectScout, customerIds, new Set([...neighIds,...routeIds]), schema)) return false;
-    if(parsed.intelligence != null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)) return false;
+    // Optional additive: an intelligence bundle that fails validation (e.g. a
+    // reasonCode/category from an older or newer app version than the current
+    // whitelist) must not reject the whole backup — CRM data (customers,
+    // invoices, payments, etc.) is authoritative and independent of this
+    // read-only, best-effort analytics layer. Drop just the bundle.
+    if(parsed.intelligence != null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)){
+      try{ console.warn('backup intelligence bundle invalid — ignoring (CRM data unaffected)'); }catch(_e){}
+      delete parsed.intelligence;
+    }
   } else {
     if(parsed.prospectScout!=null && !_validateProspectBundle(parsed.prospectScout, customerIds, new Set(), schema)) return false;
-    if(parsed.intelligence!=null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)) return false;
+    if(parsed.intelligence!=null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)){
+      try{ console.warn('backup intelligence bundle invalid — ignoring (CRM data unaffected)'); }catch(_e){}
+      delete parsed.intelligence;
+    }
   }
   // Optional Game Center state: when present it is validated and restored;
   // older backups without these fields remain compatible and preserve current game state.
@@ -823,14 +834,20 @@ async function _restoreParsedBackup(parsed){
     const expected={data:_deepClone(nextData),prospect:parsed.prospectScout ? _deepClone(parsed.prospectScout) : previous.prospect,intelligence:parsed.intelligence ? _deepClone(parsed.intelligence) : previous.intelligence,target:{value:targetValue,localRaw:String(targetValue),dbRaw:targetValue},game:expectedGame};
     const actual=await _readCurrentSemanticState();
     if(!_semanticStateEqual(actual,expected)) throw new Error('post-commit verification failed');
-    // Additive Watch Lifecycle restore (best-effort; not part of semantic journal equality)
+    // Additive Watch Lifecycle restore (best-effort; not part of semantic journal equality).
+    // CRM data above has already committed successfully — a Watch Lifecycle
+    // failure here must not roll back or fail the overall restore, but it
+    // must not be silent either, since it means seller-entered watch
+    // reasons/notes were not brought back.
+    let watchLifecycleWarning = false;
     try{
       if(parsed.watchLifecycle){
-        await restoreWatchLifecycleBundleForBackup(parsed.watchLifecycle);
+        const wOk = await restoreWatchLifecycleBundleForBackup(parsed.watchLifecycle);
+        if(!wOk) watchLifecycleWarning = true;
       }
-    }catch(wErr){ console.warn('watchLifecycle restore skipped', wErr); }
+    }catch(wErr){ console.warn('watchLifecycle restore skipped', wErr); watchLifecycleWarning = true; }
     await dbDelete(RESTORE_JOURNAL_KEY);
-    return true;
+    return watchLifecycleWarning ? 'warn' : true;
   }catch(e){
     console.error('restore commit failed; attempting journaled rollback',e);
     try{
@@ -858,7 +875,8 @@ async function importBackupJSON(file){
     _normalizeBackupEnvelope(parsed);
     if(!validateBackupShape(parsed)){ showToast('این فایل، فایل بکاپ معتبر یا کامل نیست'); return; }
     const ok=await _restoreParsedBackup(parsed);
-    if(ok){ render(); showToast('اطلاعات با موفقیت بازیابی شد'); }
+    if(ok==='warn'){ render(); showToast('اطلاعات بازیابی شد؛ اما تاریخچهٔ Watch بازیابی نشد'); }
+    else if(ok){ render(); showToast('اطلاعات با موفقیت بازیابی شد'); }
     else { render(); showToast('بازیابی انجام نشد؛ اطلاعات قبلی حفظ شد'); }
   }catch(e){
     console.error('importBackupJSON failed',e);
