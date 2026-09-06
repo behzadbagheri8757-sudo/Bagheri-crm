@@ -56,12 +56,12 @@
               if (remLineQty <= 0) {
                 return `<div class="field" style="opacity:.55;">
                   <label>${esc(it.name)} (خریداری‌شده: ${it.qty} — <span class="accent-rust">۰ قابل‌برگشت</span>؛ موجودی این خرید مصرف شده)</label>
-                  <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="0" type="text" inputmode="decimal" disabled value="">
+                  <input class="ret-item-qty" data-item-id="${esc(it.id)}" data-product-id="${esc(it.productId)}" data-unit-cost="${it.unitCost}" data-max="0" type="text" inputmode="decimal" disabled value="">
                 </div>`;
               }
               return `<div class="field">
                 <label>${esc(it.name)} (خریداری‌شده: ${it.qty}، حداکثر قابل‌برگشت: ${remLineQty})</label>
-                <input class="ret-item-qty" data-item-id="${it.id}" data-product-id="${it.productId}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)">
+                <input class="ret-item-qty" data-item-id="${esc(it.id)}" data-product-id="${esc(it.productId)}" data-unit-cost="${it.unitCost}" data-max="${remLineQty}" type="text" inputmode="decimal" placeholder="تعداد برگشتی (اختیاری)">
               </div>`;
             }).join('')}
             </div>
