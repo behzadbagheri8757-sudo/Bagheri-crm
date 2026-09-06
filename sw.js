@@ -7,7 +7,7 @@
  */
 'use strict';
 
-/* CHANGED: v32 -> v33 (sync precache with current index.html assets) */
+/* CHANGED: v33 -> v34 (sync precache with current index.html assets) */
 const CACHE_NAME = 'baqeri-shell-v34';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
