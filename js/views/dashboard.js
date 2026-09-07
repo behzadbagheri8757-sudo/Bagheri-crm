@@ -49,6 +49,9 @@
   }
 
   function money(v) { return toman(Math.round(Number(v) || 0)) + ' ت'; }
+  function bizMoney(v) {
+    return '<span class="biz-stat-number">' + toman(Math.round(Number(v) || 0)) + '</span><span class="biz-stat-unit">ت</span>';
+  }
 
   function deltaHtml(pct) {
     if (pct === null || pct === undefined || !isFinite(pct)) return '<span class="kpi-delta flat">بدون مقایسه</span>';
@@ -435,9 +438,9 @@
       '</div>' +
       todaysActionsHtml() +
       '<div class="biz-status-secondary">' +
-        '<div class="biz-stat"><span class="biz-stat-label">سود این ماه</span><span class="biz-stat-value">' + money(metrics.mtdProfit) + '</span></div>' +
-        '<div class="biz-stat"><span class="biz-stat-label">ارزش موجودی</span><span class="biz-stat-value">' + money(invVal) + '</span></div>' +
-        '<a class="biz-stat biz-stat-link" href="#/customers?filter=debt"><span class="biz-stat-label">بدهی مشتریان</span><span class="biz-stat-value debt">' + money(g.customerDebt) + '</span></a>' +
+        '<div class="biz-stat"><span class="biz-stat-label">سود این ماه</span><span class="biz-stat-value">' + bizMoney(metrics.mtdProfit) + '</span></div>' +
+        '<div class="biz-stat"><span class="biz-stat-label">ارزش موجودی</span><span class="biz-stat-value">' + bizMoney(invVal) + '</span></div>' +
+        '<a class="biz-stat biz-stat-link" href="#/customers?filter=debt"><span class="biz-stat-label">بدهی مشتریان</span><span class="biz-stat-value debt">' + bizMoney(g.customerDebt) + '</span></a>' +
       '</div>' +
       quickActionsHtml() +
       recentInvoicesHtml() + recentVisitsHtml() +

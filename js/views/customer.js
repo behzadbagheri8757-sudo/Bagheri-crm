@@ -741,11 +741,11 @@
         '<h3 class="sub-title">رفتار خرید و هوش تجاری</h3>' +
         (watchHtmlBlock
           ? '<details open style="margin-bottom:12px;">' +
-            '<summary style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">نشانه‌ها و هشدارها ▾</summary>' +
+            '<summary class="customer-behavior-summary" style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">نشانه‌ها و هشدارها</summary>' +
             '<div style="margin-top:8px;">' + watchHtmlBlock + '</div></details>'
           : '') +
         '<details style="margin-bottom:12px;">' +
-        '<summary style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">تحلیل رفتار خرید ▾</summary>' +
+        '<summary class="customer-behavior-summary" style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">تحلیل رفتار خرید</summary>' +
         summaryHtml +
         '<div class="cards" style="margin-top:10px;margin-bottom:10px;">' +
         '<div class="card"><div class="label">اولین خرید</div><div class="value" style="font-size:.95rem;">' +
