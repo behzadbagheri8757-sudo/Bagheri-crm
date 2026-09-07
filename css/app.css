@@ -4267,3 +4267,137 @@ a.dash-tile .dash-sub{font-size:.62rem;}
 .customer-list-row .customer-row-balance{
   align-self:center;
 }
+
+
+/* ============================================================
+   FINAL UI/UX POLISH — targeted fixes from independent review
+   Presentation/interaction only. No business logic or data changes.
+   ============================================================ */
+
+/* 1) Accessible semantic text colors.
+   Keep the established palette for decorative accents/borders, but use
+   darker text variants where semantic status is rendered on light surfaces. */
+:root{
+  --color-accent-text:#C83E20;
+  --color-warning-text:#9A5B00;
+  --color-success-text:#007A50;
+  --color-danger-text:#D52B36;
+}
+.accent-olive{color:var(--color-success-text) !important;}
+.accent-rust,.accent-red{color:var(--color-danger-text) !important;}
+.accent-amber{color:var(--color-warning-text) !important;}
+.badge.pending{color:var(--color-warning-text);}
+.badge.cleared{color:var(--color-success-text);}
+.badge.low{color:var(--color-danger-text);}
+.kpi-delta.up{color:var(--color-success-text);}
+.kpi-delta.down{color:var(--color-danger-text);}
+.report-summary-value.profit{color:var(--color-success-text);}
+.report-summary-value.debt{color:var(--color-danger-text);}
+.report-summary-meta.up{color:var(--color-success-text);}
+.report-summary-meta.down{color:var(--color-danger-text);}
+.action-why-now{color:var(--color-accent-text);}
+.action-urgency-critical{color:var(--color-danger-text);}
+.action-urgency-high,.action-urgency-medium{color:var(--color-accent-text);}
+.dash-risk-badge{color:var(--color-danger-text);}
+.dash-watch-compact-ico{color:var(--color-warning-text);}
+.watch-reviewed-badge{color:var(--color-warning-text);}
+.watch-reviewed-badge.is-reviewed{color:var(--color-success-text);}
+.watch-severity-high{color:var(--color-danger-text) !important;}
+.watch-severity-medium{color:var(--color-accent-text) !important;}
+.customer-row-watch{color:var(--color-warning-text);}
+.watch-level-label.watch-level-critical,
+.watch-level-label.watch-level-high{color:var(--color-danger-text);}
+.watch-level-label.watch-level-medium,
+.watch-level-unreviewed{color:var(--color-warning-text);}
+.customer-list-row .customer-row-status.badge.tone-success{color:var(--color-success-text);}
+.customer-list-row .customer-row-status.badge.tone-warning{color:var(--color-warning-text);}
+.customer-list-row .customer-row-status.badge.tone-danger{color:var(--color-danger-text);}
+#pin-lock-overlay .pin-err{color:var(--color-danger-text) !important;}
+
+/* 2) Dashboard business-status amounts: keep the currency unit attached to
+   the amount. If the number ever becomes too wide, the number may ellipsize;
+   the unit remains stable instead of falling onto a new line. */
+.biz-stat-value{
+  display:flex;
+  align-items:baseline;
+  gap:3px;
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+}
+.biz-stat-number{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.biz-stat-unit{flex:0 0 auto;white-space:nowrap;}
+
+/* 3) Non-interactive cards must not advertise button-like press feedback. */
+.card:active{transform:none !important;}
+
+/* 4) Customer behavior disclosure: the chevron reflects the real open state. */
+.customer-behavior-summary{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.customer-behavior-summary::after{
+  content:'⌄';
+  flex:0 0 auto;
+  color:var(--color-text-muted);
+  font-size:1rem;
+  line-height:1;
+  transform:translateY(-1px);
+}
+details[open] > .customer-behavior-summary::after{
+  content:'⌃';
+}
+
+/* 5) Developer QA remains available through the verified 5-tap secret,
+   but its floating test affordance is hidden from the production UI. */
+#qa-dev-btn{display:none !important;}
+
+/* 6) Secondary customer actions: calmer than the three primary actions,
+   while retaining the existing 44px touch target for easy selection. */
+.cust-actions-secondary{
+  gap:7px;
+  align-items:center;
+}
+.cust-actions-secondary .btn{
+  opacity:1;
+  min-height:44px;
+  padding-inline:13px;
+  background:var(--color-surface-2);
+  color:var(--color-text-muted);
+  border-color:var(--color-border);
+  box-shadow:none;
+  font-weight:650;
+}
+.cust-actions-secondary .btn:active{
+  transform:translateY(1px);
+  background:#E8EBEF;
+  box-shadow:none;
+}
+.cust-actions-secondary #act-toggle-active{
+  color:var(--color-danger-text);
+  border-color:#F0C9CD;
+  background:#FFF7F7;
+}
+
+/* 7) Keep secondary dashboard/supporting text readable on narrow phones.
+   Minimum remains above 10px; primary text sizes are untouched. */
+a.dash-tile .dash-sub{font-size:.64rem;}
+.action-why,.action-why-now{font-size:.66rem;}
+@media (max-width:419px){
+  a.dash-tile .dash-sub{font-size:.64rem;}
+  .action-why,.action-why-now{font-size:.64rem;}
+}
+@media (max-width:380px){
+  .action-why,.action-why-now{font-size:.64rem;}
+}
+
+/* 8) Customer list name: slightly stronger than the global ledger label,
+   but scoped only to this view so shared ledger rows remain unchanged. */
+.customer-list-row .name{font-weight:600;}
