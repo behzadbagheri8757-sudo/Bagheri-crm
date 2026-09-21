@@ -7,22 +7,51 @@
  */
 'use strict';
 
-/* CHANGED: v33 -> v34 (sync precache with current index.html assets) */
-const CACHE_NAME = 'baqeri-shell-v34';
+/* CHANGED: v56 -> v57 (More bottom sheet converted to a dedicated full-page
+   SPA route #/more. New view js/views/more.js added to the precache list;
+   old More sheet code and CSS left in place for rollback. No other shell
+   asset changed.) */
+/* CHANGED: v55 -> v56 (global typography weight retuning: all UI font-weight tokens/literals
+   lowered by one 100-weight tier, floor 400, so the app is visually balanced with iPhone
+   "Bold Text" accessibility setting ON, which is the user's real-world baseline. Print/export
+   invoice document typography intentionally left unchanged. No font-family, font-size,
+   line-height, layout, or business logic changed.) */
+/* CHANGED: v53 -> v54 (surgical retry-orphan graph preservation, validation focus, header geometry, in-app confirmations, and scoped hint/touch fixes). Previous v53 behavior is otherwise preserved.
+   The build also retains the v53 scroll-linked header geometry and native-style tab selection.
+   */
+/* Legacy v53 note: Header geometry, semantic Back, and native-style tab selection refined as a continuous,
+   scroll-linked --header-progress custom property instead of a threshold
+   class toggle with its own CSS transition — the old version kept
+   animating for ~220ms after scroll stopped/reversed, which read as a
+   snap/lag; verified via headless scroll test: progress now tracks
+   scrollY 1:1 and reverses identically. Removed the now-duplicate "داشبورد"
+   <h2> inside Dashboard's own content — the header already shows it as the
+   page title since the brand-name/page-title fix) */
+/* CHANGED: v61 -> v62 (offline-shell fix only: css/shamsi-calendar.css and
+   js/shamsi-calendar.js are loaded by index.html on every page load but were
+   missing from PRECACHE_URLS, so a freshly-activated cache version had no
+   guarantee they'd be cached before the first offline use. Added both to the
+   precache list; no other asset, route, or business logic touched.) */
+const CACHE_NAME = 'baqeri-shell-v63';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
   './index.html',
   './css/app.css',
+  './css/visual-grammar.css',
+  './css/visual-grammar-components.css',
+  './css/visual-grammar-pages.css',
+  './css/shamsi-calendar.css',
+  './js/shamsi-calendar.js',
   './js/models.js',
   './js/ui.js',
   './js/db.js',
   './js/location.js',
   './js/calc.js',
   './js/stock.js',
-  './js/payments.js',
   './js/backup.js',
   './js/pin-lock.js',
+  './js/icons.js',
   './js/nav.js',
   './js/app.js',
   './js/prospect-scoring.js',
@@ -53,6 +82,7 @@ const PRECACHE_URLS = [
   './js/views/invoice.js',
   './js/views/game-center.js',
   './js/views/settings.js',
+  './js/views/more.js',
   './vendor/xlsx.full.min.js',
   './vendor/html2canvas.min.js',
   './manifest.json',
