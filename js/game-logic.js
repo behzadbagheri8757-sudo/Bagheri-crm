@@ -179,7 +179,7 @@
   }
 
   async function gameSaveLedger(ledger) {
-    await _writeRaw(_ledgerKey(), ledger);
+    if(!await _writeRaw(_ledgerKey(), ledger)) return false;
     return ledger;
   }
 
@@ -240,7 +240,8 @@
       reversed: false
     };
     ledger.push(entry);
-    await gameSaveLedger(ledger);
+    const saved = await gameSaveLedger(ledger);
+    if(!saved) return { ok: false, reason: 'persistence_failed' };
     return { ok: true, entry: entry };
   }
 
@@ -256,7 +257,8 @@
     if (entry.reversed) return { ok: false, reason: 'already_reversed', entry: entry };
     entry.reversed = true;
     entry.reversedAt = new Date().toISOString();
-    await gameSaveLedger(ledger);
+    const saved = await gameSaveLedger(ledger);
+    if(!saved) return { ok: false, reason: 'persistence_failed' };
     return { ok: true, entry: entry };
   }
 

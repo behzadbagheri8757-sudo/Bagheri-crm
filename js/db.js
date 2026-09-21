@@ -412,7 +412,14 @@ function normalizeData(parsed){
     return Number.isFinite(n) ? n : fallback;
   };
   const optNum = (v) => (v === null || v === undefined || v === '' ? v : num(v));
-  d.invoiceSeq = num(parsed.invoiceSeq || 1000, 1000);
+  // Preserve legacy numbering without ever rewinding below an existing numeric invoice number.
+  const parsedInvoiceSeq = num(parsed.invoiceSeq, 1000);
+  const maxExistingInvoiceNumber = (Array.isArray(parsed.invoices) ? parsed.invoices : [])
+    .reduce((m, inv) => {
+      const n = Number(inv && inv.number);
+      return Number.isFinite(n) ? Math.max(m, n) : m;
+    }, 1000);
+  d.invoiceSeq = Math.max(parsedInvoiceSeq, maxExistingInvoiceNumber);
   d.products = (parsed.products||[]).map(p=>({
     id: p.id||uid(),
     name: p.name||'',
@@ -441,6 +448,7 @@ function normalizeData(parsed){
     openingBalance: num(c.openingBalance),
     visits: c.visits||[],
     active: c.active!==false,
+    prospectShopId: c.prospectShopId != null ? c.prospectShopId : null,
   }));
   d.invoices = (parsed.invoices||[]).map(i=>({
     id:i.id||uid(), number:optNum(i.number), customerId:i.customerId, date:i.date,
@@ -527,16 +535,21 @@ async function loadData(){
     if(record && record.value){
       data = normalizeData(JSON.parse(record.value));
       _lastPersistedData = JSON.parse(JSON.stringify(data));
-    } else if(window.storage){
-      // fallback: recover from an older window.storage-based save, if this
-      // file was ever previously run inside a Claude artifact sandbox
-      try{
-        const legacy = await window.storage.get('baqeri-erp-data', false);
-        if(legacy && legacy.value){
-          data = normalizeData(JSON.parse(legacy.value));
-          await saveData();
-        }
-      }catch(e){ /* no legacy data — fine */ }
+    } else {
+      // Empty DB is a valid initial state. Keep an explicit last-known-good
+      // snapshot so a first save failure can roll RAM back deterministically.
+      _lastPersistedData = JSON.parse(JSON.stringify(data));
+      if(window.storage){
+        // fallback: recover from an older window.storage-based save, if this
+        // file was ever previously run inside a Claude artifact sandbox
+        try{
+          const legacy = await window.storage.get('baqeri-erp-data', false);
+          if(legacy && legacy.value){
+            data = normalizeData(JSON.parse(legacy.value));
+            await saveData();
+          }
+        }catch(e){ /* no legacy data — fine */ }
+      }
     }
   }catch(e){
     console.error('loadData failed', e);
@@ -544,6 +557,54 @@ async function loadData(){
     // instead of mounting CRM on leftover emptyData(). Empty DB (no record) is still success.
     throw e;
   }
+}
+
+function reconcileRestoreGraph(target, source){
+  if(source === null || source === undefined || typeof source !== 'object') return source;
+  if(Array.isArray(source)){
+    if(!Array.isArray(target)) return JSON.parse(JSON.stringify(source));
+    const hasIds = source.every(function(item){ return item && typeof item === 'object' && !Array.isArray(item) && item.id != null; });
+    if(hasIds){
+      const existingById = new Map();
+      target.forEach(function(item){ if(item && typeof item === 'object' && item.id != null) existingById.set(String(item.id), item); });
+      const next = source.map(function(src){
+        const live = existingById.get(String(src.id));
+        return live ? reconcileRestoreGraph(live, src) : JSON.parse(JSON.stringify(src));
+      });
+      target.splice(0, target.length);
+      next.forEach(function(item){ target.push(item); });
+      return target;
+    }
+    target.splice(0, target.length);
+    source.forEach(function(src, index){
+      target.push(reconcileRestoreGraph(target[index], src));
+    });
+    return target;
+  }
+  if(!target || typeof target !== 'object' || Array.isArray(target)) return JSON.parse(JSON.stringify(source));
+  Object.keys(target).forEach(function(k){ if(!Object.prototype.hasOwnProperty.call(source, k)) delete target[k]; });
+  Object.keys(source).forEach(function(k){
+    const src = source[k];
+    const cur = target[k];
+    if(src && typeof src === 'object'){
+      if(Array.isArray(src)){
+        if(!Array.isArray(cur)) target[k] = JSON.parse(JSON.stringify(src));
+        else reconcileRestoreGraph(cur, src);
+      }else{
+        if(!cur || typeof cur !== 'object' || Array.isArray(cur)) target[k] = JSON.parse(JSON.stringify(src));
+        else reconcileRestoreGraph(cur, src);
+      }
+    }else target[k] = src;
+  });
+  return target;
+}
+
+function restoreDataInPlace(snapshot){
+  if(!snapshot || typeof snapshot !== 'object') return;
+  // Preserve the live graph, including ID-bearing nested objects/arrays.
+  // Form/event-handler closures therefore continue to reference live records
+  // after a failed save instead of mutating an orphaned pre-rollback object.
+  reconcileRestoreGraph(data, snapshot);
 }
 
 async function saveData(){
@@ -555,7 +616,7 @@ async function saveData(){
     console.error('save failed', e);
     // Global last-known-good rollback closes the remaining integrity gap for
     // mutation paths that do not maintain their own previousData snapshot.
-    try{ data = JSON.parse(JSON.stringify(_lastPersistedData)); }catch(rollbackErr){ console.error('global save rollback failed', rollbackErr); }
+    try{ restoreDataInPlace(_lastPersistedData); }catch(rollbackErr){ console.error('global save rollback failed', rollbackErr); }
     showToast('⚠️ ذخیره نشد؛ تغییر انجام‌شده برگردانده شد');
     throw e;
   }
@@ -565,7 +626,12 @@ async function saveData(){
 }
 
 function nextInvoiceNumber(){
-  data.invoiceSeq = (data.invoiceSeq||1000) + 1;
+  const seq = Number(data.invoiceSeq);
+  const maxExisting = (data.invoices||[]).reduce((m, inv)=>{
+    const n = Number(inv && inv.number);
+    return Number.isFinite(n) ? Math.max(m, n) : m;
+  }, 1000);
+  data.invoiceSeq = Math.max(Number.isFinite(seq) ? seq : 1000, maxExisting) + 1;
   return data.invoiceSeq;
 }
 

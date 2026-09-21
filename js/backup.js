@@ -602,6 +602,7 @@ function _validateIntelligenceBundle(bundle, customerIds, productIds){
 }
 
 function validateBackupShape(parsed){
+  validateBackupShape.lastError='';
   if(!_isPlainObject(parsed)) return false;
   _normalizeBackupEnvelope(parsed);
   const arrays = ['products','customers','invoices','payments','checks','suppliers'];
@@ -622,10 +623,22 @@ function validateBackupShape(parsed){
   const productIds=new Set(parsed.products.map(x=>String(x.id)));
   const customerIds=new Set(parsed.customers.map(x=>String(x.id)));
   const invoiceIds=new Set(parsed.invoices.map(x=>String(x.id)));
+  const invoiceNumbers=new Set();
   for(const inv of parsed.invoices){
     if(!customerIds.has(String(inv.customerId)) || !Array.isArray(inv.items)) return false;
     const invoiceNumericFields=['number','total','discount','prevBalance','cashPaid','checkPaid','cardPaid','transferPaid','newBalance'];
     for(const k of invoiceNumericFields){ if(inv[k] != null && !Number.isFinite(Number(inv[k]))) return false; }
+    if(inv.number != null && String(inv.number).trim()!==''){
+      const n=Number(inv.number);
+      const key=Number.isFinite(n) ? String(n) : String(inv.number).trim();
+      if(invoiceNumbers.has(key)){ validateBackupShape.lastError='شماره فاکتور تکراری است: '+key; return false; }
+      invoiceNumbers.add(key);
+    }
+    if(inv.discount != null){
+      const discount=Number(inv.discount);
+      if(!Number.isFinite(discount) || discount<0) return false;
+      if(inv.discountType==='percent' && discount>100) return false;
+    }
     for(const it of inv.items){
       if(!_isPlainObject(it) || it.productId==null || !productIds.has(String(it.productId))) return false;
       for(const k of ['qty','price','buyPrice','discount','weight']){ if(it[k] != null && !Number.isFinite(Number(it[k]))) return false; }
@@ -637,13 +650,26 @@ function validateBackupShape(parsed){
         }
       }
       if(it.cogs != null && !Number.isFinite(Number(it.cogs))) return false;
+      const gross=Number(it.qty)*Number(it.price);
+      const lineDiscount=Number(it.discount||0);
+      if(!Number.isFinite(gross) || gross<0 || !Number.isFinite(lineDiscount) || lineDiscount<0 || lineDiscount>gross) return false;
     }
+    const subtotal=inv.items.reduce((sum,it)=>sum + Number(it.qty)*Number(it.price) - Number(it.discount||0),0);
+    if(inv.discountType!=='percent' && Number(inv.discount||0)>subtotal) return false;
   }
   for(const pay of parsed.payments){
     if(!customerIds.has(String(pay.customerId)) || (pay.invoiceId!=null && !invoiceIds.has(String(pay.invoiceId))) || !_isFiniteNonNegative(pay.amount)) return false;
+    if(pay.invoiceId!=null){
+      const linked=parsed.invoices.find(inv=>String(inv.id)===String(pay.invoiceId));
+      if(!linked || String(linked.customerId)!==String(pay.customerId)){ validateBackupShape.lastError='پرداخت به فاکتور مشتری دیگری متصل شده است.'; return false; }
+    }
   }
   for(const chk of parsed.checks){
     if(!customerIds.has(String(chk.customerId)) || (chk.invoiceId!=null && !invoiceIds.has(String(chk.invoiceId))) || !_isFiniteNonNegative(chk.amount)) return false;
+    if(chk.invoiceId!=null){
+      const linked=parsed.invoices.find(inv=>String(inv.id)===String(chk.invoiceId));
+      if(!linked || String(linked.customerId)!==String(chk.customerId)){ validateBackupShape.lastError='چک به فاکتور مشتری دیگری متصل شده است.'; return false; }
+    }
   }
   if(schema>=3){
     const layerIds=new Set();
@@ -752,13 +778,15 @@ async function _snapshotRestoreState(){
   const prospect=await exportProspectScoutBundle();
   const intelligence=await exportIntelligenceBundle();
   const game=await exportGameStateForBackup();
-  if(!prospect || !intelligence || !game) throw new Error('complete subsystem snapshot unavailable');
+  const watchLifecycle=await exportWatchLifecycleBundleForBackup();
+  if(!prospect || !intelligence || !game || !watchLifecycle) throw new Error('complete subsystem snapshot unavailable');
   return {
     data:_deepClone(data),
     prospect:_deepClone(prospect),
     intelligence:_deepClone(intelligence),
     target:await _readTargetState(),
-    game:_deepClone(game)
+    game:_deepClone(game),
+    watchLifecycle:_deepClone(watchLifecycle)
   };
 }
 async function _applyCrmSnapshot(snapshotData){
@@ -773,11 +801,16 @@ async function _restoreSnapshot(snapshot){
   if(!await restoreIntelligenceBundleStrict(snapshot.intelligence)) throw new Error('Intelligence restore failed');
   await _restoreTargetState(snapshot.target);
   await restoreGameStateForBackup(snapshot.game);
+  if(snapshot.watchLifecycle){
+    if(!await restoreWatchLifecycleBundleForBackup(snapshot.watchLifecycle)) throw new Error('Watch Lifecycle restore failed');
+  }
 }
 async function _readCurrentSemanticState(){
   const game=await exportGameStateForBackup();
   if(!game) throw new Error('Game Center state unavailable');
-  return {data:_deepClone(data), prospect:await exportProspectScoutBundle(), intelligence:await exportIntelligenceBundle(), target:await _readTargetState(), game:_deepClone(game)};
+  const watchLifecycle=await exportWatchLifecycleBundleForBackup();
+  if(!watchLifecycle) throw new Error('Watch Lifecycle state unavailable');
+  return {data:_deepClone(data), prospect:await exportProspectScoutBundle(), intelligence:await exportIntelligenceBundle(), target:await _readTargetState(), game:_deepClone(game), watchLifecycle:_deepClone(watchLifecycle)};
 }
 function _semanticStateEqual(a,b){ return _stableJson(a)===_stableJson(b); }
 
@@ -785,9 +818,38 @@ async function _recoverPendingRestoreJournal(){
   const rec=await dbGet(RESTORE_JOURNAL_KEY);
   if(!rec || !rec.value) return {ok:true, recovered:false};
   let journal;
-  try{ journal=JSON.parse(rec.value); }catch(e){ throw new Error('restore journal is corrupted'); }
-  if(!journal || journal.version!==2 || !journal.snapshot) throw new Error('restore journal is invalid');
+  try{ journal=JSON.parse(rec.value); }catch(e){
+    // BUGFIX (Audit #9): an unparseable journal can never be recovered by
+    // retrying — retaining it made loadData() throw the same error on
+    // every future boot (bootSpaShell's waitForCrmDataLoad retry, and
+    // bootPage's "reopen the page" message, both just call loadData()
+    // again), permanently blocking the app. Discard it and let boot
+    // proceed with whatever is already committed; this does not touch
+    // the "recovery attempt genuinely failed" path below, which still
+    // retains a structurally valid journal for retry.
+    console.error('Pending restore journal is corrupted (unparseable JSON); discarding to allow boot', e);
+    try{ await dbDelete(RESTORE_JOURNAL_KEY); }catch(_de){}
+    return {ok:true, recovered:false, discarded:true};
+  }
+  if(!journal || ![2,3].includes(journal.version) || !journal.snapshot){
+    // Same reasoning as above: a structurally invalid journal (bad/missing
+    // version, missing snapshot) has nothing usable to roll back to, so
+    // retaining it only guarantees the next boot fails identically.
+    console.error('Pending restore journal is structurally invalid; discarding to allow boot');
+    try{ await dbDelete(RESTORE_JOURNAL_KEY); }catch(_de){}
+    return {ok:true, recovered:false, discarded:true};
+  }
   try{
+    if(!journal.snapshot.watchLifecycle){
+      const wSnap=await dbGet(PRERESTORE_WATCH_KEY);
+      if(wSnap && wSnap.value){
+        journal.snapshot.watchLifecycle=JSON.parse(wSnap.value);
+      } else {
+        // Pre-v3 interrupted journals had no Watch snapshot; fail closed rather
+        // than certify a mixed state as recovered.
+        throw new Error('legacy restore journal has no Watch recovery snapshot');
+      }
+    }
     await _restoreSnapshot(journal.snapshot);
     const actual=await _readCurrentSemanticState();
     if(!_semanticStateEqual(actual,journal.snapshot)) throw new Error('journal recovery verification failed');
@@ -803,7 +865,7 @@ async function _restoreParsedBackup(parsed){
   const previous=await _snapshotRestoreState();
   const targetValue = parsed.settings && Object.prototype.hasOwnProperty.call(parsed.settings,'monthlySalesTarget')
     ? Math.max(0,Number(parsed.settings.monthlySalesTarget)||0) : previous.target.value;
-  const journal={version:2,status:'committing',createdAt:new Date().toISOString(),snapshot:previous,target:{value:targetValue}};
+  const journal={version:3,status:'committing',createdAt:new Date().toISOString(),snapshot:previous,target:{value:targetValue}};
   await dbPut(RESTORE_JOURNAL_KEY, JSON.stringify(journal));
   try{
     // Preserve the user-visible Undo Restore snapshot only after the durable
@@ -822,6 +884,17 @@ async function _restoreParsedBackup(parsed){
     data=nextData;
     if(typeof _lastPersistedData!=='undefined') _lastPersistedData=_deepClone(nextData);
     if(parsed.prospectScout){ if(!await restoreProspectScoutBundleStrict(parsed.prospectScout)) throw new Error('Prospect restore failed'); }
+    // BUGFIX (Audit #8): intelligence/watchLifecycle are optional/additive
+    // bundles (see validateBackupShape comments above) — an older or
+    // incomplete backup that omits them must leave the current, valid
+    // Intelligence/Watch data untouched, exactly like prospectScout and
+    // gameMeta/gameLedger already do below. The previous code substituted
+    // an EMPTY bundle and force-restored it whenever the field was absent,
+    // which clears the IndexedDB store (runIntelligenceRestoreTx / 
+    // restoreWatchLifecycleBundle both do store.clear()) — silently wiping
+    // real Intelligence/Watch history on a routine restore from any backup
+    // that simply predates these fields, or whose bundle was dropped by
+    // validateBackupShape for failing validation.
     if(parsed.intelligence){ if(!await restoreIntelligenceBundleStrict(parsed.intelligence)) throw new Error('Intelligence restore failed'); }
     await _writeTargetValue(targetValue);
     if(parsed.gameMeta != null || parsed.gameLedger != null){
@@ -831,23 +904,12 @@ async function _restoreParsedBackup(parsed){
     const expectedGame = (parsed.gameMeta != null || parsed.gameLedger != null)
       ? {gameMeta:_deepClone(parsed.gameMeta), gameLedger:_deepClone(parsed.gameLedger)}
       : previous.game;
-    const expected={data:_deepClone(nextData),prospect:parsed.prospectScout ? _deepClone(parsed.prospectScout) : previous.prospect,intelligence:parsed.intelligence ? _deepClone(parsed.intelligence) : previous.intelligence,target:{value:targetValue,localRaw:String(targetValue),dbRaw:targetValue},game:expectedGame};
+    if(parsed.watchLifecycle){ if(!await restoreWatchLifecycleBundleForBackup(parsed.watchLifecycle)) throw new Error('Watch Lifecycle restore failed'); }
+    const expected={data:_deepClone(nextData),prospect:parsed.prospectScout ? _deepClone(parsed.prospectScout) : previous.prospect,intelligence:parsed.intelligence ? _deepClone(parsed.intelligence) : previous.intelligence,target:{value:targetValue,localRaw:String(targetValue),dbRaw:targetValue},game:expectedGame,watchLifecycle:parsed.watchLifecycle ? _deepClone(parsed.watchLifecycle) : previous.watchLifecycle};
     const actual=await _readCurrentSemanticState();
     if(!_semanticStateEqual(actual,expected)) throw new Error('post-commit verification failed');
-    // Additive Watch Lifecycle restore (best-effort; not part of semantic journal equality).
-    // CRM data above has already committed successfully — a Watch Lifecycle
-    // failure here must not roll back or fail the overall restore, but it
-    // must not be silent either, since it means seller-entered watch
-    // reasons/notes were not brought back.
-    let watchLifecycleWarning = false;
-    try{
-      if(parsed.watchLifecycle){
-        const wOk = await restoreWatchLifecycleBundleForBackup(parsed.watchLifecycle);
-        if(!wOk) watchLifecycleWarning = true;
-      }
-    }catch(wErr){ console.warn('watchLifecycle restore skipped', wErr); watchLifecycleWarning = true; }
     await dbDelete(RESTORE_JOURNAL_KEY);
-    return watchLifecycleWarning ? 'warn' : true;
+    return true;
   }catch(e){
     console.error('restore commit failed; attempting journaled rollback',e);
     try{
@@ -873,7 +935,7 @@ async function importBackupJSON(file){
   try{
     const parsed=JSON.parse(await file.text());
     _normalizeBackupEnvelope(parsed);
-    if(!validateBackupShape(parsed)){ showToast('این فایل، فایل بکاپ معتبر یا کامل نیست'); return; }
+    if(!validateBackupShape(parsed)){ showToast(validateBackupShape.lastError || 'این فایل، فایل بکاپ معتبر یا کامل نیست'); return; }
     const ok=await _restoreParsedBackup(parsed);
     if(ok==='warn'){ render(); showToast('اطلاعات بازیابی شد؛ اما تاریخچهٔ Watch بازیابی نشد'); }
     else if(ok){ render(); showToast('اطلاعات با موفقیت بازیابی شد'); }
@@ -891,7 +953,9 @@ async function undoLastRestore(){
     const storedTarget=JSON.parse(tSnap.value);
     const storedGame=JSON.parse(gSnap.value);
     if(!_validateGameState(storedGame && storedGame.gameMeta, storedGame && storedGame.gameLedger)) throw new Error('Game Center pre-restore snapshot invalid');
-    const previous={data:JSON.parse(snap.value),prospect:JSON.parse(pSnap.value),intelligence:JSON.parse(iSnap.value),target:(storedTarget && typeof storedTarget==='object' && !Array.isArray(storedTarget)) ? storedTarget : {value:Math.max(0,Number(storedTarget)||0),localRaw:String(Math.max(0,Number(storedTarget)||0)),dbRaw:Math.max(0,Number(storedTarget)||0)},game:storedGame};
+    const wSnap=await dbGet(PRERESTORE_WATCH_KEY);
+    if(!wSnap || !wSnap.value) throw new Error('Watch Lifecycle pre-restore snapshot missing');
+    const previous={data:JSON.parse(snap.value),prospect:JSON.parse(pSnap.value),intelligence:JSON.parse(iSnap.value),target:(storedTarget && typeof storedTarget==='object' && !Array.isArray(storedTarget)) ? storedTarget : {value:Math.max(0,Number(storedTarget)||0),localRaw:String(Math.max(0,Number(storedTarget)||0)),dbRaw:Math.max(0,Number(storedTarget)||0)},game:storedGame,watchLifecycle:JSON.parse(wSnap.value)};
     const current=await _snapshotRestoreState();
     const journal={version:2,status:'undoing',createdAt:new Date().toISOString(),snapshot:current};
     await dbPut(RESTORE_JOURNAL_KEY,JSON.stringify(journal));
@@ -899,12 +963,6 @@ async function undoLastRestore(){
       await _restoreSnapshot(previous);
       const actual=await _readCurrentSemanticState();
       if(!_semanticStateEqual(actual,previous)) throw new Error('undo verification failed');
-      try{
-        const wSnap = await dbGet(PRERESTORE_WATCH_KEY);
-        if(wSnap && wSnap.value){
-          await restoreWatchLifecycleBundleForBackup(JSON.parse(wSnap.value));
-        }
-      }catch(_wu){}
       await dbDelete(RESTORE_JOURNAL_KEY); await dbDelete(PRERESTORE_KEY); await dbDelete(PRERESTORE_PROSPECT_KEY); await dbDelete(PRERESTORE_INTELLIGENCE_KEY); await dbDelete(PRERESTORE_TARGET_KEY); await dbDelete(PRERESTORE_GAME_KEY);
       try{ await dbDelete(PRERESTORE_WATCH_KEY); }catch(_wd){}
       render(); showToast('به حالت قبل از بازیابی برگشت');
@@ -957,7 +1015,7 @@ async function autoBackupTick(){
 }
 
 async function restoreFromAutoBackup(key){
-  if(!confirm('مطمئنی؟ اطلاعات فعلی با این نسخه‌ی بکاپ خودکار جایگزین می‌شه.')) return;
+  if(!(await appConfirm('مطمئنی؟ اطلاعات فعلی با این نسخه‌ی بکاپ خودکار جایگزین می‌شه.'))) return;
   try{
     const snap = await dbGet(key);
     if(!snap || !snap.value){ showToast('این نسخه‌ی بکاپ پیدا نشد'); return; }

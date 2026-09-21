@@ -1,5 +1,8 @@
 /* ui.js — shared UI helpers (toast, modal/sheet, formatting)
    Phase 0 extract: no logic changes.
+   Shamsi rebuild: unified close lifecycle, handle drag dismissal, Escape,
+   focus restoration, data-shamsi-mode="calendar" dispatch, and a bridge to
+   js/shamsi-calendar.js. All other helpers are preserved byte-for-byte.
 */
 // ---------- small utilities ----------
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -11,6 +14,11 @@ function faToEnDigits(str){
   // ارقام فارسی/عربی + جداکننده‌های هزار (٬ و ,) و اعشار فارسی
   return String(str).replace(/[۰-۹٠-٩٫،٬,]/g, ch=>map[ch]!==undefined?map[ch]:ch);
 }
+function fmtQtyDisplay(n){
+  var num = Number(n) || 0;
+  return String(Math.round(num * 100) / 100);
+}
+
 function enToFaDigits(str){
   const map = {'0':'۰','1':'۱','2':'۲','3':'۳','4':'۴','5':'۵','6':'۶','7':'۷','8':'۸','9':'۹'};
   return String(str).replace(/[0-9]/g, ch=>map[ch]||ch);
@@ -266,21 +274,37 @@ function isSameJalaliMonth(iso, ref){
 
 /**
  * HTML for a Shamsi date field — single field like native input.
- * Tap opens iOS-style bottom sheet with scroll wheels (Jalali Y/M/D).
- * Hidden input keeps Gregorian YYYY-MM-DD (same id) for existing .value readers.
- * NOTE: Native iOS <input type="date"> cannot use Jalali; this is the closest safe UX.
+ * Tap opens the wheel picker by default, or the calendar grid when
+ * opts.mode === 'calendar'. Hidden input keeps Gregorian YYYY-MM-DD
+ * (same id) for existing .value readers.
+ * Backward compatible: existing 2-arg callers are unchanged.
  */
-function shamsiDateInputHTML(id, valueISO){
+function shamsiDateInputHTML(id, valueISO, opts){
   const iso = (valueISO && parseISODateParts(valueISO)) ? String(valueISO).slice(0,10) : todayISO();
   const j = isoToJalali(iso) || gregorianToJalali(
     new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate()
   );
   const label = enToFaDigits(j[0] + '/' + j[1] + '/' + j[2]);
-  return `<div class="shamsi-date" data-shamsi-root="1">
+  const modeAttr = (opts && opts.mode) ? (' data-shamsi-mode="' + esc(opts.mode) + '"') : '';
+  return `<div class="shamsi-date" data-shamsi-root="1"${modeAttr}>
     <input type="hidden" id="${esc(id)}" value="${esc(iso)}" data-shamsi-hidden="1">
     <input type="text" class="shamsi-date-field" data-shamsi-field="1" readonly inputmode="none" value="${esc(label)}" aria-label="تاریخ شمسی">
   </div>`;
 }
+
+/* ==========================================================================
+   Shamsi Wheel Picker
+   - Visual order (left → right in RTL pages): Year | Month | Day
+   - Container uses direction:ltr so DOM order (y, m, d) maps to that visual
+     order; each column re-establishes direction:rtl for its own content.
+   - Single-instance guard: only one shamsi sheet may exist at a time
+     (shared id with the calendar picker for mutual exclusion).
+   - Unified close lifecycle: cancel / done / backdrop / drag / Escape all
+     funnel through one close(apply) function; the closed flag prevents
+     double-close and no timer or listener survives past DOM removal.
+   - Focus restoration: the trigger's focus is captured on open and restored
+     on close.
+   ========================================================================== */
 
 function _shamsiPadWheel(col, countBefore){
   // spacer items so first/last can center in the highlight band
@@ -338,29 +362,46 @@ function _shamsiSnapWheel(col){
   return v;
 }
 
+function _shamsiUpdateSelected(col){
+  const v = _shamsiReadWheel(col);
+  if(v == null) return;
+  col.querySelectorAll('.shamsi-wheel-item[data-v]').forEach(function(it){
+    const iv = parseInt(it.getAttribute('data-v'), 10);
+    if(iv === v) it.setAttribute('data-selected', '1');
+    else it.removeAttribute('data-selected');
+  });
+}
+
 function _shamsiFillDayCol(dayCol, jy, jm, jd){
   const dim = jalaliMonthLength(jy, jm);
   if(jd > dim) jd = dim;
+  if(jd < 1) jd = 1;
   const vals = [];
   for(let d = 1; d <= dim; d++) vals.push(d);
   dayCol.innerHTML = _shamsiBuildWheelHTML('d', vals, jd, null);
   _shamsiScrollToValue(dayCol, jd);
+  _shamsiUpdateSelected(dayCol);
   return jd;
 }
 
 function openShamsiPicker(fieldEl){
+  if(!fieldEl || !fieldEl.closest) return;
   const root = fieldEl.closest('[data-shamsi-root]');
   if(!root) return;
   const hid = root.querySelector('[data-shamsi-hidden]');
   if(!hid) return;
-  const iso = hid.value || todayISO();
+
+  // Capture the trigger so focus can be returned on close.
+  const previousActive = document.activeElement;
+
+  const iso = (hid.value && parseISODateParts(hid.value)) ? String(hid.value).slice(0, 10) : todayISO();
   const j = isoToJalali(iso) || gregorianToJalali(
-    new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate()
+    new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate()
   );
   let jy = j[0], jm = j[1], jd = j[2];
 
-  // remove any existing sheet
-  const prev = document.getElementById('shamsi-picker-sheet');
+  // Single-instance guard: remove any other shamsi sheet (wheel OR calendar).
+  const prev = document.getElementById('shamsi-sheet-root');
   if(prev) prev.remove();
 
   const yVals = [];
@@ -369,13 +410,14 @@ function openShamsiPicker(fieldEl){
   const mLabs = SHAMSI_MONTH_NAMES.slice();
 
   const overlay = document.createElement('div');
-  overlay.id = 'shamsi-picker-sheet';
+  overlay.id = 'shamsi-sheet-root';
   overlay.className = 'shamsi-sheet-overlay';
   overlay.innerHTML =
-    '<div class="shamsi-sheet" role="dialog" aria-label="انتخاب تاریخ شمسی">' +
+    '<div class="shamsi-sheet" role="dialog" aria-modal="true" aria-labelledby="shamsi-sheet-title">' +
+      '<div class="shamsi-sheet-handle" aria-hidden="true"></div>' +
       '<div class="shamsi-sheet-toolbar">' +
         '<button type="button" class="shamsi-sheet-btn" data-shamsi-cancel="1">لغو</button>' +
-        '<span class="shamsi-sheet-title">تاریخ</span>' +
+        '<span class="shamsi-sheet-title" id="shamsi-sheet-title">تاریخ</span>' +
         '<button type="button" class="shamsi-sheet-btn shamsi-sheet-done" data-shamsi-done="1">تأیید</button>' +
       '</div>' +
       '<div class="shamsi-wheels-wrap">' +
@@ -390,6 +432,8 @@ function openShamsiPicker(fieldEl){
 
   document.body.appendChild(overlay);
 
+  const sheetEl = overlay.querySelector('.shamsi-sheet');
+  const handleEl = overlay.querySelector('.shamsi-sheet-handle');
   const yCol = overlay.querySelector('[data-shamsi-wheel="y"]');
   const mCol = overlay.querySelector('[data-shamsi-wheel="m"]');
   const dCol = overlay.querySelector('[data-shamsi-wheel="d"]');
@@ -398,20 +442,28 @@ function openShamsiPicker(fieldEl){
   mCol.innerHTML = _shamsiBuildWheelHTML('m', mVals, jm, mLabs);
   _shamsiFillDayCol(dCol, jy, jm, jd);
 
-  // initial scroll after layout
+  // initial scroll + entry animation after layout
   requestAnimationFrame(function(){
-    _shamsiScrollToValue(yCol, jy);
-    _shamsiScrollToValue(mCol, jm);
-    _shamsiScrollToValue(dCol, jd);
+    overlay.classList.add('show');
+    requestAnimationFrame(function(){
+      _shamsiScrollToValue(yCol, jy);
+      _shamsiScrollToValue(mCol, jm);
+      _shamsiScrollToValue(dCol, jd);
+      _shamsiUpdateSelected(yCol);
+      _shamsiUpdateSelected(mCol);
+      _shamsiUpdateSelected(dCol);
+    });
   });
 
-  let scrollTimers = {};
+  const scrollTimers = {};
   function onWheelScroll(ev){
     const col = ev.currentTarget;
     const part = col.getAttribute('data-shamsi-wheel');
     clearTimeout(scrollTimers[part]);
     scrollTimers[part] = setTimeout(function(){
+      delete scrollTimers[part];
       const v = _shamsiSnapWheel(col);
+      _shamsiUpdateSelected(col);
       if(part === 'y' && v != null) jy = v;
       if(part === 'm' && v != null) jm = v;
       if(part === 'd' && v != null) jd = v;
@@ -424,50 +476,110 @@ function openShamsiPicker(fieldEl){
   mCol.addEventListener('scroll', onWheelScroll, { passive: true });
   dCol.addEventListener('scroll', onWheelScroll, { passive: true });
 
-  function close(){
-    overlay.remove();
+  let closed = false;
+
+  function onKey(e){
+    if(e.key === 'Escape' || e.keyCode === 27){
+      e.preventDefault();
+      close(false);
+    }
   }
 
-  function apply(){
-    jy = _shamsiSnapWheel(yCol) || jy;
-    jm = _shamsiSnapWheel(mCol) || jm;
-    jd = _shamsiSnapWheel(dCol) || jd;
-    const dim = jalaliMonthLength(jy, jm);
-    if(jd > dim) jd = dim;
-    const newIso = jalaliToISO(jy, jm, jd);
-    const prev = hid.value;
-    hid.value = newIso;
-    const field = root.querySelector('[data-shamsi-field]');
-    if(field) field.value = enToFaDigits(jy + '/' + jm + '/' + jd);
-    if(prev !== newIso){
-      try{
-        hid.dispatchEvent(new Event('input', { bubbles: true }));
-        hid.dispatchEvent(new Event('change', { bubbles: true }));
-      }catch(e){}
+  function cleanup(){
+    Object.keys(scrollTimers).forEach(function(k){
+      clearTimeout(scrollTimers[k]);
+      delete scrollTimers[k];
+    });
+    document.removeEventListener('keydown', onKey, true);
+  }
+
+  function close(applyValues){
+    if(closed) return;
+    closed = true;
+    cleanup();
+
+    if(applyValues){
+      jy = _shamsiSnapWheel(yCol) || jy;
+      jm = _shamsiSnapWheel(mCol) || jm;
+      jd = _shamsiSnapWheel(dCol) || jd;
+      const dim = jalaliMonthLength(jy, jm);
+      if(jd > dim) jd = dim;
+      if(jd < 1) jd = 1;
+      const newIso = jalaliToISO(jy, jm, jd);
+      const old = hid.value;
+      hid.value = newIso;
+      const field = root.querySelector('[data-shamsi-field]');
+      if(field) field.value = enToFaDigits(jy + '/' + jm + '/' + jd);
+      if(old !== newIso){
+        try{
+          hid.dispatchEvent(new Event('input', { bubbles: true }));
+          hid.dispatchEvent(new Event('change', { bubbles: true }));
+        }catch(e){}
+      }
     }
-    close();
+
+    overlay.classList.remove('show');
+
+    // Remove after exit animation finishes; guard against double removal.
+    setTimeout(function(){
+      if(overlay.parentNode) overlay.remove();
+      if(previousActive && typeof previousActive.focus === 'function'){
+        try{ previousActive.focus(); }catch(e){}
+      }
+    }, 340);
   }
 
   overlay.addEventListener('click', function(e){
-    if(e.target === overlay) close();
+    if(e.target === overlay) close(false);
   });
   overlay.querySelector('[data-shamsi-cancel]').addEventListener('click', function(e){
-    e.preventDefault(); close();
+    e.preventDefault();
+    close(false);
   });
   overlay.querySelector('[data-shamsi-done]').addEventListener('click', function(e){
-    e.preventDefault(); apply();
+    e.preventDefault();
+    close(true);
+  });
+  document.addEventListener('keydown', onKey, true);
+
+  if(typeof bindSheetDragToDismiss === 'function'){
+    bindSheetDragToDismiss(sheetEl, handleEl, function(){ close(false); });
+  }
+
+  requestAnimationFrame(function(){
+    const done = overlay.querySelector('[data-shamsi-done]');
+    if(done){ try{ done.focus(); }catch(e){} }
   });
 }
 
-/** Tap on Shamsi date field opens wheel sheet (document delegation). */
+/* Bridge to the calendar-grid picker in js/shamsi-calendar.js.
+   If the module is not on the page, we log a visible warning (not a silent
+   fallback) and open the wheel picker so the field still functions. */
+function openShamsiCalendarPicker(fieldEl){
+  if(window.ShamsiCalendar && typeof window.ShamsiCalendar.open === 'function'){
+    window.ShamsiCalendar.open(fieldEl);
+    return;
+  }
+  try{ console.warn('[shamsi] js/shamsi-calendar.js is not loaded; falling back to wheel picker. Add the <script> tag after js/ui.js.'); }catch(e){}
+  openShamsiPicker(fieldEl);
+}
+
+/** Tap on a Shamsi date field opens a picker.
+    - root[data-shamsi-mode="calendar"] → calendar grid
+    - otherwise → wheel picker */
 (function bindShamsiDateDelegation(){
   if(typeof document === 'undefined') return;
   function onClick(e){
     const t = e.target;
     if(!t || !t.closest) return;
     const field = t.closest('[data-shamsi-field]');
-    if(field){
-      e.preventDefault();
+    if(!field) return;
+    e.preventDefault();
+    const root = field.closest('[data-shamsi-root]');
+    const mode = root && root.getAttribute('data-shamsi-mode');
+    if(mode === 'calendar'){
+      openShamsiCalendarPicker(field);
+    } else {
       openShamsiPicker(field);
     }
   }
@@ -480,7 +592,6 @@ function openShamsiPicker(fieldEl){
     bind();
   }
 })();
-
 
 function daysAgo(iso){
   if(!iso) return Infinity;
@@ -546,29 +657,168 @@ function showToast(msg){
   };
 })();
 
-// ---------- modals ----------
+// ---------- modals / sheets ----------
+// Shared drag-to-dismiss gesture for any bottom sheet: started only from a
+// dedicated handle element (so scrolling the sheet's own content is never
+// hijacked), with a real-world velocity check in addition to distance, so a
+// quick short flick dismisses even if it didn't travel far — the way an iOS
+// sheet responds to a flick vs. a slow drag. Presentation-only: it flips
+// classes/inline transform and calls the dismiss callback; no data/state.
+function bindSheetDragToDismiss(sheetEl, handleEl, dismissFn){
+  if(!sheetEl || !handleEl) return;
+  let startY = 0, startT = 0, lastY = 0, lastT = 0, velocity = 0, deltaY = 0, dragging = false;
+  handleEl.addEventListener('touchstart', function(e){
+    dragging = true;
+    startY = lastY = e.touches[0].clientY;
+    startT = lastT = e.timeStamp;
+    velocity = 0;
+    sheetEl.style.transition = 'none';
+  }, {passive:true});
+  handleEl.addEventListener('touchmove', function(e){
+    if(!dragging) return;
+    const y = e.touches[0].clientY;
+    const t = e.timeStamp;
+    deltaY = y - startY;
+    if(deltaY > 0){
+      sheetEl.style.transform = 'translateY(' + deltaY + 'px)';
+    } else {
+      // Rubber-band resistance when dragging upward past the open position —
+      // it should feel like it's stretching, not slide further up.
+      sheetEl.style.transform = 'translateY(' + (deltaY * 0.15) + 'px)';
+    }
+    const dt = t - lastT;
+    if(dt > 0) velocity = (y - lastY) / dt; // px/ms, +down / -up
+    lastY = y; lastT = t;
+  }, {passive:true});
+  handleEl.addEventListener('touchend', function(){
+    if(!dragging) return;
+    dragging = false;
+    sheetEl.style.transition = '';
+    sheetEl.style.transform = '';
+    const shouldDismiss = deltaY > 60 || (deltaY > 16 && velocity > 0.5);
+    if(shouldDismiss) dismissFn();
+    deltaY = 0; velocity = 0;
+  });
+}
+
+let _modalHideTimer = null;
+
+/* In-app confirmation layer. It sits above an existing sheet when needed, so
+   destructive actions can be confirmed without replacing/dismissing an
+   in-flight form or changing its state. */
+function appConfirm(message, confirmLabel){
+  confirmLabel = confirmLabel || 'تأیید';
+  return new Promise(function(resolve){
+    const root = document.getElementById('modalRoot');
+    if(!root){ resolve(false); return; }
+    const layer = document.createElement('div');
+    layer.className = 'confirm-overlay';
+    layer.setAttribute('role','alertdialog');
+    layer.setAttribute('aria-modal','true');
+    layer.innerHTML = '<div class="confirm-card"><div class="confirm-message"></div><div class="btn-row"><button type="button" class="btn secondary" data-confirm-cancel>انصراف</button><button type="button" class="btn danger" data-confirm-ok>'+esc(confirmLabel)+'</button></div></div>';
+    layer.querySelector('.confirm-message').textContent = String(message || 'ادامه می‌دهید؟');
+    root.appendChild(layer);
+    let settled = false;
+    function finish(value){
+      if(settled) return;
+      settled = true;
+      layer.remove();
+      resolve(value);
+    }
+    layer.querySelector('[data-confirm-cancel]').addEventListener('click', function(){ finish(false); });
+    layer.querySelector('[data-confirm-ok]').addEventListener('click', function(){ finish(true); });
+    layer.addEventListener('click', function(e){ if(e.target === layer) finish(false); });
+    requestAnimationFrame(function(){
+      const ok = layer.querySelector('[data-confirm-ok]');
+      if(ok) ok.focus();
+    });
+  });
+}
+
+
 function closeModal(){
+  const overlay = document.getElementById('overlay');
   const root = document.getElementById('modalRoot');
-  root.innerHTML = '';
+  if(!overlay){ if(root) root.innerHTML=''; return; }
+  overlay.classList.remove('show');
+  const sheetEl = overlay.querySelector('.sheet');
+  if(sheetEl) sheetEl.classList.remove('show');
   try{ document.body.classList.remove('modal-open'); }catch(_e){}
-  if(window.scrollX) window.scrollTo(0, window.scrollY);
+  if(_modalHideTimer){ clearTimeout(_modalHideTimer); }
+  _modalHideTimer = setTimeout(() => {
+    _modalHideTimer = null;
+    root.innerHTML = '';
+    if(window.scrollX) window.scrollTo(0, window.scrollY);
+  }, 240);
 }
 
 function openSheet(html){
   const root = document.getElementById('modalRoot');
+
+  // Generic sheets can also re-render in response to a control change.
+  // Replace only the sheet content so the visible sheet/overlay never
+  // closes and reopens during an in-sheet interaction.
+  const existingGenericSheet = document.querySelector('#modalRoot .overlay.show .sheet:not(.inv-sheet-host)');
+  if(existingGenericSheet && typeof html === 'string'){
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const keep = Array.from(existingGenericSheet.children).filter(function(el){
+      return el.id === 'closeX' || el.classList.contains('sheet-handle');
+    });
+    Array.from(existingGenericSheet.children).forEach(function(el){
+      if(keep.indexOf(el) === -1) el.remove();
+    });
+    const frag = document.createDocumentFragment();
+    Array.from(tmp.childNodes).forEach(function(n){ frag.appendChild(n); });
+    existingGenericSheet.appendChild(frag);
+    return;
+  }
+
+  // Invoice V6 re-renders its form when a row is added/removed or a payment
+  // control changes. Re-presenting the whole sheet causes the visible
+  // close/reopen jump on iPhone. When an invoice sheet is already open,
+  // replace only its content shell and keep the existing overlay/sheet
+  // presentation alive. Other sheets keep the original behavior.
+  const existingInvoiceSheet = document.querySelector('#modalRoot .sheet.inv-sheet-host .inv-sheet-v2');
+  if(existingInvoiceSheet && typeof html === 'string' && html.indexOf('class="inv-sheet-v2"') !== -1){
+    const oldBody = existingInvoiceSheet.querySelector('.inv-body');
+    const oldScrollTop = oldBody ? oldBody.scrollTop : 0;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const next = tmp.firstElementChild;
+    if(next && next.classList.contains('inv-sheet-v2')){
+      existingInvoiceSheet.replaceWith(next);
+      requestAnimationFrame(function(){
+        const body = document.querySelector('#modalRoot .sheet.inv-sheet-host .inv-body');
+        if(body) body.scrollTop = oldScrollTop;
+      });
+      return;
+    }
+  }
+  if(_modalHideTimer){ clearTimeout(_modalHideTimer); _modalHideTimer = null; }
   // مطمئن شو هر Modal قبلی کاملاً پاک شده (نه فقط مخفی) قبل از ساختن Modal جدید،
   // و یک reflow اجباری بین پاک‌شدن و رندر جدید انجام بده تا ظاهر (گوشه‌های گرد و غیره) بعد از باز/بسته‌شدن‌های مکرر خراب نشه
-  closeModal();
+  root.innerHTML = '';
   void root.offsetHeight;
   root.innerHTML = `
     <div class="overlay" id="overlay">
       <div class="sheet" style="position:relative;">
-        <button class="close-x" id="closeX">×</button>
+        <div class="sheet-handle"></div>
+        <button class="close-x" id="closeX" aria-label="بستن">×</button>
         ${html}
       </div>
     </div>`;
   try{ document.body.classList.add('modal-open'); }catch(_e){}
-  document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
+  const overlay = document.getElementById('overlay');
+  const sheet = overlay.querySelector('.sheet');
+  requestAnimationFrame(() => {
+    overlay.classList.add('show');
+    sheet.classList.add('show');
+  });
+  overlay.addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
+  overlay.addEventListener('touchmove', function(e){
+    if(!e.target.closest('.sheet')) e.preventDefault();
+  }, {passive:false});
   document.getElementById('closeX').addEventListener('click', closeModal);
+  bindSheetDragToDismiss(sheet, sheet.querySelector('.sheet-handle'), closeModal);
 }
-
