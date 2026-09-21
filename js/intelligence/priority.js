@@ -98,7 +98,10 @@
      Rank among active customers → map to score:
        top 20% → 100, mid 60% → 60, bottom 20% → 30, unknown → 50.
      Same idea as action.js impact map — no invented commercial data. */
-  function _economicScore(cid) {
+  function _economicScore(cid, precomputedRankMap) {
+    if (precomputedRankMap) {
+      return precomputedRankMap[cid] != null ? precomputedRankMap[cid] : 50;
+    }
     if (typeof data === 'undefined' || !Array.isArray(data.customers)) return 50;
     if (typeof customerTotals !== 'function') return 50;
 
@@ -131,6 +134,40 @@
     if (myIdx < band) return 100;
     if (myIdx >= n - band) return 30;
     return 60;
+  }
+
+  /* Batch version of _economicScore's ranking, computed once instead of
+     once per customer (was O(N^2) across calculateAllCustomerPriorities /
+     calculateAllActions). Produces the exact same per-customer score as
+     calling _economicScore(cid) individually, for a fixed data snapshot. */
+  function _buildEconomicRankMap() {
+    var map = Object.create(null);
+    if (typeof data === 'undefined' || !Array.isArray(data.customers)) return map;
+    if (typeof customerTotals !== 'function') return map;
+
+    var rows = [];
+    for (var i = 0; i < data.customers.length; i++) {
+      var c = data.customers[i];
+      if (!c || c.active === false) continue;
+      var invTotal = null;
+      try {
+        var t = customerTotals(c.id);
+        if (t && typeof t.invTotal === 'number' && isFinite(t.invTotal)) invTotal = t.invTotal;
+      } catch (e) { /* ignore */ }
+      rows.push({ id: c.id, invTotal: invTotal });
+    }
+
+    var ranked = rows.filter(function (r) { return r.invTotal != null; })
+      .sort(function (a, b) { return (b.invTotal || 0) - (a.invTotal || 0); });
+
+    var n = ranked.length;
+    var band = Math.max(1, Math.ceil(n * 0.2));
+    ranked.forEach(function (r, idx) {
+      if (idx < band) map[r.id] = 100;
+      else if (idx >= n - band) map[r.id] = 30;
+      else map[r.id] = 60;
+    });
+    return map;
   }
 
   /* ---- Opportunity (0..100) ----
@@ -223,14 +260,14 @@
     return pool.slice(0, 2).map(function (s) { return s.reason; }).join(' + ');
   }
 
-  function calculateCustomerPriority(cid) {
+  function calculateCustomerPriority(cid, opts) {
     var risk = (typeof calculateCustomerRisk === 'function')
       ? calculateCustomerRisk(cid)
       : { customerId: cid, score: 0, level: 'low', signals: [] };
 
     var signals = risk.signals || [];
     var riskComponent = (typeof risk.score === 'number' && isFinite(risk.score)) ? risk.score : 0;
-    var economicComponent = _economicScore(cid);
+    var economicComponent = _economicScore(cid, opts && opts.economicRankMap);
     var opportunityComponent = _opportunityScore(signals);
     var timingComponent = _timingScore(cid);
 
@@ -292,9 +329,10 @@
   function calculateAllCustomerPriorities() {
     if (typeof data === 'undefined' || !Array.isArray(data.customers)) return [];
 
+    var economicRankMap = _buildEconomicRankMap();
     var customers = data.customers.filter(function (c) { return c && c.active !== false; });
     var results = customers.map(function (c) {
-      return calculateCustomerPriority(c.id);
+      return calculateCustomerPriority(c.id, { economicRankMap: economicRankMap });
     });
 
     results.sort(function (a, b) {
@@ -309,5 +347,6 @@
 
   global.calculateCustomerPriority = calculateCustomerPriority;
   global.calculateAllCustomerPriorities = calculateAllCustomerPriorities;
+  global._buildEconomicRankMap = _buildEconomicRankMap;
 
 })(typeof window !== 'undefined' ? window : this);

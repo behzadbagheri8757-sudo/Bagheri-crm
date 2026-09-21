@@ -245,12 +245,112 @@
     return null;
   }
 
-  function calculateCustomerAction(cid) {
-    const priority = (typeof calculateCustomerPriority === 'function')
-      ? calculateCustomerPriority(cid)
-      : { customerId: cid, priorityScore: 0, riskLevel: 'low', signals: [] };
+  function _applyCurrentContextFilter(cid, signals) {
+    if (!Array.isArray(signals) || !signals.length) return signals || [];
 
-    const winner = _pickActionSignal(priority.signals);
+    const skuCategories = {
+      SKU_DELAY: true,
+      SKU_QUANTITY_DROP: true,
+      SKU_FREQUENCY_DROP: true,
+      LINE_DROP: true,
+      COMBINED_SKU_DETERIORATION: true,
+    };
+
+    let customer = null;
+    if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
+      for (let i = 0; i < data.customers.length; i++) {
+        if (data.customers[i] && data.customers[i].id === cid) {
+          customer = data.customers[i];
+          break;
+        }
+      }
+    }
+
+    const visits = customer && Array.isArray(customer.visits) ? customer.visits : [];
+
+    function validISODate(value) {
+      return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    }
+
+    function latestProductContext(productId) {
+      let latest = null;
+      for (let vi = 0; vi < visits.length; vi++) {
+        const visit = visits[vi];
+        if (!visit || !validISODate(visit.date) || !Array.isArray(visit.offeredProducts)) continue;
+        for (let oi = 0; oi < visit.offeredProducts.length; oi++) {
+          const op = visit.offeredProducts[oi];
+          if (!op || op.productId !== productId) continue;
+          if (!latest || visit.date > latest.date || (visit.date === latest.date && vi > latest.visitIndex) ||
+              (visit.date === latest.date && vi === latest.visitIndex && oi > latest.offerIndex)) {
+            latest = {
+              date: visit.date,
+              visitIndex: vi,
+              offerIndex: oi,
+              reaction: op.reaction,
+              rejectionReason: op.rejectionReason,
+            };
+          }
+        }
+      }
+      return latest;
+    }
+
+    function latestNoOrderVisit() {
+      let latest = null;
+      for (let vi = 0; vi < visits.length; vi++) {
+        const visit = visits[vi];
+        if (!visit || !validISODate(visit.date)) continue;
+        const noOrder = visit.ordered === false ||
+          (typeof VISIT_RESULTS !== 'undefined' && visit.result !== VISIT_RESULTS[0]);
+        if (!noOrder) continue;
+        if (!latest || visit.date > latest.date || (visit.date === latest.date && vi > latest.visitIndex)) {
+          latest = { date: visit.date, visitIndex: vi };
+        }
+      }
+      return latest;
+    }
+
+    const noOrderVisit = latestNoOrderVisit();
+    let laterInvoiceExists = false;
+    if (noOrderVisit && typeof data !== 'undefined' && Array.isArray(data.invoices)) {
+      for (let i = 0; i < data.invoices.length; i++) {
+        const invoice = data.invoices[i];
+        if (!invoice || invoice.customerId !== cid || !validISODate(invoice.date)) continue;
+        if (invoice.date > noOrderVisit.date) {
+          laterInvoiceExists = true;
+          break;
+        }
+      }
+    }
+
+    return signals.filter(function (signal) {
+      if (!signal || !signal.category) return true;
+
+      if (skuCategories[signal.category] && signal.productId != null && signal.productId !== '' && signal.productId !== 'multi') {
+        const context = latestProductContext(signal.productId);
+        if (context && context.reaction === 'rejected' &&
+            (context.rejectionReason === 'still_stock' || context.rejectionReason === 'unavailable')) {
+          return false;
+        }
+      }
+
+      if (signal.category === 'CONSECUTIVE_NO_ORDER' && laterInvoiceExists) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  function calculateCustomerAction(cid, precomputedPriority, opts) {
+    const priority = precomputedPriority || (
+      (typeof calculateCustomerPriority === 'function')
+        ? calculateCustomerPriority(cid, opts)
+        : { customerId: cid, priorityScore: 0, riskLevel: 'low', signals: [] }
+    );
+
+    const actionCandidates = _applyCurrentContextFilter(cid, priority.signals);
+    const winner = _pickActionSignal(actionCandidates);
 
     if (!winner) {
       return Object.assign({
@@ -321,9 +421,10 @@
 
   function calculateAllCustomerActions() {
     if (typeof data === 'undefined' || !Array.isArray(data.customers)) return [];
+    const economicRankMap = (typeof _buildEconomicRankMap === 'function') ? _buildEconomicRankMap() : null;
     const customers = data.customers.filter(function (c) { return c && c.active !== false; });
     const results = customers.map(function (c) {
-      return calculateCustomerAction(c.id);
+      return calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap });
     });
     results.sort(function (a, b) {
       const ua = URGENCY_RANK[a.urgency] || 0;
@@ -446,12 +547,13 @@
 
   function calculateAllActions() {
     const impactMap = _customerImpactMap();
+    const economicRankMap = (typeof _buildEconomicRankMap === 'function') ? _buildEconomicRankMap() : null;
     const actions = [];
 
     if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
       data.customers.forEach(function (c) {
         if (!c || c.active === false) return;
-        const base = calculateCustomerAction(c.id);
+        const base = calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap });
         if (!base || base.actionType === 'no_action') return;
 
         const urgencyPts = URGENCY_SCORE[base.urgency] || 10;

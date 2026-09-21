@@ -518,6 +518,28 @@
     return Math.max(0, gross - returned);
   }
 
+  // BUGFIX (Audit #12): mirrors _netRecentQty's own recent-window/earliest
+  // computation, but exposes whether any return actually falls inside that
+  // window. Kept separate from _netRecentQty (rather than changing its
+  // return shape) so its one existing call site is untouched.
+  function _hasReturnsInWindow(pair, recentWindowSize) {
+    var purchases = pair.purchases;
+    var startIdx = Math.max(0, purchases.length - recentWindowSize);
+    var windowPurchases = purchases.slice(startIdx);
+    var earliest = null;
+    for (var i = 0; i < windowPurchases.length; i++) {
+      if (!earliest || String(windowPurchases[i].date) < String(earliest)) {
+        earliest = windowPurchases[i].date;
+      }
+    }
+    if (!earliest || !pair.returns) return false;
+    for (var r = 0; r < pair.returns.length; r++) {
+      var ret = pair.returns[r];
+      if (String(ret.date || '') >= String(earliest)) return true;
+    }
+    return false;
+  }
+
   function _accountWideDecline(customerId) {
     if (typeof customerBehavior !== 'function') return false;
     try {
@@ -683,7 +705,13 @@
       // recent orders 100/12/12 — a real drop to ~12 — with zero returns
       // involved at all). Require an actual recorded return before
       // "returns explain it" is allowed to suppress the signal.
-      var hasReturnsInPeriod = !!(pair.returns && pair.returns.length > 0);
+      // BUGFIX (Audit #12): this previously checked pair.returns.length > 0
+      // across the SKU's ENTIRE history with no date boundary — despite the
+      // "InPeriod" name — so a single unrelated return from long ago (even
+      // years prior) could permanently suppress genuine future quantity-
+      // decline detection for that customer/SKU. Scope it to the same
+      // recent window _netRecentQty already uses just above.
+      var hasReturnsInPeriod = _hasReturnsInWindow(pair, SKU_PARAMS.recentWindowSize);
       var returnsExplain = hasReturnsInPeriod &&
         (eventRatio < 1 - SKU_PARAMS.quantityDropSensitivity) &&
         (qtyRatio >= 1 - SKU_PARAMS.quantityDropSensitivity);

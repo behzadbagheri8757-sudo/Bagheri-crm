@@ -50,6 +50,7 @@
   var _mem = Object.create(null);
   var _idb = null;
   var _hydrated = false;
+  var _deferSave = false; // true while reconcileWatchLifecycle batches multiple _persist calls
 
   function _nowISO() {
     return new Date().toISOString();
@@ -174,7 +175,7 @@
   function _persist(rec) {
     if (!rec || !rec.id) return;
     _mem[rec.id] = rec;
-    _saveLS();
+    if (!_deferSave) _saveLS();
     _idbPut(rec);
   }
 
@@ -262,62 +263,97 @@
           }
         }
 
-        var now = _nowISO();
-        var touched = [];
-
-        for (var ci = 0; ci < customerIds.length; ci++) {
-          var cid = customerIds[ci];
-          var watches = [];
-          if (_isCustomerActive(cid) && typeof extractWatchObservations === 'function') {
-            try {
-              watches = extractWatchObservations(cid) || [];
-            } catch (eW) {
-              watches = [];
+        // When reconciling all customers, include customerIds found in existing
+        // occurrences so orphaned active occurrences also use the normal path.
+        if (!customerId) {
+          var occurrences = _allOccurrences();
+          for (var oi = 0; oi < occurrences.length; oi++) {
+            var occurrence = occurrences[oi];
+            if (!occurrence || !occurrence.customerId) continue;
+            var occurrenceCid = String(occurrence.customerId);
+            var alreadyIncluded = false;
+            for (var cji = 0; cji < customerIds.length; cji++) {
+              if (String(customerIds[cji]) === occurrenceCid) {
+                alreadyIncluded = true;
+                break;
+              }
             }
-          }
-
-          var activeMap = _activeByIdentity(cid);
-          var seenKeys = Object.create(null);
-
-          for (var wi = 0; wi < watches.length; wi++) {
-            var w = watches[wi];
-            if (!w || !w.category) continue;
-            var key = _identityKey(cid, w.category, w.productId);
-            seenKeys[key] = true;
-            var existing = activeMap[key];
-            if (existing) {
-              existing.level = w.level || existing.level;
-              existing.generatedReason = w.reason || existing.generatedReason;
-              existing.lastEvaluatedAt = now;
-              if (w.productName != null) existing.productName = w.productName;
-              _persist(existing);
-              touched.push(existing);
-            } else {
-              var created = _mkOccurrence(w, now);
-              if (w.productName != null) created.productName = w.productName;
-              _persist(created);
-              touched.push(created);
-            }
-          }
-
-          // Auto-resolve actives whose condition is gone
-          var actKeys = Object.keys(activeMap);
-          for (var ai = 0; ai < actKeys.length; ai++) {
-            var ak = actKeys[ai];
-            if (seenKeys[ak]) continue;
-            var stale = activeMap[ak];
-            if (!stale || stale.status !== 'active') continue;
-            stale.status = 'resolved';
-            stale.lastEvaluatedAt = now;
-            stale.resolution = {
-              type: 'auto',
-              resolvedAt: now,
-              note: null
-            };
-            // Keep reason + note history intact
-            _persist(stale);
+            if (!alreadyIncluded) customerIds.push(occurrence.customerId);
           }
         }
+
+        var now = _nowISO();
+        var touched = [];
+        var persistCount = 0;
+
+        _deferSave = true;
+        try {
+          for (var ci = 0; ci < customerIds.length; ci++) {
+            var cid = customerIds[ci];
+            var watches = [];
+            if (_isCustomerActive(cid) && typeof extractWatchObservations === 'function') {
+              try {
+                watches = extractWatchObservations(cid) || [];
+              } catch (eW) {
+                watches = [];
+              }
+            }
+
+            var activeMap = _activeByIdentity(cid);
+            var seenKeys = Object.create(null);
+
+            for (var wi = 0; wi < watches.length; wi++) {
+              var w = watches[wi];
+              if (!w || !w.category) continue;
+              var key = _identityKey(cid, w.category, w.productId);
+              seenKeys[key] = true;
+              var existing = activeMap[key];
+              if (existing) {
+                existing.level = w.level || existing.level;
+                existing.generatedReason = w.reason || existing.generatedReason;
+                existing.lastEvaluatedAt = now;
+                if (w.productName != null) existing.productName = w.productName;
+                _persist(existing);
+                persistCount++;
+                touched.push(existing);
+              } else {
+                var created = _mkOccurrence(w, now);
+                if (w.productName != null) created.productName = w.productName;
+                _persist(created);
+                persistCount++;
+                touched.push(created);
+              }
+            }
+
+            // Auto-resolve actives whose condition is gone
+            var actKeys = Object.keys(activeMap);
+            for (var ai = 0; ai < actKeys.length; ai++) {
+              var ak = actKeys[ai];
+              if (seenKeys[ak]) continue;
+              var stale = activeMap[ak];
+              if (!stale || stale.status !== 'active') continue;
+              stale.status = 'resolved';
+              stale.lastEvaluatedAt = now;
+              stale.resolution = {
+                type: 'auto',
+                resolvedAt: now,
+                note: null
+              };
+              // Keep reason + note history intact
+              _persist(stale);
+              persistCount++;
+            }
+          }
+        } finally {
+          // Always clear the defer flag, even if something above threw,
+          // so a stray exception can never permanently disable localStorage
+          // saves for recordWatchReason/dismissWatchOccurrence.
+          _deferSave = false;
+        }
+        // Batched write: one localStorage serialize instead of one per
+        // touched/resolved occurrence (IndexedDB puts still happen per-record
+        // above via _persist -> _idbPut, unchanged).
+        if (persistCount > 0) _saveLS();
 
         resolve(touched);
       }
