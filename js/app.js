@@ -518,20 +518,53 @@ function openAddProduct(editId){
       await withSubmitGuard(e.currentTarget, async ()=>{
         const q = numVal(document.getElementById('f-adjust-qty'));
         if(q<=0){ showToast('مقدار رو وارد کن'); throw new Error('validation'); }
+        const snapshot = {
+          name: document.getElementById('f-name').value,
+          cat: document.getElementById('f-cat').value,
+          pkgw: document.getElementById('f-pkgw').value,
+          buy: document.getElementById('f-buy').value,
+          wholesale: document.getElementById('f-wholesale').value,
+          retail: document.getElementById('f-retail').value,
+          minstock: document.getElementById('f-minstock').value,
+        };
         manualStockIn(p.id, q, 'ورود کالا');
-        await saveData(); openAddProduct(p.id); showToast('موجودی اضافه شد');
+        await saveData();
+        openAddProduct(p.id);
+        document.getElementById('f-name').value = snapshot.name;
+        document.getElementById('f-cat').value = snapshot.cat;
+        document.getElementById('f-pkgw').value = snapshot.pkgw;
+        document.getElementById('f-buy').value = snapshot.buy;
+        document.getElementById('f-wholesale').value = snapshot.wholesale;
+        document.getElementById('f-retail').value = snapshot.retail;
+        document.getElementById('f-minstock').value = snapshot.minstock;
+        showToast('موجودی اضافه شد');
       });
     });
     document.getElementById('stock-out').addEventListener('click', async (e)=>{
       await withSubmitGuard(e.currentTarget, async ()=>{
         const q = numVal(document.getElementById('f-adjust-qty'));
         if(q<=0){ showToast('مقدار رو وارد کن'); throw new Error('validation'); }
+        const snapshot = {
+          name: document.getElementById('f-name').value,
+          cat: document.getElementById('f-cat').value,
+          pkgw: document.getElementById('f-pkgw').value,
+          buy: document.getElementById('f-buy').value,
+          wholesale: document.getElementById('f-wholesale').value,
+          retail: document.getElementById('f-retail').value,
+          minstock: document.getElementById('f-minstock').value,
+        };
         const r = manualStockOut(p.id, q, 'خروج/اصلاح دستی');
-        if(!r || !r.ok){
-          showToast((r && r.error) ? r.error : 'امکان کاهش موجودی نیست');
-          throw new Error('validation');
-        }
-        await saveData(); openAddProduct(p.id); showToast('موجودی کم شد');
+        if(!r || !r.ok){ showToast((r && r.error) ? r.error : 'امکان کاهش موجودی نیست'); throw new Error('validation'); }
+        await saveData();
+        openAddProduct(p.id);
+        document.getElementById('f-name').value = snapshot.name;
+        document.getElementById('f-cat').value = snapshot.cat;
+        document.getElementById('f-pkgw').value = snapshot.pkgw;
+        document.getElementById('f-buy').value = snapshot.buy;
+        document.getElementById('f-wholesale').value = snapshot.wholesale;
+        document.getElementById('f-retail').value = snapshot.retail;
+        document.getElementById('f-minstock').value = snapshot.minstock;
+        showToast('موجودی کم شد');
       });
     });
   }
@@ -1410,7 +1443,6 @@ function openAddVisit(cid){
           }
           state.step = 'done';
           renderStage();
-          persistVisit(true);
           return;
         }
       });
@@ -2760,7 +2792,7 @@ function openSupplierDetail(sid){
     btn.title = 'Developer QA';
     btn.textContent = 'QA';
     btn.addEventListener('click', openQAPanel);
-    document.body.appendChild(btn);
+    /* disabled for daily use: document.body.appendChild(btn); */
 
     // secret: 5 rapid clicks on header title also opens QA
     const h1 = document.querySelector('header h1');
