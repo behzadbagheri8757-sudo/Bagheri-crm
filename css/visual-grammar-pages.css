@@ -1,0 +1,761 @@
+/* ============================================================
+   BAGHERI VISUAL GRAMMAR — PAGES v2
+   Page-level composition only.
+   No shared component definitions.
+   ============================================================ */
+
+:root{
+  --vg-page-gap:24px;
+  --vg-group-gap:12px;
+  --vg-unit-gap:8px;
+  --vg-content-max:760px;
+}
+
+/* ---------- Shared page frame ---------- */
+main{
+  max-width:var(--vg-content-max);
+  margin:0 auto;
+  padding:14px 14px calc(160px + env(safe-area-inset-bottom,0px));
+}
+
+main > *:first-child{margin-top:0;}
+main .section-title{position:relative; margin-bottom:14px;}
+main .tx-hint,
+main > p.tx-hint{margin-top:-6px;margin-bottom:16px;}
+main > .field{margin-bottom:12px;}
+main > .chip-row{margin-bottom:12px;}
+main > .tx-toolbar{margin:0 0 14px;}
+main > .btn-row{margin-bottom:12px;}
+main .empty{margin:14px 0;}
+
+/* ---------- Page identity (quiet) ---------- */
+.vg-route-dashboard main .section-title,
+.vg-route-customers main .section-title,
+.vg-route-products main .section-title,
+.vg-route-invoices main .section-title,
+.vg-route-payments main .section-title,
+.vg-route-visits main .section-title,
+.vg-route-reports main .section-title,
+.vg-route-suppliers main .section-title,
+.vg-route-checks main .section-title,
+.vg-route-inventory main .section-title,
+.vg-route-prospects main .section-title{
+  font-weight:var(--vg-weight-title);
+}
+
+/* ---------- List-first pages ---------- */
+.vg-route-customers #customer-list,
+.vg-route-products #product-list,
+.vg-route-invoices #invoice-list,
+.vg-route-payments #payment-list,
+.vg-route-visits #visit-list,
+.vg-route-suppliers #supplier-list,
+.vg-route-checks #check-list,
+.vg-route-prospects #prospect-list{
+  margin-top:14px;
+  border-radius:var(--vg-radius-soft);
+}
+
+.vg-route-customers .customer-list-row,
+.vg-route-products .tx-list .ledger-row,
+.vg-route-invoices .tx-list .ledger-row,
+.vg-route-payments .tx-list .ledger-row,
+.vg-route-visits .tx-list .ledger-row,
+.vg-route-suppliers .tx-list .ledger-row,
+.vg-route-checks .tx-list .ledger-row,
+.vg-route-prospects .tx-list .ledger-row{
+  background:transparent;
+  box-shadow:none;
+}
+
+/* Summary metrics share one quiet surface instead of a grid of nested cards.
+   The page-specific contents remain unchanged. */
+.vg-route-payments #payment-summary,
+.vg-route-checks #check-summary,
+.vg-route-visits #visit-summary,
+.vg-route-prospects #prospect-summary{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:0;
+  padding:0;
+  overflow:hidden;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+  box-shadow:var(--vg-shadow-group);
+}
+
+.vg-route-payments #payment-summary > .card,
+.vg-route-checks #check-summary > .card,
+.vg-route-visits #visit-summary > .card,
+.vg-route-prospects #prospect-summary > .card{
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  padding:14px;
+}
+
+.vg-route-payments #payment-summary > .card:nth-child(odd),
+.vg-route-checks #check-summary > .card:nth-child(odd),
+.vg-route-visits #visit-summary > .card:nth-child(odd),
+.vg-route-prospects #prospect-summary > .card:nth-child(odd){
+  border-inline-end:1px solid var(--vg-color-divider);
+}
+
+.vg-route-payments #payment-summary > .card:nth-child(-n+2),
+.vg-route-checks #check-summary > .card:nth-child(-n+2),
+.vg-route-visits #visit-summary > .card:nth-child(-n+2),
+.vg-route-prospects #prospect-summary > .card:nth-child(-n+2){
+  border-bottom:1px solid var(--vg-color-divider);
+}
+
+/* ---------- Customers: native list-row alignment ----------
+   Keep identity, financial value and disclosure affordance on stable tracks.
+   This prevents status/date/warning content from changing the horizontal or
+   vertical alignment of neighboring rows. */
+.vg-route-customers .customer-list-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(88px,auto) 14px;
+  align-items:center;
+  column-gap:10px;
+  min-height:68px;
+  padding-block:10px;
+}
+.vg-route-customers .customer-row-main{
+  min-width:0;
+  align-self:center;
+  gap:3px;
+}
+.vg-route-customers .customer-row-title-line{
+  min-width:0;
+  min-height:1.35em;
+}
+.vg-route-customers .customer-row-meta-line{
+  min-width:0;
+  min-height:22px;
+  gap:7px;
+}
+.vg-route-customers .customer-row-status{
+  min-height:21px;
+  padding-inline:7px;
+  font-size:.68rem;
+  font-weight:550;
+}
+.vg-route-customers .customer-row-meta{
+  min-width:0;
+}
+.vg-route-customers .customer-row-watch{
+  width:16px;
+  height:16px;
+}
+.vg-route-customers .customer-row-balance{
+  min-width:88px;
+  align-self:center;
+  align-items:flex-start;
+  text-align:start;
+  gap:3px;
+}
+.vg-route-customers .customer-row-balance-label,
+.vg-route-customers .customer-row-balance-value{
+  width:100%;
+  text-align:start;
+}
+.vg-route-customers .customer-row-balance-value{
+  font-size:.84rem;
+  font-weight:700;
+}
+.vg-route-customers .customer-list-row::after{
+  grid-column:3;
+  grid-row:1;
+  justify-self:end;
+  align-self:center;
+  margin-inline-start:0;
+}
+@media (max-width:380px){
+  .vg-route-customers .customer-list-row{
+    grid-template-columns:minmax(0,1fr) minmax(76px,auto) 14px;
+    column-gap:8px;
+  }
+  .vg-route-customers .customer-row-balance{min-width:76px;}
+}
+
+/* ---------- Search/filter group ---------- */
+.vg-route-customers .field:has(#customer-search),
+.vg-route-products .field:has(#product-search),
+.vg-route-invoices .field:has(#invoice-search),
+.vg-route-payments .field:has(#payment-search),
+.vg-route-visits .field:has(#visit-search){
+  margin-bottom:8px;
+}
+
+.vg-route-customers .chip-row,
+.vg-route-products .chip-row,
+.vg-route-invoices .chip-row,
+.vg-route-payments .chip-row,
+.vg-route-visits .chip-row,
+.vg-route-suppliers .chip-row,
+.vg-route-checks .chip-row,
+.vg-route-prospects .chip-row{
+  gap:var(--vg-space-related);
+}
+
+/* ---------- Customer detail ---------- */
+#main.customer-detail-view .cust-summary,
+#main.customer-detail-view .customer-behavior-summary{
+  margin-bottom:18px;
+}
+
+#main.customer-detail-view .cust-recommended-action{
+  margin:18px 0 22px;
+}
+
+#main.customer-detail-view .cust-recommended-action-label{
+  margin-bottom:7px;
+}
+
+#main.customer-detail-view .cust-recommended-action{
+  background:var(--vg-color-primary-soft);
+  border-color:transparent;
+  border-inline-start:3px solid var(--vg-color-primary);
+}
+
+#main.customer-detail-view .cust-recommended-action-btn{
+  text-align:start;
+  font-size:.95rem;
+  font-weight:700;
+  line-height:1.55;
+}
+
+#main.customer-detail-view .customer-identity-card{
+  margin-bottom:12px;
+}
+
+#main.customer-detail-view .customer-identity-name{
+  font-size:1.15rem;
+  font-weight:var(--vg-weight-value);
+  color:var(--vg-color-text);
+  margin-bottom:8px;
+}
+
+#main.customer-detail-view .customer-identity-meta{
+  font-size:.88rem;
+  line-height:1.85;
+  color:var(--vg-color-text);
+}
+
+#main.customer-detail-view .customer-balance-block{
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px dotted var(--vg-color-divider);
+}
+
+#main.customer-detail-view .customer-balance-value{
+  font-size:1.25rem;
+}
+
+#main.customer-detail-view > main .sub-title{
+  margin-top:20px;
+  margin-bottom:9px;
+}
+
+#main.customer-detail-view .cust-actions-primary,
+#main.customer-detail-view .cust-actions-secondary{
+  gap:8px;
+}
+
+#main.customer-detail-view .cust-summary .ledger-row,
+#main.customer-detail-view .tx-list .ledger-row{
+  background:transparent;
+  box-shadow:none;
+}
+
+#main.customer-detail-view .customer-static-row{
+  cursor:default;
+}
+
+#main.customer-detail-view .customer-static-value{
+  font-size:.85rem;
+  font-weight:var(--vg-weight-label);
+}
+
+#main.customer-detail-view .customer-rejection-list{
+  margin-bottom:var(--vg-space-group);
+}
+
+#main.customer-detail-view .watch-confirmed-card,
+#main.customer-detail-view .watch-lifecycle-card{
+  margin-bottom:var(--vg-space-related);
+}
+
+/* Two Business Intelligence cards get a quiet accent so they read as
+   distinct from each other (confirmed finding vs. early warning), not
+   just two identical white boxes stacked together. */
+#main.customer-detail-view .watch-confirmed-card{
+  border-inline-start:3px solid var(--vg-color-primary);
+}
+#main.customer-detail-view .watch-lifecycle-card{
+  border-inline-start:3px solid var(--vg-color-warning);
+}
+#main.customer-detail-view .watch-confirmed-card > .label,
+#main.customer-detail-view .watch-lifecycle-card > .label{
+  font-size:.72rem;
+  font-weight:var(--vg-weight-title);
+  color:var(--vg-color-text);
+}
+
+/* Severity labels (بحرانی/زیاد/متوسط/کم) had no color coding at all —
+   this is the "WHY IT MATTERS" signal these rows need. Text-only, no
+   background chips, matching the restrained dashboard priority palette. */
+#main.customer-detail-view .watch-level-critical{
+  color:var(--vg-color-danger);
+  font-weight:700;
+}
+#main.customer-detail-view .watch-level-high{
+  color:#C2410C;
+  font-weight:700;
+}
+#main.customer-detail-view .watch-level-medium{
+  color:var(--vg-color-warning);
+}
+#main.customer-detail-view .watch-level-low{
+  color:var(--vg-color-text-muted);
+}
+
+#main.customer-detail-view .watch-confirmed-list,
+#main.customer-detail-view .watch-occ-list{
+  margin-top:var(--vg-space-tight);
+}
+
+#main.customer-detail-view .watch-confirmed-row{
+  display:flex;
+  justify-content:space-between;
+  gap:var(--vg-space-related);
+  font-size:.85rem;
+  line-height:1.9;
+}
+
+#main.customer-detail-view .watch-confirmed-row .watch-level-label,
+#main.customer-detail-view .watch-reviewed,
+#main.customer-detail-view .watch-level-unreviewed{
+  font-weight:var(--vg-weight-label);
+  font-size:.78rem;
+  white-space:nowrap;
+}
+
+#main.customer-detail-view .watch-occ-row{
+  font-size:.85rem;
+  line-height:1.7;
+  padding:8px 0;
+  border-bottom:1px dotted var(--vg-color-divider);
+}
+
+#main.customer-detail-view .watch-occ-row:last-child{
+  border-bottom:0;
+}
+
+#main.customer-detail-view .watch-occ-head{
+  display:flex;
+  justify-content:space-between;
+  gap:var(--vg-space-related);
+  align-items:flex-start;
+}
+
+#main.customer-detail-view .watch-occ-status{
+  text-align:left;
+  white-space:nowrap;
+}
+
+#main.customer-detail-view .watch-reason{
+  font-size:.78rem;
+  color:var(--vg-color-text-muted);
+  margin-top:2px;
+}
+
+#main.customer-detail-view .watch-note{
+  margin:4px 0 8px;
+}
+
+#main.customer-detail-view details > .cards{
+  gap:0;
+  padding:0;
+  overflow:hidden;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+  box-shadow:var(--vg-shadow-group);
+}
+
+#main.customer-detail-view details > .cards > .card{
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+}
+
+#main.customer-detail-view .customer-behavior-summary{
+  color:var(--vg-color-text);
+}
+
+#main.customer-detail-view .customer-watch-details,
+#main.customer-detail-view .customer-behavior-details{
+  margin-bottom:12px;
+}
+
+#main.customer-detail-view .customer-behavior-summary{
+  cursor:pointer;
+  font-weight:var(--vg-weight-title);
+  padding:6px 0;
+  list-style:none;
+}
+
+#main.customer-detail-view .customer-detail-watch-body{
+  margin-top:8px;
+}
+
+#main.customer-detail-view .customer-detail-subtitle{
+  margin-top:4px;
+}
+
+#main.customer-detail-view .customer-detail-subtitle-secondary{
+  margin-top:10px;
+}
+
+#main.customer-detail-view .customer-last-visit-card{
+  margin-top:10px;
+  margin-bottom:12px;
+}
+
+#main.customer-detail-view .customer-last-visit-body{
+  font-size:.88rem;
+  line-height:1.7;
+  margin-top:6px;
+}
+
+#main.customer-detail-view .customer-empty{
+  padding:8px 0 12px;
+}
+
+/* ---------- Reports ---------- */
+.vg-route-reports #reports-summary{margin:14px 0 20px;}
+.vg-route-reports .report-summary{margin-bottom:0;}
+.vg-route-reports #reports-body{margin-top:18px;}
+.vg-route-reports .report-section{margin-bottom:var(--vg-space-section);}
+.vg-route-reports .report-section h3{margin-bottom:9px;}
+
+/* ---------- Dashboard rhythm ---------- */
+.vg-route-dashboard .dashboard-shell{gap:0;}
+.vg-route-dashboard .dashboard-shell > .section-title{margin-bottom:5px;}
+.vg-route-dashboard .dashboard-eyebrow{margin-bottom:18px;}
+.vg-route-dashboard .dashboard-block{margin-bottom:26px;}
+.vg-route-dashboard .dashboard-block-head{margin-bottom:9px;}
+.vg-route-dashboard .dash-section-label{font-weight:var(--vg-weight-title);}
+
+/* ---------- Settings / Management ---------- */
+.vg-route-settings .mgmt-section,
+.vg-route-locations .mgmt-section{
+  margin-bottom:var(--vg-space-section);
+}
+
+.vg-route-settings .mgmt-section-title{margin-bottom:9px;}
+
+.vg-route-settings .settings-section .card{
+  background:transparent;
+  border:0;
+  box-shadow:none;
+}
+
+.vg-route-settings .settings-description{
+  margin-bottom:var(--vg-space-related);
+  font-size:.8rem;
+  line-height:1.5;
+}
+
+.vg-route-settings .settings-restore-note{
+  margin-top:var(--vg-space-related);
+  font-size:.78rem;
+}
+
+.vg-route-settings .settings-empty{
+  padding:8px 0;
+}
+
+.vg-route-settings .auto-backup-name{
+  font-size:.85rem;
+}
+
+.vg-route-settings .pin-status{
+  margin-bottom:var(--vg-space-related);
+}
+
+.vg-route-settings .settings-status-value{
+  font-size:.95rem;
+}
+
+.vg-route-settings .settings-stats,
+.vg-route-settings .settings-tech-stats{
+  margin-top:var(--vg-space-related);
+}
+
+.vg-route-settings .settings-storage-meta{
+  margin-top:4px;
+}
+
+.vg-route-settings .settings-tech-note{
+  font-size:.78rem;
+  margin-top:12px;
+  line-height:1.55;
+}
+
+.vg-route-suppliers .tx-list .tx-row{
+  min-height:56px;
+}
+
+.vg-route-suppliers .tx-list .tx-row-amount{
+  min-width:96px;
+}
+
+.vg-route-suppliers .tx-list .tx-row-total{
+  font-weight:800;
+}
+.vg-route-suppliers .tx-list .tx-row-title,
+.vg-route-products .tx-list .tx-row-title,
+.vg-route-invoices .tx-list .tx-row-title{
+  font-weight:var(--vg-weight-title);
+}
+
+/* ---------- More (full page) — #/more ----------
+   Full-page replacement for the old More bottom sheet. All selectors are
+   scoped under .more-page and use only existing visual-grammar tokens.
+   The old .more-sheet* rules in app.css remain untouched for rollback.
+
+   Divider treatment (PHASE 3): a single inset 1px line between adjacent
+   rows. It starts at the text-area start (after the icon column and the
+   gap) and stops just past the chevron column, with a small breathing
+   gap so it never touches the chevron glyph or the card edge. It is
+   implemented as a ::before pseudo-element on every row that follows
+   another row, so the first row of each card and the last row of each
+   card never carry a line — matching native iOS grouped-list behavior. */
+.more-page{
+  display:flex;
+  flex-direction:column;
+  gap:26px;
+  padding-top:6px;
+}
+
+.more-group{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.more-group-title{
+  margin:0;
+  padding:0 4px;
+  font-size:.78rem;
+  font-weight:var(--vg-weight-label);
+  color:var(--vg-color-text-muted);
+  line-height:1.35;
+  letter-spacing:.01em;
+  text-align:start;
+}
+
+.more-group-card{
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+  box-shadow:var(--vg-shadow-group);
+  overflow:hidden;
+}
+
+.more-row{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-height:54px;
+  padding:12px 14px;
+  color:var(--vg-color-text);
+  text-decoration:none;
+  font-size:.95rem;
+  font-weight:var(--vg-weight-title);
+  -webkit-tap-highlight-color:transparent;
+  transition:background-color 140ms ease;
+}
+
+/* Inset divider: 1px line at the top edge of every row except the first
+   in its card. Horizontal extents (RTL logical):
+     inset-inline-start = padding-inline-start + icon + gap = 14 + 24 + 12 = 50px
+     inset-inline-end   = padding-inline-end + chevron + gap = 14 + 16 + 4 = 34px
+   so the line never runs under the icon column and never touches the
+   chevron glyph or the outer card edge. */
+.more-row + .more-row::before{
+  content:'';
+  position:absolute;
+  top:0;
+  inset-inline-start:calc(14px + 24px + 12px);
+  inset-inline-end:calc(14px + 16px + 4px);
+  height:1px;
+  background:var(--vg-color-divider);
+  pointer-events:none;
+}
+
+.more-row:active{
+  background:var(--vg-color-surface-soft);
+}
+
+.more-row-icon{
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:24px;
+  height:24px;
+  color:var(--vg-color-primary);
+}
+
+.more-row-icon svg{
+  max-width:22px;
+  max-height:22px;
+  display:block;
+}
+
+.more-row-title{
+  flex:1 1 auto;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.more-row-chevron{
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:16px;
+  height:16px;
+  color:var(--vg-color-text-muted);
+  opacity:.6;
+}
+
+.more-row-chevron svg{
+  display:block;
+  width:16px;
+  height:16px;
+}
+
+/* ---------- Shared repeated-row divider ----------
+   A very subtle, inset (not edge-to-edge) 1px line between consecutive
+   plain rows so consecutive entries don't visually merge, without turning
+   any of them into cards. Same technique as the More-page row divider
+   (.more-row + .more-row::before). Scoped only to the specific lists
+   named in the visual-polish pass — pages marked "no known issue"
+   (Invoices List, Invoice Detail, Customer Visits, Store Evaluation,
+   Sales Game Center) are intentionally left untouched. */
+.dash-activity .ledger-row,
+#main.customer-detail-view .customer-tx-list .ledger-row,
+.rtp-list .ledger-row{
+  position:relative;
+}
+.dash-activity .ledger-row + .ledger-row::before,
+#main.customer-detail-view .customer-tx-list .ledger-row + .ledger-row::before,
+.rtp-list .ledger-row + .ledger-row::before{
+  content:'';
+  position:absolute;
+  top:0;
+  inset-inline-start:6px;
+  inset-inline-end:6px;
+  height:1px;
+  background:var(--vg-color-divider);
+  pointer-events:none;
+}
+
+/* Visit/evaluation rows (item I): the supporting detail lines (reason,
+   opportunity, threat, next action, tags) were the same visual weight as
+   the date line. Keep the date as the immediate secondary line, and make
+   the additional detail lines quieter and more tightly set so the row
+   reads as one primary fact + supporting detail, not a wall of equal
+   facts. */
+#main.customer-detail-view .customer-visit-row-detail{
+  font-size:.72rem;
+  line-height:1.5;
+  opacity:.85;
+}
+
+/* ---------- Mobile responsiveness ---------- */
+@media (max-width:419px){
+  :root{
+    --vg-page-gap:22px;
+  }
+  main{
+    padding:12px 10px calc(84px + env(safe-area-inset-bottom,0px));
+  }
+  main .section-title{margin-bottom:12px;}
+  main > .field{margin-bottom:10px;}
+  .vg-route-dashboard .dashboard-block{margin-bottom:22px;}
+  .vg-route-reports .report-section{margin-bottom:20px;}
+  #main.customer-detail-view .cust-recommended-action{margin-top:16px;margin-bottom:20px;}
+}
+
+@media (min-width:768px){
+  main{
+    padding:20px 20px 40px;
+  }
+}
+
+@media (min-width:901px){
+  .bottom-nav{
+    display:none!important;
+  }
+  main{
+    padding-bottom:40px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   MICRO TYPOGRAPHY TUNING — Products list only (post system-font A/B test)
+   ID-scoped to the live #product-list element (set at runtime by
+   js/views/products.js). Deliberately NOT using .tx-row-title /
+   .tx-row-total directly, and NOT using .vg-route-products — both are
+   shared with/dormant across many other views; see patch report.
+   -------------------------------------------------------------------------- */
+#product-list .tx-row-title{
+  font-weight:var(--vg-weight-title);
+  letter-spacing:.1px;
+}
+#product-list .tx-row-total{
+  font-weight:700;
+  letter-spacing:-.1px;
+}
+#product-list .product-row-qty-value{
+  font-weight:600;
+  letter-spacing:.1px;
+  color:var(--vg-color-text-secondary);
+}
+#product-list .product-row-value .tx-row-total{
+  color:var(--vg-color-text);
+}
+
+/* مشاهده انبار: a real navigation control that was reading as passive
+   text. Add a quiet chevron (same disclosure glyph used elsewhere) so its
+   tap affordance is obvious without turning it into a heavier button. */
+.btn-row > a.btn.secondary.small.has-chevron{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+}
+.btn-row > a.btn.secondary.small.has-chevron::after{
+  content:'';
+  width:12px;
+  height:12px;
+  flex:none;
+  opacity:.55;
+  background-color:currentColor;
+  -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
+  mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
+  -webkit-mask-size:contain;
+  mask-size:contain;
+  -webkit-mask-repeat:no-repeat;
+  mask-repeat:no-repeat;
+}

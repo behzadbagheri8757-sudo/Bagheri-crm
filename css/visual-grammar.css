@@ -1,0 +1,175 @@
+/* ============================================================
+   BAGHERI VISUAL GRAMMAR — FOUNDATION v2
+   Single source of truth for design tokens.
+   No component definitions. Only tokens and base environment.
+   ============================================================ */
+
+:root{
+  /* ---------- Color roles ---------- */
+  --vg-color-bg:               #F5F7FA;
+  --vg-color-surface:          #FFFFFF;
+  --vg-color-surface-soft:     #F7F8FA;
+  --vg-color-text:             #1F2937;
+  --vg-color-text-secondary:   #4B5563;
+  --vg-color-text-muted:       #667085;
+  --vg-color-border:           rgba(31,41,55,.075);
+  --vg-color-divider:          rgba(31,41,55,.055);
+  --vg-color-primary:          #0070D2;
+  --vg-color-primary-soft:     #E8F2FC;
+  --vg-color-success:          #00A068;
+  --vg-color-success-soft:     #E8F7F2;
+  --vg-color-warning:          #9A6700;
+  --vg-color-warning-soft:     #FFF3DF;
+  --vg-color-danger:           #FA3946;
+  --vg-color-danger-soft:      #FFF0EC;
+  --vg-color-neutral:          #6B7280;
+  --vg-color-neutral-soft:     #F3F4F6;
+  --vg-color-icon:             #1C1C1E;
+
+  /* ---------- Spacing scale ---------- */
+  --vg-space-tight:            6px;
+  --vg-space-related:          10px;
+  --vg-space-group:            16px;
+  --vg-space-section:          24px;
+  --vg-space-module:           32px;
+
+  /* ---------- Radius scale (Capsule / Circle / Soft / Raised) ---------- */
+  --vg-radius-control:         999px;   /* Capsule for inputs, buttons, chips */
+  --vg-radius-circle:          50%;     /* Circle for icon-only controls */
+  --vg-radius-soft:            14px;    /* Soft surfaces: cards, panels */
+  --vg-radius-raised:          16px;    /* Raised surfaces: sheets, modals */
+  --vg-radius-pill:            999px;   /* Badges and small pills */
+
+  /* ---------- Shadow scale ---------- */
+  --vg-shadow-group:           0 2px 10px rgba(31,41,55,.045);
+  --vg-shadow-raised:          0 6px 20px rgba(31,41,55,.075);
+  --vg-shadow-overlay:         0 12px 32px rgba(31,41,55,.12);
+  --vg-shadow-glass:           0 6px 24px rgba(26,38,52,.12), 0 1px 3px rgba(26,38,52,.08);
+
+  /* ---------- Typography roles ---------- */
+  --vg-type-page:              1.05rem;
+  --vg-type-section:           .88rem;
+  --vg-type-primary:           1.12rem;
+  --vg-type-secondary:         .92rem;
+  --vg-type-label:             .70rem;
+  --vg-type-meta:              .64rem;
+  --vg-type-action:            .88rem;
+
+  /* ---------- Font weights ----------
+     Retuned one 100-weight tier lighter (2026-09 iOS Bold-Text retuning pass):
+     baseline visual density now targets iPhone "Bold Text: ON" as the real-world
+     rendering condition instead of "Bold Text: OFF". Floor kept at 400. */
+  --vg-weight-regular:         400;
+  --vg-weight-medium:          400;
+  --vg-weight-label:           500;
+  --vg-weight-title:           600;
+  --vg-weight-value:           700;
+  --vg-weight-emphasis:        800;
+
+  /* ---------- Control height (minimum touch target) ---------- */
+  --vg-control-height:         44px;
+
+  /* ---------- Motion tokens (iOS 26 interaction layer) ----------
+     Moved here from css/app.css so this file remains the single
+     source of truth for tokens, per this file's own header comment.
+     Values unchanged — this is a location fix only, not a value change. */
+  --ios-ease-out:               cubic-bezier(.22,1,.36,1);
+  --ios-route-ease:             cubic-bezier(0.32, 0.72, 0, 1);
+  --ios-ease-spring:            cubic-bezier(.22,1.18,.36,1);
+  --ios-touch:                  120ms;
+  --ios-control:                180ms;
+  --ios-route:                  240ms;
+  --ios-glass:                  rgba(255,255,255,.72);
+  --ios-glass-border:           rgba(255,255,255,.58);
+}
+
+/* ---------- Base environment ---------- */
+html{
+  background:var(--vg-color-bg);
+  -webkit-text-size-adjust:100%;
+}
+
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display','Helvetica Neue',Arial,sans-serif;
+  background:var(--vg-color-bg);
+  color:var(--vg-color-text);
+  font-size:16px;
+  line-height:1.55;
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+  max-width:100vw;
+  overscroll-behavior-y:contain;
+  touch-action:manipulation;
+  -webkit-overflow-scrolling:touch;
+}
+
+/* ---------- Typography hierarchy ---------- */
+h1,h2,h3,h4,h5,h6{
+  margin:0;
+  font-weight:var(--vg-weight-title);
+  color:var(--vg-color-text);
+}
+
+h2.section-title{
+  font-size:var(--vg-type-page);
+  letter-spacing:-.18px;
+  line-height:1.3;
+}
+
+h3.sub-title{
+  font-size:var(--vg-type-section);
+  line-height:1.3;
+}
+
+a{
+  color:inherit;
+  text-decoration:none;
+}
+
+p{
+  margin:0 0 1em;
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion:reduce){
+  *,
+  *::before,
+  *::after{
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   CANVAS BACKGROUND HOOK (iOS 26 two-tier background patch)
+   Self-contained: these two classes control ONLY the page canvas color.
+   Not part of the .vg-route-* namespace (that namespace is intentionally
+   left untouched/dormant elsewhere in this project). Applied to <html> by
+   router.js so it wins on both the html and body paint layers (covers
+   iOS rubber-band overscroll on either element).
+   -------------------------------------------------------------------------- */
+:root{
+  --vg-color-bg-system: #FFFFFF;
+}
+html.vg-canvas-white,
+html.vg-canvas-white body{
+  background:var(--vg-color-bg-system);
+}
+html.vg-canvas-grouped,
+html.vg-canvas-grouped body{
+  background:var(--vg-color-bg);
+}
+
+/* Search field (capsule) contrast: on the flat white canvas the existing
+   ios-glass background/border pairing (designed to sit over the grouped
+   #F5F7FA canvas) becomes visually indistinguishable from the page itself.
+   Minimum fix: swap only the border color back to the standard, visible
+   border token when the white canvas is active. No size/background/shadow/
+   blur/behavior/DOM change. */
+html.vg-canvas-white input[type="search"],
+html.vg-canvas-white input[placeholder*="جستجو"]{
+  border-color:var(--vg-color-border);
+}

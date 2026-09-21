@@ -1,0 +1,861 @@
+/* ============================================================
+   BAGHERI VISUAL GRAMMAR — COMPONENTS v2
+   Owns all shared component geometry:
+   Capsule, Circle, Soft Surface, Floating Glass.
+   No page-specific or view-specific rules.
+   ============================================================ */
+
+/* ---------- Capsule geometry ---------- */
+/* Applies to form controls, buttons, chips, search inputs, selects */
+.btn,
+.btn.small,
+.btn.secondary,
+.btn.danger,
+.chip,
+.chip-opt,
+.field input,
+.field select,
+.tx-toolbar-select,
+input[type="search"],
+input[placeholder*="جستجو"]{
+  border-radius:var(--vg-radius-control);
+}
+
+/* ---------- Circle geometry ---------- */
+/* Applies to icon-only actions and containers */
+.close-x,
+.icon-btn,
+.icon-button,
+.dash-section-ico,
+.dash-qa-ico{
+  border-radius:var(--vg-radius-circle);
+}
+
+/* ---------- Soft Surface geometry ---------- */
+/* Cards, panels, summaries, sheets */
+.card,
+.report-summary-card,
+.gc-panel,
+.prospect-result-card,
+.cust-summary,
+.overlay .sheet{
+  border-radius:var(--vg-radius-soft);
+}
+
+.sheet{
+  border-radius:var(--vg-radius-raised) var(--vg-radius-raised) 0 0;
+}
+
+
+/* ============================================================
+   Floating Glass Bottom Navigation
+   Single canonical definition.
+   ============================================================ */
+
+.bottom-nav{
+  --bn-minimize-progress:0;
+  --bn-minimize-duration:180ms;
+
+  position:fixed!important;
+  top:auto!important;
+  left:12px;
+  right:12px;
+  bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  z-index:40;
+  box-sizing:border-box;
+  /* Keeps the jelly indicator's travel-time grow/stretch (see js/nav.js
+     _bnAnimateIndicatorToItem) confined to the capsule at every tab,
+     including the first/last where there's least padding to spare. Doesn't
+     clip the bar's own box-shadow (that's painted outside this element's
+     own border box, unaffected by its own overflow). */
+  overflow:hidden;
+
+  display:flex;
+  align-items:stretch;
+  justify-content:space-around;
+
+  /* Short floating capsule: 60px at rest → 46px minimized. border-radius
+     is set far larger than any of these heights on purpose — the browser
+     clamps border-radius to half the box's own height/width, so the two
+     ends are always a true semicircle (radius = height/2) at every single
+     step of the scroll-linked minimize progress, not just at the two
+     endpoints. */
+  min-height:calc(60px - (14px * var(--bn-minimize-progress)));
+  padding:calc(6px - (2px * var(--bn-minimize-progress))) 10px;
+  border-radius:999px;
+
+  background:rgba(255,255,255,.82);
+  border:0.5px solid rgba(15,23,42,.08);
+
+  box-shadow:
+    0 8px 24px rgba(15,23,42,.12),
+    0 2px 6px rgba(15,23,42,.06);
+
+  -webkit-backdrop-filter:saturate(160%) blur(20px);
+  backdrop-filter:saturate(160%) blur(20px);
+
+  -webkit-overflow-scrolling:auto;
+
+  transform-origin:center bottom;
+
+  /* Preserve final behavior: geometry is driven by JS progress. */
+  transition:background-color 220ms ease,
+             box-shadow 220ms ease,
+             min-height var(--bn-minimize-duration) cubic-bezier(.22,1,.36,1),
+             padding-block var(--bn-minimize-duration) cubic-bezier(.22,1,.36,1);
+}
+
+.bottom-nav-item{
+  position:relative;
+  z-index:1;
+  isolation:isolate;
+  overflow:visible;
+
+  flex:1 1 0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:2px;
+
+  /* Content-area height that exactly matches the bar's own border-box
+     shrink above (bar min-height minus the bar's own top+bottom padding
+     at the same progress), so the item never gets taller or shorter than
+     the capsule actually has room for. */
+  min-height:calc(48px - (10px * var(--bn-minimize-progress)));
+  padding:calc(4px - (1px * var(--bn-minimize-progress))) 2px;
+
+  border:none;
+  border-radius:0;
+  background:transparent;
+
+  color:var(--vg-color-text-muted);
+  text-decoration:none;
+  font-family:inherit;
+  font-size:.62rem;
+  font-weight:var(--vg-weight-label);
+  line-height:1.15;
+
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+
+  transition:color var(--ios-control) var(--ios-ease-out),
+             transform var(--ios-touch) var(--ios-ease-out),
+             opacity var(--ios-touch) ease,
+             min-height 180ms cubic-bezier(.22,1,.36,1),
+             padding-block 180ms cubic-bezier(.22,1,.36,1);
+}
+
+/* AppIcons are monochrome by default across all views. Only the active Bottom Nav item is brand-blue. */
+.app-icon{
+  color:#1C1C1E;
+}
+
+.bottom-nav-item .bn-ico{
+  width:calc(26px - (1px * var(--bn-minimize-progress)));
+  height:calc(26px - (1px * var(--bn-minimize-progress)));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:var(--vg-color-icon,#1C1C1E);
+}
+
+.bottom-nav-item .bn-ico svg{
+  max-width:100%;
+  max-height:100%;
+  stroke-width:1.55;
+}
+
+.bottom-nav-item .bn-label{
+  max-width:100%;
+  max-height:calc(2em * (1 - var(--bn-minimize-progress)));
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+
+  opacity:calc(1 - var(--bn-minimize-progress));
+  transform:translateY(calc(-2px * var(--bn-minimize-progress)));
+
+  pointer-events:auto;
+
+  transition:max-height 160ms cubic-bezier(.22,1,.36,1),
+             opacity 120ms ease;
+}
+
+/* Active = tint-only (no pill, no glass box) */
+.bottom-nav-item.active{
+  color:var(--vg-color-primary);
+  font-weight:var(--vg-weight-title);
+  background:transparent;
+}
+
+.bottom-nav-item.active .bn-ico{
+  color:var(--vg-color-primary);
+}
+
+.bottom-nav-item.active .bn-ico .app-icon{
+  color:var(--vg-color-primary);
+}
+
+.bottom-nav-item.active .bn-ico svg{
+  stroke-width:1.9;
+  transition:stroke-width 0.2s ease;
+}
+
+/* Minimized state while scrolling — matches the calc() endpoints above
+   (progress=1) exactly, so this class taking over at progress>=.98 never
+   produces a visible pop. */
+.bottom-nav.is-minimized{
+  min-height:46px;
+  padding-block:4px;
+}
+
+.bottom-nav.is-minimized .bottom-nav-item{
+  min-height:38px;
+  padding-block:2px;
+}
+
+.bottom-nav.is-minimized .bottom-nav-item .bn-label{
+  max-height:0;
+  opacity:0;
+  overflow:hidden;
+  pointer-events:none;
+}
+
+.bottom-nav.is-minimized .bottom-nav-item .bn-ico{
+  width:25px;
+  height:25px;
+}
+
+.bottom-nav.is-minimized .bottom-nav-item .bn-ico svg{
+  max-width:100%;
+  max-height:100%;
+}
+
+@media (prefers-reduced-motion: reduce){
+  .bottom-nav,
+  .bottom-nav-item,
+  .bottom-nav-item .bn-label{
+    transition:none!important;
+  }
+}
+
+@media (min-width:901px){
+  .bottom-nav{
+    display:none!important;
+  }
+}
+
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+
+.btn{
+  min-height:var(--vg-control-height);
+  padding:12px 16px;
+  background:var(--vg-color-primary);
+  color:#fff;
+  border:1px solid var(--vg-color-primary);
+  font-size:var(--vg-type-action);
+  font-weight:var(--vg-weight-title);
+  box-shadow:0 3px 10px rgba(0,112,210,.14);
+  cursor:pointer;
+  transition:transform .1s,box-shadow .1s;
+}
+
+.btn:active{
+  transform:scale(.98);
+  box-shadow:0 1px 4px rgba(0,0,0,.1);
+}
+
+.btn.secondary{
+  background:var(--vg-color-surface);
+  color:var(--vg-color-text-secondary);
+  border:1px solid var(--vg-color-border);
+  box-shadow:none;
+}
+
+.btn.danger{
+  background:var(--vg-color-danger);
+  color:#fff;
+  border-color:var(--vg-color-danger);
+  box-shadow:0 3px 10px rgba(250,57,70,.16);
+}
+
+.btn.small{
+  min-height:40px;
+  padding:8px 12px;
+  font-size:.78rem;
+}
+
+.btn:disabled{
+  opacity:.55;
+  box-shadow:none;
+}
+
+
+/* ============================================================
+   Chips
+   ============================================================ */
+
+.chip,
+.chip-opt{
+  min-height:40px;
+  padding:8px 12px;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  color:var(--vg-color-text-secondary);
+  font-weight:var(--vg-weight-label);
+  cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s;
+}
+
+.chip.active,
+.chip-opt.selected{
+  background:var(--vg-color-primary);
+  border-color:var(--vg-color-primary);
+  color:#fff;
+}
+
+
+/* ============================================================
+   Badges
+   ============================================================ */
+
+.badge{
+  display:inline-block;
+  padding:3px 9px;
+  border:1px solid transparent;
+  border-radius:var(--vg-radius-pill);
+  font-size:.64rem;
+  font-weight:var(--vg-weight-title);
+  line-height:1.3;
+}
+
+.badge.tone-success,
+.badge.cleared{
+  background:var(--vg-color-success-soft);
+  color:var(--vg-color-success);
+}
+
+.badge.tone-warning,
+.badge.pending{
+  background:var(--vg-color-warning-soft);
+  color:var(--vg-color-warning);
+}
+
+.badge.tone-danger,
+.badge.low{
+  background:var(--vg-color-danger-soft);
+  color:var(--vg-color-danger);
+}
+
+.badge.tone-muted{
+  background:var(--vg-color-surface-soft);
+  color:var(--vg-color-text-muted);
+}
+
+.badge.tone-neutral{
+  background:var(--vg-color-neutral-soft);
+  color:var(--vg-color-text-secondary);
+}
+
+
+/* ============================================================
+   Form Controls
+   ============================================================ */
+
+.field{
+  margin-bottom:var(--vg-space-group);
+}
+
+.field label{
+  display:block;
+  margin-bottom:6px;
+  color:var(--vg-color-text-muted);
+  font-size:var(--vg-type-label);
+  font-weight:var(--vg-weight-label);
+}
+
+.field input,
+.field select,
+.field textarea{
+  width:100%;
+  min-height:var(--vg-control-height);
+  padding:11px 14px;
+  background:var(--vg-color-surface);
+  color:var(--vg-color-text);
+  border:1px solid var(--vg-color-border);
+  font-size:16px;
+  font-family:inherit;
+  box-shadow:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus{
+  outline:none;
+  border-color:rgba(0,112,210,.45);
+  box-shadow:0 0 0 3px rgba(0,112,210,.10);
+}
+
+.field textarea{
+  min-height:72px;
+  border-radius:var(--vg-radius-soft);
+}
+
+
+/* ============================================================
+   Search Inputs
+   ============================================================ */
+
+input[type="search"],
+input[placeholder*="جستجو"]{
+  min-height:var(--vg-control-height);
+  padding:11px 14px;
+  padding-right:38px;
+
+  background-color:var(--ios-glass, var(--vg-color-surface));
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7' fill='none' stroke='%2398A2B3' stroke-width='2'/%3E%3Cline x1='16.65' y1='16.65' x2='21' y2='21' stroke='%2398A2B3' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  background-size:16px 16px;
+
+  border:1px solid var(--ios-glass-border, var(--vg-color-border));
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.62),
+    0 1px 3px rgba(26,38,52,.035);
+
+  backdrop-filter:saturate(150%) blur(12px);
+  -webkit-backdrop-filter:saturate(150%) blur(12px);
+
+  border-radius:var(--vg-radius-control);
+
+  font-size:16px;
+  font-family:inherit;
+}
+
+input[type="search"]:focus,
+input[placeholder*="جستجو"]:focus{
+  outline:none;
+  border-color:rgba(0,112,210,.45);
+  box-shadow:0 0 0 3px rgba(0,112,210,.10);
+}
+
+
+/* ============================================================
+   Toolbar Selects
+   ============================================================ */
+
+.field select,
+.tx-toolbar-select,
+.inv-discount-block select{
+  -webkit-appearance:none;
+  appearance:none;
+
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:left 12px center;
+  background-size:16px 16px;
+}
+
+.tx-toolbar-select{
+  min-height:var(--vg-control-height);
+  padding:11px 12px 11px 34px;
+  background-color:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  color:var(--vg-color-text);
+  font-family:inherit;
+  font-size:16px;
+  cursor:pointer;
+}
+
+
+/* ============================================================
+   Icon-only actions
+   ============================================================ */
+
+.close-x,
+.icon-btn,
+.icon-button{
+  width:44px;
+  height:44px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:var(--vg-color-surface-soft);
+  color:var(--vg-color-text-secondary);
+  border:1px solid var(--vg-color-border);
+  cursor:pointer;
+  font-size:1.2rem;
+  padding:0;
+  transition:background .15s;
+}
+
+.close-x:active,
+.icon-btn:active,
+.icon-button:active{
+  background:var(--vg-color-surface);
+}
+
+
+/* ============================================================
+   Surface grammar
+   ============================================================ */
+
+.card,
+.report-summary-card,
+.gc-panel,
+.prospect-result-card{
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  box-shadow:var(--vg-shadow-group);
+  padding:14px;
+}
+
+.card.wide{
+  padding:14px;
+}
+
+
+/* ============================================================
+   Sheets / Modals
+   ============================================================ */
+
+.sheet{
+  background:var(--vg-color-surface);
+  border-top-left-radius:var(--vg-radius-raised);
+  border-top-right-radius:var(--vg-radius-raised);
+  box-shadow:var(--vg-shadow-overlay);
+}
+
+.sheet h3,
+.sheet-title{
+  color:var(--vg-color-text);
+  font-weight:var(--vg-weight-title);
+}
+
+
+/* ============================================================
+   Empty / Error states
+   ============================================================ */
+
+.empty{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:10px;
+  color:var(--vg-color-text-muted);
+  background:transparent;
+  border:0;
+  padding:40px 20px;
+  text-align:center;
+  font-size:.88rem;
+  line-height:1.6;
+}
+
+.empty::before{
+  content:'';
+  width:40px;
+  height:40px;
+  flex:none;
+  opacity:.32;
+  background-color:currentColor;
+
+  -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z'/%3E%3C/svg%3E");
+  mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z'/%3E%3C/svg%3E");
+  -webkit-mask-size:contain;
+  mask-size:contain;
+  -webkit-mask-repeat:no-repeat;
+  mask-repeat:no-repeat;
+  -webkit-mask-position:center;
+  mask-position:center;
+}
+
+.empty[role="alert"]{
+  color:#B45309;
+}
+
+.empty[role="alert"]::before{
+  opacity:.4;
+  -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z'/%3E%3C/svg%3E");
+  mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z'/%3E%3C/svg%3E");
+}
+
+.empty .btn{
+  margin-top:4px;
+}
+
+.field > .empty{
+  display:block;
+  padding:4px 0 0;
+  margin:0;
+  text-align:right;
+  font-size:.75rem;
+  line-height:1.55;
+}
+
+.field > .empty::before{
+  display:none;
+}
+
+.form-hint{
+  display:block;
+  padding:4px 0;
+  margin:0;
+  text-align:right;
+  line-height:1.55;
+}
+
+.form-hint::before{
+  display:none;
+}
+
+
+/* ============================================================
+   Financial check status
+   ============================================================ */
+
+[data-toggle-check].tx-status-btn,
+button[data-toggle-check]{
+  min-height:44px;
+  min-width:44px;
+}
+
+
+/* ============================================================
+   Lists / Ledger rows
+   ============================================================ */
+
+.ledger-row,
+.tx-row,
+.customer-list-row{
+  position:relative;
+  background:transparent;
+  border-bottom:0;
+}
+
+.ledger-row:last-child,
+.tx-row:last-child{
+  border-bottom-color:transparent;
+}
+
+/* Shared inset rhythm for data lists. The line is deliberately kept out of
+   the trailing disclosure/value track, matching the More reference without
+   forcing every data list into a grouped-navigation layout. */
+.tx-list > .ledger-row + .ledger-row::before,
+.tx-list > .tx-row + .tx-row::before,
+#customer-list > .customer-list-row + .customer-list-row::before{
+  content:'';
+  position:absolute;
+  top:0;
+  inset-inline-start:0;
+  inset-inline-end:20px;
+  height:1px;
+  background:var(--vg-color-divider);
+  pointer-events:none;
+}
+
+.ledger-row .name,
+.tx-row-title,
+.customer-list-row .name{
+  color:var(--vg-color-text);
+  font-weight:var(--vg-weight-title);
+}
+
+.ledger-row .sub,
+.tx-row-meta,
+.tx-hint,
+.customer-list-row .sub{
+  color:var(--vg-color-text-muted);
+  font-size:var(--vg-type-meta);
+  font-weight:var(--vg-weight-regular);
+}
+
+.ledger-row .amount,
+.tx-row-total,
+.tx-row-amount,
+.customer-row-balance-value{
+  color:var(--vg-color-text);
+  font-weight:var(--vg-weight-value);
+  font-variant-numeric:tabular-nums;
+}
+
+a.ledger-row:active{
+  background:var(--vg-color-surface-soft);
+}
+
+
+/* ============================================================
+   Semantic accent colors
+   ============================================================ */
+
+.accent-olive{
+  color:var(--vg-color-success)!important;
+}
+
+.accent-rust,
+.accent-red{
+  color:var(--vg-color-danger)!important;
+}
+
+.accent-amber{
+  color:var(--vg-color-warning)!important;
+}
+
+
+/* ============================================================
+   Toolbars
+   ============================================================ */
+
+.btn-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:var(--vg-space-related);
+  margin-top:var(--vg-space-group);
+}
+
+.tx-toolbar{
+  display:flex;
+  align-items:center;
+  gap:var(--vg-space-related);
+  margin:var(--vg-space-group) 0;
+}
+
+.tx-toolbar-label{
+  color:var(--vg-color-text-muted);
+  font-size:var(--vg-type-meta);
+  font-weight:var(--vg-weight-label);
+}
+
+
+/* ============================================================
+   Toast
+   ============================================================ */
+
+.toast{
+  position:fixed;
+  bottom:calc(84px + env(safe-area-inset-bottom,0px) + var(--keyboard-height,0px));
+  left:50%;
+  transform:translateX(-50%) translateY(10px);
+  background:var(--vg-color-primary);
+  color:#fff;
+  padding:11px 18px;
+  border-radius:var(--vg-radius-control);
+  font-size:.82rem;
+  font-weight:var(--vg-weight-title);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s,transform .2s;
+  z-index:70;
+}
+
+.toast.show{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
+
+
+/* ============================================================
+   Overlay
+   ============================================================ */
+
+.overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(11,31,58,.5);
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  z-index:60;
+}
+
+
+/* ============================================================
+   Chip rows
+   ============================================================ */
+
+.chip-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+}
+
+
+/* ============================================================
+   iOS-native Liquid Glass Bottom Navigation Indicator
+   Geometry/motion is driven by js/nav.js; this block supplies material.
+   ============================================================ */
+
+.bn-indicator{
+  position:absolute;
+  left:0;
+  top:0;
+  box-sizing:border-box;
+  pointer-events:none;
+  isolation:isolate;
+  opacity:1;
+  z-index:0;
+  border-radius:999px;
+
+  /* Project-adapted Liquid Glass material. The indicator sits INSIDE the
+     already-blurred/frosted .bottom-nav surface — giving it its own
+     backdrop-filter here would blur an already-blurred background a second
+     time (nested backdrop-filter), which is what read as smoked/milky glass
+     rather than clean translucent glass. A single translucent tint plus a
+     crisp rim and inset highlights is enough to read as a distinct glass
+     pill without a second blur pass, and is cheaper to render. */
+background: rgba(45, 49, 57, 0.14);
+border: 1px solid rgba(15, 23, 42, 0.04);
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+
+  /* PHASE 1.5 SHADOW MICRO PATCH:
+     Two-layer external shadow (near contact + soft elevated falloff) gives a
+     subtle "floating above the bar" separation, without reading as a heavy
+     card/button shadow. Inset top highlight unchanged; inset bottom line
+     slightly strengthened (.04 → .06) for a defined glass floor. */
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.10),
+    0 5px 12px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.60),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.06);
+
+  transform:translate3d(0,0,0) scaleX(1) scaleY(1);
+  transform-origin:50% 50%;
+  scale:1;
+  /* left/top/width/height are set once per travel (FLIP), not animated
+     frame-by-frame — only transform (travel) and scale (press-lift) are
+     actually animated, so that's all this hints to the compositor. */
+  will-change:transform,scale;
+  overflow:visible;
+}
+
+/* Touch-down lift: subtle depth cue for a same-tab tap (no travel). */
+.bn-indicator.is-lifted{
+  box-shadow:
+    0 4px 10px rgba(15,23,42,.12),
+    inset 0 1px 0 rgba(255,255,255,.65),
+    inset 0 -1px 0 rgba(15,23,42,.04);
+}
+
+/* In-flight material gets only a slight increase in separation; geometry
+   carries the visible jelly, not a color flash. */
+.bn-indicator.is-traveling{
+  box-shadow:
+    0 4px 10px rgba(15,23,42,.11),
+    inset 0 1px 0 rgba(255,255,255,.62),
+    inset 0 -1px 0 rgba(15,23,42,.04);
+}
+
+.bn-indicator.is-settling{
+  box-shadow:
+    0 1px 4px rgba(15,23,42,.08),
+    inset 0 1px 0 rgba(255,255,255,.58),
+    inset 0 -1px 0 rgba(15,23,42,.04);
+}

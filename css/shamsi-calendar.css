@@ -1,0 +1,315 @@
+/* ==========================================================================
+   css/shamsi-calendar.css — Shamsi Wheel Picker + Calendar Grid
+   Scoped strictly to .shamsi-sheet-overlay, .shamsi-sheet, .shamsi-wheel*,
+   .shamsi-sheet-*, .shamsi-calendar-* selectors.
+   No global .btn / .sheet / .overlay / button / input / body overrides.
+   No `!important`. No `transition: all`.
+   z-index 110 sits above generic modal (60), More sheet (46), Invoice V6
+   overlay (60), and toast (70); below confirm (120) and PIN lock (99999).
+   ========================================================================== */
+
+/* ---------- Overlay / sheet surface ---------- */
+.shamsi-sheet-overlay{
+  position:fixed;
+  inset:0;
+  z-index:110;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  background:rgba(11,31,58,.42);
+  -webkit-backdrop-filter:blur(2px);
+  backdrop-filter:blur(2px);
+  opacity:0;
+  transition:opacity 220ms cubic-bezier(.22,1,.36,1);
+  overscroll-behavior:contain;
+}
+.shamsi-sheet-overlay.show{ opacity:1; }
+
+.shamsi-sheet{
+  position:relative;
+  width:100%;
+  max-width:520px;
+  box-sizing:border-box;
+  background:#FFFFFF;
+  border-top-left-radius:20px;
+  border-top-right-radius:20px;
+  padding:6px 12px calc(12px + env(safe-area-inset-bottom,0px));
+  transform:translateY(110%);
+  transition:transform 320ms cubic-bezier(.22,1,.36,1);
+  will-change:transform;
+  max-height:min(88vh, calc(100dvh - env(safe-area-inset-top,0px) - 12px));
+  display:flex;
+  flex-direction:column;
+  box-shadow:0 -10px 34px rgba(31,41,55,.14);
+  overflow:hidden;
+}
+.shamsi-sheet-overlay.show .shamsi-sheet{ transform:translateY(0); }
+
+/* ---------- Handle / toolbar ---------- */
+.shamsi-sheet-handle{
+  flex:none;
+  width:40px;
+  height:4px;
+  border-radius:999px;
+  background:rgba(31,41,55,.14);
+  margin:6px auto 4px;
+  touch-action:none;
+}
+.shamsi-sheet-toolbar{
+  flex:none;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:4px 4px 8px;
+}
+.shamsi-sheet-title{
+  flex:1 1 auto;
+  text-align:center;
+  font-size:.95rem;
+  font-weight:600;
+  color:#1F2937;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.shamsi-sheet-btn{
+  appearance:none;
+  -webkit-appearance:none;
+  border:0;
+  background:transparent;
+  color:#0070D2;
+  font-family:inherit;
+  font-size:.92rem;
+  font-weight:600;
+  padding:8px 12px;
+  min-height:44px;
+  min-width:60px;
+  border-radius:999px;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:background-color 140ms ease;
+}
+.shamsi-sheet-btn:active{ background:rgba(0,112,210,.08); }
+.shamsi-sheet-done{ font-weight:700; }
+
+/* ---------- Wheel layout ---------- */
+.shamsi-wheels-wrap{
+  position:relative;
+  flex:1 1 auto;
+  min-height:216px;
+  overflow:hidden;
+  padding:0 4px;
+}
+.shamsi-wheels-highlight{
+  position:absolute;
+  left:8px;
+  right:8px;
+  top:50%;
+  height:36px;
+  margin-top:-18px;
+  border-radius:12px;
+  background:rgba(0,112,210,.06);
+  border:1px solid rgba(0,112,210,.12);
+  pointer-events:none;
+  z-index:0;
+}
+/* Visual order left→right in RTL pages: Year | Month | Day.
+   The container is direction:ltr so DOM order (y, m, d) maps directly to
+   that visual order. Each column re-establishes direction:rtl for its own
+   content so digits and inline content render naturally. */
+.shamsi-wheels{
+  position:relative;
+  display:flex;
+  direction:ltr;
+  height:216px;
+  align-items:stretch;
+  justify-content:center;
+  z-index:1;
+}
+.shamsi-wheel{
+  flex:1 1 0;
+  min-width:0;
+  height:216px;
+  overflow-y:scroll;
+  overflow-x:hidden;
+  scroll-snap-type:y mandatory;
+  scrollbar-width:none;
+  -ms-overflow-style:none;
+  direction:rtl;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  text-align:center;
+  padding:0;
+  -webkit-mask-image:linear-gradient(180deg,
+    transparent 0%,
+    rgba(0,0,0,.15) 12%,
+    rgba(0,0,0,1) 34%,
+    rgba(0,0,0,1) 66%,
+    rgba(0,0,0,.15) 88%,
+    transparent 100%);
+  mask-image:linear-gradient(180deg,
+    transparent 0%,
+    rgba(0,0,0,.15) 12%,
+    rgba(0,0,0,1) 34%,
+    rgba(0,0,0,1) 66%,
+    rgba(0,0,0,.15) 88%,
+    transparent 100%);
+}
+.shamsi-wheel::-webkit-scrollbar{ display:none; }
+.shamsi-wheel-item{
+  height:36px;
+  line-height:36px;
+  scroll-snap-align:center;
+  font-size:1.05rem;
+  font-weight:500;
+  color:#667085;
+  font-variant-numeric:tabular-nums;
+  user-select:none;
+  -webkit-user-select:none;
+  transition:color 120ms ease,font-weight 120ms ease;
+}
+.shamsi-wheel-item[data-selected="1"]{
+  color:#1F2937;
+  font-weight:700;
+}
+.shamsi-wheel-spacer{
+  opacity:0;
+  pointer-events:none;
+}
+
+/* ---------- Calendar grid ---------- */
+.shamsi-calendar{
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  padding:0 4px 4px;
+  min-height:0;
+}
+.shamsi-calendar-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:4px 4px 10px;
+}
+.shamsi-calendar-title{
+  flex:1 1 auto;
+  text-align:center;
+  font-size:.95rem;
+  font-weight:600;
+  color:#1F2937;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.shamsi-calendar-nav{
+  flex:none;
+  width:44px;
+  height:44px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border:0;
+  background:rgba(31,41,55,.04);
+  color:#0070D2;
+  font-family:inherit;
+  font-size:1.4rem;
+  line-height:1;
+  border-radius:50%;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:background-color 140ms ease;
+}
+.shamsi-calendar-nav:active{ background:rgba(0,112,210,.12); }
+
+.shamsi-calendar-weekdays{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:2px;
+  padding:0 0 6px;
+  font-size:.68rem;
+  font-weight:500;
+  color:#667085;
+  text-align:center;
+}
+.shamsi-calendar-weekdays span{ padding:4px 0; }
+
+.shamsi-calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:2px;
+  touch-action:pan-y;
+}
+.shamsi-calendar-day{
+  appearance:none;
+  -webkit-appearance:none;
+  border:0;
+  background:transparent;
+  font-family:inherit;
+  font-size:.92rem;
+  font-weight:500;
+  color:#1F2937;
+  height:44px;
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:12px;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  font-variant-numeric:tabular-nums;
+  transition:background-color 120ms ease,color 120ms ease,box-shadow 120ms ease;
+}
+.shamsi-calendar-day:active{ background:rgba(0,112,210,.08); }
+.shamsi-calendar-day.is-outside{ color:#C4CAD3; }
+.shamsi-calendar-day.is-today{
+  color:#0070D2;
+  font-weight:700;
+  box-shadow:inset 0 0 0 1.5px rgba(0,112,210,.32);
+}
+.shamsi-calendar-day.is-selected{
+  background:#0070D2;
+  color:#FFFFFF;
+  box-shadow:none;
+  font-weight:700;
+}
+.shamsi-calendar-day.is-selected.is-today{
+  box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.6);
+}
+
+/* ---------- Dark-mode fallback ---------- */
+@media (prefers-color-scheme: dark){
+  .shamsi-sheet-overlay{ background:rgba(0,0,0,.5); }
+  .shamsi-sheet{
+    background:#1C1C1E;
+    box-shadow:0 -10px 34px rgba(0,0,0,.4);
+  }
+  .shamsi-sheet-title,
+  .shamsi-wheel-item[data-selected="1"],
+  .shamsi-calendar-title,
+  .shamsi-calendar-day{ color:#F2F2F7; }
+  .shamsi-wheel-item{ color:#8E8E93; }
+  .shamsi-calendar-day.is-outside{ color:#5A5A5E; }
+  .shamsi-calendar-nav{
+    background:rgba(255,255,255,.06);
+    color:#5AA9F0;
+  }
+  .shamsi-calendar-nav:active{ background:rgba(90,169,240,.22); }
+  .shamsi-sheet-btn{ color:#5AA9F0; }
+  .shamsi-wheels-highlight{
+    background:rgba(90,169,240,.10);
+    border-color:rgba(90,169,240,.20);
+  }
+  .shamsi-sheet-handle{ background:rgba(255,255,255,.2); }
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce){
+  .shamsi-sheet-overlay,
+  .shamsi-sheet{ transition:none; }
+  .shamsi-wheel-item,
+  .shamsi-sheet-btn,
+  .shamsi-calendar-nav,
+  .shamsi-calendar-day{ transition:none; }
+}
