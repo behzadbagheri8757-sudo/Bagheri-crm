@@ -16,16 +16,7 @@
   let fabHandler = null;
 
   function navigateToCustomer(cid) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/customer', { id: cid });
-    } else {
-      location.href = '#/customer?id=' + encodeURIComponent(cid);
-    }
+    AppRouter.navigate('/customer', { id: cid });
   }
 
   function invoicePaidAmount(inv) {
@@ -81,7 +72,7 @@
           ? `<span class="tx-row-meta accent-rust">مانده ${toman(Math.max(0, remain))} ت</span>`
           : `<span class="tx-row-meta accent-olive">تسویه</span>`;
         return `
-        <a class="ledger-row tx-row" href="#/invoice?id=${encodeURIComponent(inv.id)}" style="text-decoration:none;color:inherit;">
+        <a class="ledger-row tx-row" href="#/invoice?id=${encodeURIComponent(inv.id)}">
           <span class="name invoice-row-main">
             <span class="tx-row-title">#${esc(String(inv.number||''))} · ${esc(custName)}</span>
             <span class="sub">${faDate(inv.date)} — <span class="${st.cls}">${st.label}</span></span>
@@ -123,7 +114,6 @@
       return `<button type="button" class="chip ${invFilter===id?'active':''}" data-if="${id}">${label}</button>`;
     };
     root.innerHTML = `
-      <h2 class="section-title">فاکتورها</h2>
       <div class="field"><input id="invoice-search" placeholder="جستجوی شماره فاکتور یا نام مشتری..." value="${esc(invQuery)}" autocomplete="off"></div>
       <div class="chip-row" id="invoice-chips">
         ${chip('all','همه')}

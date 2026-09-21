@@ -28,29 +28,11 @@
   }
 
   function navigateToWatch(occId) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/watch', { id: occId });
-    } else {
-      location.href = watchDetailHref(occId);
-    }
+    AppRouter.navigate('/watch', { id: occId });
   }
 
   function navigateToWatches() {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/watches');
-    } else {
-      location.href = watchesHref();
-    }
+    AppRouter.navigate('/watches');
   }
 
   function customerNameById(cid) {
@@ -344,7 +326,7 @@
       var card = e.target.closest('[data-watch-open-customer]');
       if (card && !e.target.closest('button,a')) {
         var cid = card.getAttribute('data-watch-open-customer');
-        if (cid) { if (typeof isSpaShell === 'function' && isSpaShell() && typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', {id: cid}); else location.href = '#/customer?id=' + encodeURIComponent(cid); }
+        if (cid) { AppRouter.navigate('/customer', {id: cid}); }
       }
     }
     root.addEventListener('click', onDetailClick);
@@ -354,7 +336,7 @@
       if (!card) return;
       e.preventDefault();
       var cid = card.getAttribute('data-watch-open-customer');
-      if (cid) { if (typeof isSpaShell === 'function' && isSpaShell() && typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', {id: cid}); else location.href = '#/customer?id=' + encodeURIComponent(cid); }
+      if (cid) { AppRouter.navigate('/customer', {id: cid}); }
     }
     root.addEventListener('keydown', onDetailKeydown);
 

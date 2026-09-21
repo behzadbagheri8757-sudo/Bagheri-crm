@@ -51,7 +51,7 @@
                     }
                     return '<div class="card" style="margin-bottom:8px;" data-route="' + esc(rt.id) + '">' +
                       '<div class="btn-row" style="justify-content:space-between;">' +
-                      '<button type="button" class="btn small secondary" data-toggle-route="' + esc(rt.id) + '" style="font-weight:800;">' +
+                      '<button type="button" class="btn small secondary" data-toggle-route="' + esc(rt.id) + '" style="font-weight:700;">' +
                       (rOpen ? '▾ ' : '▸ ') + esc(rt.name) + ' <span class="sub">(' + neighCount + ' محله)</span></button>' +
                       '<button type="button" class="btn small danger" data-del-route="' + esc(rt.id) + '">حذف مسیر</button>' +
                       '</div>' + neighHtml + '</div>';
@@ -61,7 +61,7 @@
           }
           return '<div class="card" style="margin-bottom:10px;" data-region="' + esc(r.id) + '">' +
             '<div class="btn-row" style="justify-content:space-between;">' +
-            '<button type="button" class="btn small secondary" data-toggle-region="' + esc(r.id) + '" style="font-weight:800;">' +
+            '<button type="button" class="btn small secondary" data-toggle-region="' + esc(r.id) + '" style="font-weight:700;">' +
             (isOpen ? '▾ ' : '▸ ') + esc(r.name) + ' <span class="sub">(' + routeCount + ' مسیر)</span></button>' +
             '<button type="button" class="btn small danger" data-del-region="' + esc(r.id) + '">حذف منطقه</button>' +
             '</div>' + routesHtml + '</div>';
@@ -134,7 +134,7 @@
       const delRegion = e.target.closest('[data-del-region]');
       if (delRegion) {
         const id = delRegion.getAttribute('data-del-region');
-        if (!confirm('این منطقه حذف شود؟')) return;
+        if (!(await appConfirm('این منطقه حذف شود؟'))) return;
         const res = await deleteRegion(id);
         if (!res.ok) { showToast(res.reason || 'حذف نشد'); return; }
         showToast('حذف شد');
@@ -144,7 +144,7 @@
       const delRoute = e.target.closest('[data-del-route]');
       if (delRoute) {
         const id = delRoute.getAttribute('data-del-route');
-        if (!confirm('این مسیر حذف شود؟')) return;
+        if (!(await appConfirm('این مسیر حذف شود؟'))) return;
         const res = await deleteRoute(id);
         if (!res.ok) { showToast(res.reason || 'حذف نشد'); return; }
         showToast('حذف شد');
@@ -154,7 +154,7 @@
       const delNeigh = e.target.closest('[data-del-neigh]');
       if (delNeigh) {
         const id = delNeigh.getAttribute('data-del-neigh');
-        if (!confirm('این محله حذف شود؟')) return;
+        if (!(await appConfirm('این محله حذف شود؟'))) return;
         const res = await deleteNeighborhood(id);
         if (!res.ok) { showToast(res.reason || 'حذف نشد'); return; }
         showToast('حذف شد');

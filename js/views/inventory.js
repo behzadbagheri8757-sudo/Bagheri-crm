@@ -14,6 +14,14 @@
     return { label: 'کافی', cls: 'accent-olive' };
   }
 
+  // Display-only: cap quantity to 2 decimal places (e.g. 3.176470588 -> 3.18).
+  // Does not touch stored values or any calculation — formatting only.
+  function fmtQty(n) {
+    var num = Number(n) || 0;
+    var rounded = Math.round(num * 100) / 100;
+    return String(rounded);
+  }
+
   function stockTypeLabel(type) {
     const map = {
       in: 'ورود',
@@ -58,7 +66,8 @@
     }).length;
     const lowList = lowStockProducts();
     const lowN = lowList.length;
-    const logRows = collectStockLog(40);
+    const logRows = collectStockLog(12);
+    const logRowsAll = collectStockLog(200);
 
     const stockList =
       products
@@ -104,7 +113,7 @@
             '<span class="amount ' +
             qtyCls +
             '">' +
-            (p.stockQty || 0) +
+            fmtQty(p.stockQty) +
             '<span class="sub" style="display:block;">' +
             toman(val) +
             ' ت</span></span></div>'
@@ -112,34 +121,35 @@
         })
         .join('') || '<div class="empty">کالایی ثبت نشده</div>';
 
+    function stockLogRowHtml(l) {
+      const qty = Number(l.qty) || 0;
+      const signCls = qty < 0 ? 'accent-red' : 'accent-olive';
+      return (
+        '<div class="ledger-row"><span class="name">' +
+        esc(l.name) +
+        '<span class="sub">' +
+        faDate(l.date) +
+        ' — ' +
+        esc((l.type === 'sale' && /فروش \(فاکتور[^)]*null[^)]*\)/.test(String(l.note || ''))) ? 'فروش (فاکتور)' : stockTypeLabel(l.type)) +
+        (l.note && !(l.type === 'sale' && /null/.test(String(l.note))) ? ' — ' + esc(l.note) : '') +
+        '</span></span><span class="filler"></span>' +
+        '<span class="amount ' +
+        signCls +
+        '">' +
+        (qty > 0 ? '+' + fmtQty(qty) : fmtQty(qty)) +
+        '</span></div>'
+      );
+    }
     const logHtml = logRows.length
-      ? logRows
-          .map(function (l) {
-            const qty = Number(l.qty) || 0;
-            const signCls = qty < 0 ? 'accent-red' : 'accent-olive';
-            return (
-              '<div class="ledger-row"><span class="name">' +
-              esc(l.name) +
-              '<span class="sub">' +
-              faDate(l.date) +
-              ' — ' +
-              esc((l.type === 'sale' && /فروش \(فاکتور[^)]*null[^)]*\)/.test(String(l.note || ''))) ? 'فروش (فاکتور)' : stockTypeLabel(l.type)) +
-              (l.note && !(l.type === 'sale' && /null/.test(String(l.note))) ? ' — ' + esc(l.note) : '') +
-              '</span></span><span class="filler"></span>' +
-              '<span class="amount ' +
-              signCls +
-              '">' +
-              (qty > 0 ? '+' + qty : qty) +
-              '</span></div>'
-            );
-          })
-          .join('')
+      ? logRows.map(stockLogRowHtml).join('') +
+        (logRowsAll.length > logRows.length
+          ? '<div class="btn-row" style="margin-top:8px;"><button type="button" class="btn secondary small" id="inv-stock-log-show-all">نمایش همه (' + logRowsAll.length + ')</button></div>'
+          : '')
       : '<div class="empty">هنوز گردش موجودی ثبت نشده</div>';
 
     const prodHref = '#/products';
 
     root.innerHTML =
-      '<h2 class="section-title">موجودی انبار</h2>' +
       '<div class="btn-row" style="margin-bottom:10px;">' +
       '<a class="btn secondary small" href="' +
       prodHref +
@@ -148,7 +158,7 @@
       '<div class="card"><div class="label">تعداد کالا</div><div class="value">' +
       products.length +
       '</div></div>' +
-      '<div class="card"><div class="label">ارزش کل موجودی</div><div class="value">' +
+      '<div class="card inv-summary-quiet"><div class="label">ارزش کل موجودی</div><div class="value">' +
       toman(totalVal) +
       ' ت</div></div>' +
       '<div class="card"><div class="label">ناموجود</div><div class="value accent-rust">' +
@@ -165,11 +175,34 @@
       '</div>' +
       '<h3 class="sub-title">موجودی کالاها</h3>' +
       '<div class="empty" style="padding:0 0 8px;text-align:right;font-size:.78rem;">برای اصلاح موجودی روی هر کالا بزنید (همان فرم فعلی ورود/خروج/ویرایش).</div>' +
-      stockList +
+      '<div class="tx-list inventory-list">' + stockList + '</div>' +
       '<h3 class="sub-title">گردش اخیر انبار</h3>' +
-      logHtml;
+      '<div class="tx-list inventory-log-list">' + logHtml + '</div>';
 
     listClickHandler = function (e) {
+      const showAll = e.target.closest('#inv-stock-log-show-all');
+      if (showAll) {
+        const listHost = showAll.parentElement;
+        const wrap = listHost && listHost.previousElementSibling;
+        // Replace truncated list: find the log section's rows before the button row
+        const sectionTitle = Array.from(root.querySelectorAll('h3.sub-title')).find(function (h) {
+          return (h.textContent || '').indexOf('گردش') !== -1;
+        });
+        if (sectionTitle) {
+          let node = sectionTitle.nextSibling;
+          const buf = [];
+          while (node) {
+            if (node.nodeType === 1 && node.classList && node.classList.contains('btn-row') && node.querySelector('#inv-stock-log-show-all')) break;
+            if (node.nodeType === 1 && node.classList && node.classList.contains('ledger-row')) buf.push(node);
+            node = node.nextSibling;
+          }
+          buf.forEach(function (n) { n.remove(); });
+          const html = logRowsAll.map(stockLogRowHtml).join('');
+          sectionTitle.insertAdjacentHTML('afterend', html);
+        }
+        showAll.parentElement.remove();
+        return;
+      }
       const row = e.target.closest('[data-edit-product]');
       if (!row) return;
       if (typeof openAddProduct === 'function') openAddProduct(row.getAttribute('data-edit-product'));

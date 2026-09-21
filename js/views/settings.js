@@ -55,74 +55,81 @@
 
     let autoHtml = '';
     if (!autoList.length) {
-      autoHtml = '<div class="empty" style="padding:8px 0;">هنوز بکاپ خودکاری ذخیره نشده (هر ۱۲ ساعت حداکثر یک نسخه، تا ۵ نسخه).</div>';
+      autoHtml = '<div class="empty settings-empty">هنوز نسخه پشتیبان خودکاری ذخیره نشده (هر ۱۲ ساعت حداکثر یک نسخه، تا ۵ نسخه).</div>';
     } else {
       autoHtml = autoList.slice().reverse().map(function (item) {
         const when = item.ts ? new Date(item.ts).toLocaleString('fa-IR') : '—';
         return `<div class="auto-backup-row">
-          <span class="name" style="font-size:.85rem;">${esc(when)}</span>
+          <span class="name auto-backup-name">${esc(when)}</span>
           <button type="button" class="btn small secondary" data-auto-key="${esc(item.key)}">بازیابی این نسخه</button>
         </div>`;
       }).join('');
     }
 
     root.innerHTML = `
-      <h2 class="section-title">تنظیمات</h2>
       <p class="tx-hint">مدیریت داده‌ها، پشتیبان‌گیری و امنیت برنامه.</p>
 
-      <div class="settings-section mgmt-section">
-        <h3 class="mgmt-section-title">داده و بکاپ</h3>
-        <div class="settings-warn">
-          فایل JSON را در جایی امن نگه دارید (Files / ابر / کامپیوتر). روی iPhone معمولاً برگه Share و «Save to Files» باز می‌شود.
-        </div>
-        <div class="btn-row tx-actions-primary">
-          <button type="button" class="btn" id="export-json">دریافت Backup (JSON)</button>
-          <button type="button" class="btn secondary" id="export-excel">خروجی اکسل</button>
+      <div class="mgmt-section">
+        <h3 class="mgmt-section-title">داده و پشتیبان‌گیری</h3>
+        <div class="settings-section">
+          <div class="settings-warn">
+            فایل JSON را در جایی امن نگه دارید (Files / ابر). روی iPhone معمولاً Share → Save to Files.
+          </div>
+          <div class="btn-row tx-actions-primary">
+            <button type="button" class="btn" id="export-json">دریافت فایل پشتیبان</button>
+            <button type="button" class="btn secondary settings-action-link" id="export-excel">خروجی اکسل</button>
+          </div>
         </div>
       </div>
 
-      <div class="settings-section mgmt-section">
+      <div class="mgmt-section">
         <h3 class="mgmt-section-title">بازیابی از فایل</h3>
-        <div class="settings-warn">
-          بازیابی، اطلاعات فعلی را <b>جایگزین</b> می‌کند. قبل از آن، یک نسخه برای «برگشت از بازیابی» ذخیره می‌شود.
-        </div>
-        <div class="field"><label>انتخاب فایل بکاپ JSON</label>
-          <input type="file" id="import-file" accept="application/json,.json">
-        </div>
-        <div class="btn-row">
-          <button type="button" class="btn danger" id="do-import">بازیابی و جایگزینی</button>
-          <button type="button" class="btn secondary" id="undo-import" ${canUndo ? '' : 'disabled'}>
-            بازگشت به نسخه قبل از آخرین بازیابی
-          </button>
-        </div>
-        <div class="sub" style="margin-top:8px;font-size:.78rem;">
-          ${canUndo
-            ? 'نسخهٔ قبل از آخرین Restore در دسترس است و می‌توانید برگردید.'
-            : 'هنوز نسخهٔ قبل از Restore ذخیره نشده (بعد از یک بازیابی موفق فعال می‌شود).'}
+        <div class="settings-section">
+          <div class="settings-warn">
+            بازیابی اطلاعات فعلی را <b>جایگزین</b> می‌کند؛ قبلش نسخهٔ برگشت ذخیره می‌شود.
+          </div>
+          <div class="field"><label>انتخاب فایل پشتیبان JSON</label>
+            <input type="file" id="import-file" accept="application/json,.json">
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn danger" id="do-import">بازیابی و جایگزینی</button>
+            <button type="button" class="btn secondary settings-action-link" id="undo-import" ${canUndo ? '' : 'disabled'}>
+              بازگشت به نسخه قبل از آخرین بازیابی
+            </button>
+          </div>
+          <div class="sub settings-restore-note">
+            ${canUndo
+              ? 'نسخهٔ قبل از آخرین Restore در دسترس است و می‌توانید برگردید.'
+              : 'هنوز نسخهٔ قبل از Restore ذخیره نشده (بعد از یک بازیابی موفق فعال می‌شود).'}
+          </div>
         </div>
       </div>
 
-      <div class="settings-section mgmt-section">
-        <h3 class="mgmt-section-title">بکاپ خودکار داخلی</h3>
-        <div class="sub" style="margin-bottom:8px;font-size:.8rem;line-height:1.5;">
-          برنامه در صورت استفاده، حداکثر هر ۱۲ ساعت یک نسخه از داده‌های CRM، FIFO، هدف فروش، ProspectScout و Intelligence داخل IndexedDB نگه می‌دارد (تا ۵ نسخه). این جایگزین Backup فایل JSON نیست.
+      <div class="mgmt-section">
+        <h3 class="mgmt-section-title">پشتیبان خودکار داخلی</h3>
+        <div class="settings-section">
+          <div class="sub settings-description">
+            برنامه در صورت استفاده، حداکثر هر ۱۲ ساعت یک نسخه از داده‌های CRM، FIFO، هدف فروش، ProspectScout و Intelligence داخل IndexedDB نگه می‌دارد (تا ۵ نسخه). این جایگزین فایل پشتیبان JSON نیست.
+          </div>
+          <div class="card">${autoHtml}</div>
         </div>
-        <div class="card">${autoHtml}</div>
       </div>
 
-      <div class="settings-section mgmt-section">
+      <div class="mgmt-section">
         <h3 class="mgmt-section-title">موقعیت مکانی</h3>
-        <div class="sub" style="margin-bottom:8px;font-size:.8rem;line-height:1.5;">
-          مدیریت ساختار منطقه › مسیر › محله، مشترک بین مشتریان و مغازه‌های بالقوه.
-        </div>
-        <div class="btn-row">
-          <a class="btn small secondary" href="#/locations">مدیریت موقعیت مکانی</a>
+        <div class="settings-section">
+          <div class="sub settings-description">
+            مدیریت ساختار منطقه › مسیر › محله، مشترک بین مشتریان و مغازه‌های بالقوه.
+          </div>
+          <div class="btn-row">
+            <a class="btn small secondary settings-action-link" href="#/locations">مدیریت موقعیت مکانی</a>
+          </div>
         </div>
       </div>
 
       <details class="tx-details mgmt-section">
         <summary>آمار دادهٔ فعلی</summary>
-        <div class="cards" style="margin-top:10px;">
+        <div class="cards settings-stats">
           <div class="card"><div class="label">مشتریان</div><div class="value">${enToFaDigits(String((data.customers || []).length))}</div></div>
           <div class="card"><div class="label">کالاها</div><div class="value">${enToFaDigits(String((data.products || []).length))}</div></div>
           <div class="card"><div class="label">فاکتورها</div><div class="value">${enToFaDigits(String((data.invoices || []).length))}</div></div>
@@ -133,17 +140,19 @@
         </div>
       </details>
 
-      <div class="settings-section mgmt-section">
+      <div class="mgmt-section">
         <h3 class="mgmt-section-title">امنیت — قفل PIN</h3>
-        <div class="sub" style="margin-bottom:8px;font-size:.8rem;line-height:1.5;">
-          با فعال‌سازی PIN، بعد از خروج از برنامه یا رفتن به پس‌زمینه، برای ورود دوباره باید کد شش‌رقمی را وارد کنید. PIN روی همین دستگاه در localStorage ذخیره می‌شود (هش‌شده) و داخل Backup نیست.
-        </div>
-        <div id="pin-settings-status" class="card" style="margin-bottom:10px;"></div>
-        <div class="btn-row">
-          <button type="button" class="btn small" id="pin-set-btn">تنظیم PIN</button>
-          <button type="button" class="btn small secondary" id="pin-change-btn">تغییر PIN</button>
-          <button type="button" class="btn small secondary" id="pin-clear-btn">حذف PIN</button>
-          <button type="button" class="btn small secondary" id="pin-lock-now-btn">قفل اکنون</button>
+        <div class="settings-section">
+          <div class="sub settings-description">
+            با فعال‌سازی PIN، بعد از خروج از برنامه یا رفتن به پس‌زمینه، برای ورود دوباره باید کد شش‌رقمی را وارد کنید. PIN روی همین دستگاه در localStorage ذخیره می‌شود (هش‌شده) و داخل فایل پشتیبان نیست.
+          </div>
+          <div id="pin-settings-status" class="card pin-status"></div>
+          <div class="btn-row">
+            <button type="button" class="btn small" id="pin-set-btn">تنظیم PIN</button>
+            <button type="button" class="btn small secondary" id="pin-change-btn">تغییر PIN</button>
+            <button type="button" class="btn small secondary" id="pin-clear-btn">حذف PIN</button>
+            <button type="button" class="btn small secondary" id="pin-lock-now-btn">قفل اکنون</button>
+          </div>
         </div>
       </div>
 
@@ -161,8 +170,8 @@
       if (!statusEl) return;
       const set = window.pinLock && typeof window.pinLock.isPinSet === 'function' && window.pinLock.isPinSet();
       statusEl.innerHTML = set
-        ? '<div class="label">وضعیت</div><div class="value accent-olive" style="font-size:.95rem;">PIN فعال است</div>'
-        : '<div class="label">وضعیت</div><div class="value" style="font-size:.95rem;">PIN تنظیم نشده</div>';
+         ? '<div class="label">وضعیت</div><div class="value accent-olive settings-status-value">PIN فعال است</div>'
+         : '<div class="label">وضعیت</div><div class="value settings-status-value">PIN تنظیم نشده</div>';
     }
     refreshPinStatus();
 
@@ -170,7 +179,7 @@
     const exportJsonBtn = document.getElementById('export-json');
     exportJsonHandler = function () {
       if (typeof exportBackupJSON === 'function') exportBackupJSON();
-      else showToast('تابع بکاپ در دسترس نیست');
+      else showToast('تابع پشتیبان‌گیری در دسترس نیست');
     };
     exportJsonBtn.onclick = exportJsonHandler;
 
@@ -194,7 +203,7 @@
     importBtnHandler = async function () {
       const f = document.getElementById('import-file').files[0];
       if (!f) { showToast('فایل را انتخاب کنید'); return; }
-      const ok = confirm(
+      const ok = await appConfirm(
         'اطلاعات فعلی با محتوای این فایل جایگزین شود؟\n\n' +
         'قبل از جایگزینی، وضعیت فعلی برای «برگشت از بازیابی» ذخیره می‌شود.\n' +
         'فایل: ' + f.name
@@ -216,7 +225,7 @@
         showToast('نسخه‌ی قبل از بازیابی موجود نیست');
         return;
       }
-      if (!confirm('به حالت قبل از آخرین بازیابی برگردیم؟')) return;
+      if (!(await appConfirm('به حالت قبل از آخرین بازیابی برگردیم؟'))) return;
       if (typeof undoLastRestore === 'function') {
         await undoLastRestore();
         location.reload();
@@ -248,90 +257,76 @@
       const seq = data.invoiceSeq != null ? data.invoiceSeq : '—';
       openSheet(`
         <h3>اطلاعات فنی</h3>
-        <div class="cards" style="margin-top:4px;">
+        <div class="cards settings-tech-stats">
           <div class="card wide"><div class="label">نام</div>
-            <div class="value" style="font-size:1rem;">حبوبات و خشکبار باقری — دفتر حساب</div></div>
+             <div class="value">حبوبات و خشکبار باقری — دفتر حساب</div></div>
           <div class="card"><div class="label">نسخه معماری</div>
-            <div class="value" style="font-size:.95rem;">چندصفحه‌ای · فاز ۹</div></div>
+             <div class="value">تک‌صفحه‌ای (SPA)</div></div>
           <div class="card"><div class="label">schemaVersion</div>
             <div class="value">${esc(enToFaDigits(String(schema)))}</div></div>
           <div class="card wide"><div class="label">ذخیره‌سازی محلی</div>
-            <div class="value" style="font-size:.9rem;">${esc(storageStatusLabel())}</div>
-            <div class="sub" style="margin-top:4px;">DB: baqeriDB · store: appdata · کلید: main</div>
+             <div class="value">${esc(storageStatusLabel())}</div>
+             <div class="sub settings-storage-meta">DB: baqeriDB · store: appdata · کلید: main</div>
           </div>
           <div class="card"><div class="label">سری فاکتور</div><div class="value">${esc(enToFaDigits(String(seq)))}</div></div>
         </div>
-        <div class="report-note" style="font-size:.78rem;color:var(--ink-soft);margin-top:12px;line-height:1.55;">
-          برنامه آفلاین است. داده‌ها روی همین دستگاه ذخیره می‌شوند. برای امنیت، به‌طور منظم Backup بگیرید.
+        <div class="report-note settings-tech-note">
+          برنامه آفلاین است. داده‌ها روی همین دستگاه ذخیره می‌شوند. برای امنیت، به‌طور منظم پشتیبان‌گیری کنید.
         </div>
       `);
     };
     techRow.onclick = techInfoHandler;
 
-    // PIN settings
+    // PIN settings — app-owned sheet UI (no browser dialog).
     (function bindPinSettings() {
       const setBtn = document.getElementById('pin-set-btn');
       const changeBtn = document.getElementById('pin-change-btn');
       const clearBtn = document.getElementById('pin-clear-btn');
       const lockBtn = document.getElementById('pin-lock-now-btn');
 
-      pinSetHandler = async function () {
+      function openPinSheet(mode) {
         if (!window.pinLock) { showToast('ماژول PIN در دسترس نیست'); return; }
-        if (window.pinLock.isPinSet()) { showToast('PIN از قبل فعال است؛ از «تغییر» استفاده کنید'); return; }
-        const a = prompt('PIN شش‌رقمی جدید:');
-        if (a == null) return;
-        const b = prompt('تکرار PIN:');
-        if (b == null) return;
-        if (String(a).replace(/\D/g, '').slice(0, 6) !== String(b).replace(/\D/g, '').slice(0, 6)) {
-          showToast('دو PIN یکسان نیستند');
-          return;
-        }
-        try {
-          await window.pinLock.setPin(a);
-          showToast('PIN ذخیره شد');
-          refreshPinStatus();
-        } catch (e) {
-          showToast(e && e.message ? e.message : 'خطا در تنظیم PIN');
-        }
-      };
+        if (mode === 'set' && window.pinLock.isPinSet()) { showToast('PIN از قبل فعال است؛ از «تغییر» استفاده کنید'); return; }
+        if ((mode === 'change' || mode === 'clear') && !window.pinLock.isPinSet()) { showToast('PIN فعال نیست'); return; }
+        const title = mode === 'set' ? 'تنظیم PIN' : (mode === 'change' ? 'تغییر PIN' : 'حذف PIN');
+        let fields = '';
+        if(mode !== 'set') fields += '<div class="field"><label for="pin-current">PIN فعلی</label><input id="pin-current" type="tel" inputmode="numeric" maxlength="6" autocomplete="off"></div>';
+        if(mode !== 'clear') fields += '<div class="field"><label for="pin-new">PIN جدید (۶ رقم)</label><input id="pin-new" type="tel" inputmode="numeric" maxlength="6" autocomplete="new-password"></div>';
+        if(mode !== 'clear') fields += '<div class="field"><label for="pin-confirm">تکرار PIN</label><input id="pin-confirm" type="tel" inputmode="numeric" maxlength="6" autocomplete="new-password"></div>';
+        openSheet('<h3>'+title+'</h3>'+fields+'<div class="btn-row"><button type="button" class="btn" id="pin-sheet-save">'+(mode === 'clear' ? 'حذف PIN' : 'ذخیره')+'</button></div>');
+        const save = document.getElementById('pin-sheet-save');
+        const first = document.getElementById(mode === 'set' ? 'pin-new' : 'pin-current');
+        if(first) setTimeout(function(){ first.focus(); }, 0);
+        if(save) save.onclick = async function(){
+          const current = document.getElementById('pin-current');
+          const n1 = document.getElementById('pin-new');
+          const n2 = document.getElementById('pin-confirm');
+          const clean = function(el){ return String(el ? el.value : '').replace(/\D/g,'').slice(0,6); };
+          if(mode !== 'clear'){
+            if(clean(n1).length !== 6){ showToast('PIN باید ۶ رقم باشد'); if(n1){ n1.setAttribute('aria-invalid','true'); n1.focus(); } return; }
+            if(clean(n1) !== clean(n2)){ showToast('دو PIN جدید یکسان نیستند'); if(n2){ n2.setAttribute('aria-invalid','true'); n2.focus(); } return; }
+          }
+          if(mode !== 'set' && clean(current).length !== 6){ showToast('PIN فعلی باید ۶ رقم باشد'); if(current){ current.setAttribute('aria-invalid','true'); current.focus(); } return; }
+          save.disabled = true;
+          try{
+            if(mode === 'set') await window.pinLock.setPin(clean(n1));
+            else if(mode === 'change') await window.pinLock.changePin(clean(current), clean(n1));
+            else await window.pinLock.clearPin(clean(current));
+            closeModal();
+            refreshPinStatus();
+            showToast(mode === 'clear' ? 'PIN حذف شد' : (mode === 'change' ? 'PIN تغییر کرد' : 'PIN ذخیره شد'));
+          }catch(e){
+            save.disabled = false;
+            showToast(e && e.message ? e.message : 'خطا در عملیات PIN');
+          }
+        };
+      }
+
+      pinSetHandler = function(){ openPinSheet('set'); };
+      pinChangeHandler = function(){ openPinSheet('change'); };
+      pinClearHandler = function(){ openPinSheet('clear'); };
       setBtn.onclick = pinSetHandler;
-
-      pinChangeHandler = async function () {
-        if (!window.pinLock) { showToast('ماژول PIN در دسترس نیست'); return; }
-        if (!window.pinLock.isPinSet()) { showToast('ابتدا PIN را تنظیم کنید'); return; }
-        const oldP = prompt('PIN فعلی:');
-        if (oldP == null) return;
-        const n1 = prompt('PIN جدید (۶ رقم):');
-        if (n1 == null) return;
-        const n2 = prompt('تکرار PIN جدید:');
-        if (n2 == null) return;
-        if (String(n1).replace(/\D/g, '').slice(0, 6) !== String(n2).replace(/\D/g, '').slice(0, 6)) {
-          showToast('دو PIN جدید یکسان نیستند');
-          return;
-        }
-        try {
-          await window.pinLock.changePin(oldP, n1);
-          showToast('PIN تغییر کرد');
-          refreshPinStatus();
-        } catch (e) {
-          showToast(e && e.message ? e.message : 'خطا در تغییر PIN');
-        }
-      };
       changeBtn.onclick = pinChangeHandler;
-
-      pinClearHandler = async function () {
-        if (!window.pinLock) { showToast('ماژول PIN در دسترس نیست'); return; }
-        if (!window.pinLock.isPinSet()) { showToast('PIN فعال نیست'); return; }
-        const cur = prompt('برای حذف PIN، PIN فعلی را وارد کنید:');
-        if (cur == null) return;
-        try {
-          await window.pinLock.clearPin(cur);
-          showToast('PIN حذف شد');
-          refreshPinStatus();
-        } catch (e) {
-          showToast(e && e.message ? e.message : 'خطا در حذف PIN');
-        }
-      };
       clearBtn.onclick = pinClearHandler;
 
       pinLockNowHandler = function () {

@@ -6,6 +6,22 @@
 'use strict';
 
 (function (global) {
+  /* Same defensive helper as payments view — customer payment rows call this. */
+  if (typeof global.paymentMethodLabel !== 'function') {
+    global.paymentMethodLabel = function paymentMethodLabel(method) {
+      var map = {
+        cash: 'نقد',
+        card: 'کارت',
+        transfer: 'انتقال',
+        return: 'برگشت',
+        check: 'چک',
+        supplier: 'پرداخت به تامین‌کننده'
+      };
+      if (method == null || method === '') return '—';
+      return map[method] || String(method);
+    };
+  }
+
   let currentCustomerId = null;
   let rootEl = null;
   function customersHref() {
@@ -13,16 +29,7 @@
   }
 
   function navigateToCustomer(cid) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/customer', { id: cid });
-    } else {
-      location.href = '#/customer?id=' + encodeURIComponent(cid);
-    }
+    AppRouter.navigate('/customer', { id: cid });
   }
 
   function invoicePayStatus(inv) {
@@ -234,16 +241,16 @@
       var reasonTxt = it.topRejectionReason
         ? ('دلیل غالب: ' + rejectionReasonLabel(it.topRejectionReason))
         : 'دلیل غالب: —';
-      return '<div class="ledger-row" style="cursor:default;">' +
+      return '<div class="ledger-row customer-static-row">' +
         '<span class="name">' + esc(it.productName) +
           '<span class="sub">' + reasonTxt + '</span></span>' +
         '<span class="filler"></span>' +
-        '<span class="amount" style="font-size:.85rem;font-weight:600;">' +
+        '<span class="amount customer-static-value">' +
           esc(String(it.rejectedCount)) + ' بار رد شده</span></div>';
     }).join('');
 
     return '<h3 class="sub-title">کالاهای ردشده توسط مشتری</h3>' +
-      '<div class="dash-activity" style="margin-bottom:14px;">' + rows + '</div>';
+      '<div class="dash-activity customer-rejection-list">' + rows + '</div>';
   }
 
   function intelligenceWatchHtml(cid) {
@@ -301,14 +308,14 @@
     if (activeConfirmed.length) {
       var crows = activeConfirmed.map(function (s) {
         var label = (s.productName ? ('«' + esc(s.productName) + '» — ') : '') + esc(s.reason || '');
-        return '<div style="font-size:.85rem;line-height:1.9;display:flex;justify-content:space-between;gap:8px;">' +
+        return '<div class="watch-confirmed-row">' +
           '<span>• ' + label + '</span>' +
-          '<span class="watch-level-label ' + levelClass(s.severity) + '" style="font-weight:600;white-space:nowrap;">' + esc(levelLabel(s.severity)) + '</span>' +
+          '<span class="watch-level-label ' + levelClass(s.severity) + '">' + esc(levelLabel(s.severity)) + '</span>' +
           '</div>';
       }).join('');
-      confirmedHtml = '<div class="card wide" style="margin-bottom:10px;">' +
-        '<div class="label">هوش تجاری — تأییدشده (CONFIRMED)</div>' +
-        '<div style="margin-top:6px;">' + crows + '</div></div>';
+      confirmedHtml = '<div class="card wide watch-confirmed-card">' +
+        '<div class="label">هوش تجاری — تأییدشده</div>' +
+        '<div class="watch-confirmed-list">' + crows + '</div></div>';
     }
 
     var watchHtml = '';
@@ -317,30 +324,30 @@
         var label = (o.productName ? ('«' + esc(o.productName) + '» — ') : '') + esc(o.generatedReason || '');
         var reviewed = !!(o.reason);
         var badge = reviewed
-          ? '<span style="color:var(--olive-dark);font-weight:600;font-size:.78rem;">بررسی شده</span>'
-          : '<span class="watch-level-unreviewed" style="font-weight:600;font-size:.78rem;">بررسی نشده</span>';
+          ? '<span class="watch-reviewed">بررسی شده</span>'
+          : '<span class="watch-level-unreviewed">بررسی نشده</span>';
         var reasonBit = '';
         if (reviewed && o.reason) {
           var rlabel = (typeof watchReasonLabel === 'function') ? watchReasonLabel(o.reason.code) : (o.reason.code || '');
-          reasonBit = '<div style="font-size:.78rem;color:var(--ink-soft);margin-top:2px;">علت: ' + esc(rlabel) +
+          reasonBit = '<div class="watch-reason">علت: ' + esc(rlabel) +
             (o.reason.comment ? (' — ' + esc(o.reason.comment)) : '') + '</div>';
         }
         var clickable = o.id
-          ? (' data-watch-occ="' + esc(o.id) + '" role="button" tabindex="0" style="cursor:pointer;"')
+          ? (' data-watch-occ="' + esc(o.id) + '" role="button" tabindex="0"')
           : '';
-        return '<div class="watch-occ-row"' + clickable + ' style="font-size:.85rem;line-height:1.7;padding:8px 0;border-bottom:1px dotted var(--line);">' +
-          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">' +
+        return '<div class="watch-occ-row"' + clickable + '>' +
+          '<div class="watch-occ-head">' +
             '<span>• ' + label + '</span>' +
-            '<span style="text-align:left;white-space:nowrap;">' + badge +
-              '<div class="watch-level-label ' + levelClass(o.level) + '" style="font-weight:600;font-size:.78rem;">' + esc(levelLabel(o.level)) + '</div>' +
+            '<span class="watch-occ-status">' + badge +
+              '<div class="watch-level-label ' + levelClass(o.level) + '">' + esc(levelLabel(o.level)) + '</div>' +
             '</span>' +
           '</div>' + reasonBit +
         '</div>';
       }).join('');
-      watchHtml = '<div class="card wide" style="margin-bottom:10px;" id="watch-lifecycle-card">' +
+      watchHtml = '<div class="card wide watch-lifecycle-card" id="watch-lifecycle-card">' +
         '<div class="label">هشدارهای زودهنگام</div>' +
-        '<div class="report-note" style="margin:4px 0 8px;">برای ثبت علت، روی مورد بزنید. ثبت علت، هشدار را حذف نمی‌کند.</div>' +
-        '<div style="margin-top:6px;">' + wrows + '</div></div>';
+        '<div class="report-note watch-note">برای ثبت علت، روی مورد بزنید. ثبت علت، هشدار را حذف نمی‌کند.</div>' +
+        '<div class="watch-occ-list">' + wrows + '</div></div>';
     }
 
     return confirmedHtml + watchHtml;
@@ -427,6 +434,8 @@
 
   function drawCustomerPage(root) {
     if (!root) return;
+    root.classList.add('customer-detail-view'); // UPDATED: Added for CSS scoping
+
     const id = currentCustomerId;
 
     if (!id) {
@@ -449,6 +458,10 @@
       return;
     }
 
+    if (typeof setHeaderTitle === 'function') {
+      setHeaderTitle(c.name, { isRoot: false });
+    }
+
     const t = customerTotals(c.id);
     const profit = customerProfit(c.id);
     const word = balanceStatusWord(t.balance);
@@ -466,7 +479,7 @@
     {
       let priority = null, action = null;
       try { if (typeof calculateCustomerPriority === 'function') priority = calculateCustomerPriority(c.id); } catch (eP) { priority = null; }
-      try { if (typeof calculateCustomerAction === 'function') action = calculateCustomerAction(c.id); } catch (eA) { action = null; }
+      try { if (typeof calculateCustomerAction === 'function') action = calculateCustomerAction(c.id, priority); } catch (eA) { action = null; }
       recommendedAction = action && action.actionType !== 'no_action' ? action : null;
       const riskLevel = priority ? priority.riskLevel : null;
       const storyText = (priority && priority.customerStory && priority.customerStory.summary) ? priority.customerStory.summary : '';
@@ -595,7 +608,7 @@
             if (v.note) extraBits.push(v.note);
             const extraHtml = extraBits
               .map(function (x) {
-                return '<span class="sub">' + esc(x) + '</span>';
+                return '<span class="sub customer-visit-row-detail">' + esc(x) + '</span>';
               })
               .join('');
             const ordered = v.ordered || v.result === (typeof VISIT_RESULTS !== 'undefined' && VISIT_RESULTS[0]);
@@ -695,7 +708,7 @@
                   '<div class="ledger-row" style="cursor:default;"><span class="name">' +
                   esc(p.name) +
                   '<span class="sub">تعداد: ' +
-                  p.qty +
+                  fmtQtyDisplay(p.qty) +
                   '</span></span><span class="filler"></span><span class="amount">' +
                   toman(p.revenue) +
                   ' ت</span></div>'
@@ -711,9 +724,9 @@
                   '<div class="ledger-row" style="cursor:default;"><span class="name">' +
                   esc(p.name) +
                   '<span class="sub">قبلاً ' +
-                  p.earlyQty +
+                  fmtQtyDisplay(p.earlyQty) +
                   ' ← اخیراً ' +
-                  p.lateQty +
+                  fmtQtyDisplay(p.lateQty) +
                   '</span></span></div>'
                 );
               })
@@ -740,71 +753,71 @@
       behaviorHtml =
         '<h3 class="sub-title">رفتار خرید و هوش تجاری</h3>' +
         (watchHtmlBlock
-          ? '<details open style="margin-bottom:12px;">' +
-            '<summary class="customer-behavior-summary" style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">نشانه‌ها و هشدارها</summary>' +
-            '<div style="margin-top:8px;">' + watchHtmlBlock + '</div></details>'
+          ? '<details open class="customer-watch-details">' +
+            '<summary class="customer-behavior-summary">نشانه‌ها و هشدارها</summary>' +
+            '<div class="customer-detail-watch-body">' + watchHtmlBlock + '</div></details>'
           : '') +
-        '<details style="margin-bottom:12px;">' +
-        '<summary class="customer-behavior-summary" style="cursor:pointer;color:var(--olive-dark);font-weight:700;padding:6px 0;list-style:none;">تحلیل رفتار خرید</summary>' +
+        '<details class="customer-behavior-details">' +
+        '<summary class="customer-behavior-summary">تحلیل رفتار خرید</summary>' +
         summaryHtml +
-        '<div class="cards" style="margin-top:10px;margin-bottom:10px;">' +
-        '<div class="card"><div class="label">اولین خرید</div><div class="value" style="font-size:.95rem;">' +
+        '<div class="cards">' +
+        '<div class="card"><div class="label">اولین خرید</div><div class="value">' +
         (b.firstInvoiceDate ? faDate(b.firstInvoiceDate) : '—') +
         '</div></div>' +
-        '<div class="card"><div class="label">آخرین خرید</div><div class="value" style="font-size:.95rem;">' +
+        '<div class="card"><div class="label">آخرین خرید</div><div class="value">' +
         (b.lastInvoiceDate ? faDate(b.lastInvoiceDate) : '—') +
         '</div></div>' +
         '<div class="card"><div class="label">تعداد فاکتور</div><div class="value">' +
         b.invoiceCount +
         '</div></div>' +
-        '<div class="card"><div class="label">میانگین مبلغ فاکتور</div><div class="value" style="font-size:.95rem;">' +
+        '<div class="card"><div class="label">میانگین مبلغ فاکتور</div><div class="value">' +
         (b.avgInvoice != null ? toman(b.avgInvoice) + ' ت' : '—') +
         '</div></div>' +
-        '<div class="card"><div class="label">الگوی معمول خرید</div><div class="value" style="font-size:.9rem;">' +
+        '<div class="card"><div class="label">الگوی معمول خرید</div><div class="value">' +
         esc(String(intervalText)) +
         '</div></div>' +
-        '<div class="card"><div class="label">فاصله از آخرین خرید</div><div class="value" style="font-size:.95rem;">' +
+        '<div class="card"><div class="label">فاصله از آخرین خرید</div><div class="value">' +
         esc(String(gapText)) +
         '</div></div>' +
-        '<div class="card"><div class="label">خرید خالص ۳۰ روز</div><div class="value" style="font-size:.95rem;">' +
+        '<div class="card"><div class="label">خرید خالص ۳۰ روز</div><div class="value">' +
         toman(b.sales30 || 0) +
         ' ت</div></div>' +
-        '<div class="card"><div class="label">خرید خالص ۹۰ روز</div><div class="value" style="font-size:.95rem;">' +
+        '<div class="card"><div class="label">خرید خالص ۹۰ روز</div><div class="value">' +
         toman(b.sales90 || 0) +
         ' ت</div></div>' +
         (b.returnTotal > 0
-          ? '<div class="card wide"><div class="label">جمع برگشت از فروش (کل سابقه)</div><div class="value" style="font-size:.95rem;">' +
+          ? '<div class="card wide"><div class="label">جمع برگشت از فروش (کل سابقه)</div><div class="value">' +
             toman(b.returnTotal) +
             ' ت</div></div>'
           : '') +
         (trendLabel
           ? '<div class="card wide"><div class="label">روند مبلغ (۳۰ روز اخیر نسبت به ۳۰ روز قبل)</div><div class="value ' +
             trendCls +
-            '" style="font-size:1rem;">' +
+             '">' +
             trendLabel +
             '</div></div>'
-          : '<div class="card wide"><div class="label">روند مبلغ</div><div class="value" style="font-size:.9rem;">اطلاعات کافی نیست</div></div>') +
+          : '<div class="card wide"><div class="label">روند مبلغ</div><div class="value">اطلاعات کافی نیست</div></div>') +
         behindHtml +
         '<div class="card"><div class="label">تعداد ویزیت</div><div class="value">' +
         b.visitCount +
         '</div></div>' +
-        '<div class="card"><div class="label">نرخ تبدیل ویزیت به سفارش</div><div class="value" style="font-size:.85rem;">' +
+        '<div class="card"><div class="label">نرخ تبدیل ویزیت به سفارش</div><div class="value">' +
         esc(String(convText)) +
         '</div></div>' +
         '</div>' +
-        '<div class="sub-title" style="margin-top:4px;">کالاهای اصلی مشتری</div>' +
-        topProdHtml +
-        (decliningHtml ? '<div class="sub-title" style="margin-top:10px;">کالاهای با کاهش خرید (نسبت به نیمه اول سابقه)</div>' + decliningHtml : '') +
+        '<div class="sub-title customer-detail-subtitle">کالاهای اصلی مشتری</div>' +
+        '<div class="customer-tx-list customer-top-products">' + topProdHtml + '</div>' +
+        (decliningHtml ? '<div class="sub-title customer-detail-subtitle customer-detail-subtitle-secondary">کالاهای با کاهش خرید (نسبت به نیمه اول سابقه)</div><div class="customer-tx-list customer-declining-products">' + decliningHtml + '</div>' : '') +
         (lv
-          ? '<div class="card" style="margin-top:10px;margin-bottom:12px;">' +
+          ? '<div class="card customer-last-visit-card">' +
             '<div class="label">آخرین ویزیت — ' +
             faDate(lv.date) +
             (lv.time ? ' ' + esc(lv.time) : '') +
             '</div>' +
-            '<div style="font-size:.88rem;line-height:1.7;margin-top:6px;">' +
+            '<div class="customer-last-visit-body">' +
             lastVisitBits.join('<br>') +
             '</div></div>'
-          : '<div class="empty" style="padding:8px 0 12px;">ویزیتی ثبت نشده</div>') +
+          : '<div class="empty customer-empty">ویزیتی ثبت نشده</div>') +
         '</details>';
     }
 
@@ -813,11 +826,11 @@
       '<a class="btn secondary small" href="' +
       customersHref() +
       '">← مشتریان</a></div>' +
-      '<div class="card" style="margin-bottom:12px;">' +
-      '<div style="font-size:1.15rem;font-weight:800;color:var(--olive-dark);margin-bottom:8px;">' +
+      '<div class="card customer-identity-card">' +
+      '<div class="customer-identity-name">' +
       esc(c.name) +
       '</div>' +
-      '<div style="font-size:.88rem;line-height:1.85;color:var(--ink);">' +
+      '<div class="customer-identity-meta">' +
       (c.ownerName ? '<div>مسئول فروشگاه: ' + esc(c.ownerName) + '</div>' : '') +
       (c.phone ? '<div>تلفن: ' + esc(c.phone) + '</div>' : '') +
       (c.locationId
@@ -827,11 +840,11 @@
       (c.address ? '<div>آدرس: ' + esc(c.address) + '</div>' : '') +
       (c.note ? '<div>یادداشت: ' + esc(c.note) + '</div>' : '') +
       '</div>' +
-      '<div style="margin-top:12px;padding-top:10px;border-top:1px dotted var(--line);">' +
+      '<div class="customer-balance-block">' +
       '<div class="label">مانده حساب</div>' +
       '<div class="value ' +
       color +
-      '" style="font-size:1.25rem;">' +
+      ' customer-balance-value">' +
       balanceLine +
       '</div></div></div>' +
       unifiedSummaryHtml +
@@ -880,15 +893,15 @@
       '<h3 class="sub-title">فاکتورها (' +
       invs.length +
       ')</h3>' +
-      invRows +
+      '<div class="customer-tx-list customer-invoice-list">' + invRows + '</div>' +
       '<h3 class="sub-title">پرداخت‌ها (' +
       pays.length +
       ')</h3>' +
-      payRows +
+      '<div class="customer-tx-list customer-payment-list">' + payRows + '</div>' +
       '<h3 class="sub-title">چک‌ها (' +
       chks.length +
       ')</h3>' +
-      chkRows +
+      '<div class="customer-tx-list customer-check-list">' + chkRows + '</div>' +
       '<h3 class="sub-title">ویزیت‌ها و ارزیابی‌ها (' +
       visits.length +
       ')</h3>' +
@@ -896,7 +909,7 @@
       '<button type="button" class="btn small" id="act-visit-section">ثبت ویزیت برای این مشتری</button>' +
       '<a class="btn small secondary" href="#/visits">همه ویزیت‌ها</a>' +
       '</div>' +
-      visitRows;
+      '<div class="customer-tx-list customer-visit-list">' + visitRows + '</div>';
 
     document.getElementById('act-invoice').onclick = function () {
       openAddInvoice(c.id);
@@ -966,7 +979,7 @@
           const msg = willDeactivate
             ? 'این مشتری غیرفعال شود؟ اطلاعات، فاکتورها، پرداخت‌ها، چک‌ها و سوابق او حذف نخواهد شد.'
             : 'مشتری «' + c.name + '» دوباره فعال شود؟';
-          if (!confirm(msg)) throw new Error('validation');
+          if (!(await appConfirm(msg))) throw new Error('validation');
           c.active = (c.active === false) ? true : false;
           await saveData();
           drawCustomerPage(rootEl || root);
@@ -988,10 +1001,10 @@
     currentCustomerId = params && params.id ? params.id : null;
     function refreshCustomer() {
       function paint() { drawCustomerPage(rootEl || root); }
+      // Paint immediately so the page is never blank if lifecycle reconcile hangs.
+      paint();
       if (typeof reconcileWatchLifecycle === 'function' && currentCustomerId) {
         reconcileWatchLifecycle(currentCustomerId).then(paint).catch(function () { paint(); });
-      } else {
-        paint();
       }
     }
     refreshCustomer();
@@ -1001,6 +1014,7 @@
       ViewHost.clearRefresh(refreshToken);
       refreshToken = null;
       currentCustomerId = null;
+      root.classList.remove('customer-detail-view'); // UPDATED: Added for CSS scoping cleanup
       root.innerHTML = '';
       rootEl = null;
     };

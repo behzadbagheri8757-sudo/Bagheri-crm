@@ -211,36 +211,37 @@
       '<div class="card"><div class="label">فروش امروز</div><div class="value">' +
       toman(g.todaySales) +
       ' ت</div></div>' +
-      '<div class="card"><div class="label">فروش این ماه</div><div class="value">' +
-      toman(g.monthSales) +
-      ' ت</div></div>' +
-      '<div class="card"><div class="label">فروش کل</div><div class="value">' +
-      toman(g.totalSales) +
-      ' ت</div></div>' +
+      (reportPeriod === 'all'
+        ? ''
+        : '<div class="card"><div class="label">فروش کل</div><div class="value">' +
+          toman(g.totalSales) +
+          ' ت</div></div>') +
       '</div></div>' +
       '<div class="report-section">' +
       '<h3>سود</h3>' +
       '<div class="cards">' +
-      '<div class="card wide"><div class="label">سود کل (منطق customerProfit روی همه مشتریان)</div>' +
+      '<div class="card wide report-profit-primary"><div class="label">سود کل</div>' +
       '<div class="value accent-olive">' +
       toman(g.totalProfit) +
       ' ت</div></div>' +
-      '<div class="card wide"><div class="label">سود ناخالص فاکتورهای دوره «' +
+      '<div class="card wide report-profit-secondary"><div class="label">سود ناخالص فاکتورهای دوره «' +
       esc(periodLabel) +
       '»</div>' +
       '<div class="value">' +
       toman(periodGrossProfit) +
       ' ت</div>' +
-      '<div class="report-note">همان فرمول ردیف فاکتور (قیمت − buyPrice تاریخی − تخفیف). برگشت/تخفیف تراکنشی فقط در «سود کل» لحاظ شده است.</div>' +
+      '<div class="report-note">سود ردیف فاکتور (قیمت − خرید تاریخی − تخفیف). برگشت/تخفیف تراکنشی فقط در سود کل.</div>' +
       '</div>' +
       '<div class="card"><div class="label">دریافت نقد/کارت/انتقال — ' +
       esc(periodLabel) +
       '</div><div class="value">' +
       toman(periodReceived) +
       ' ت</div></div>' +
-      '<div class="card"><div class="label">چک در جریان</div><div class="value accent-amber">' +
-      toman(g.outstandingChecks) +
-      ' ت</div></div>' +
+      (g.outstandingChecks > 0
+        ? '<div class="card"><div class="label">چک در جریان</div><div class="value accent-amber">' +
+          toman(g.outstandingChecks) +
+          ' ت</div></div>'
+        : '') +
       '</div></div>' +
       '<div class="report-section report-top-products">' +
       '<h3>پرفروش‌ترین کالاها</h3>' +
@@ -254,7 +255,7 @@
                 '</span><span class="name"><span class="tx-row-title">' +
                 esc(p.name) +
                 '</span><span class="sub">تعداد: ' +
-                enToFaDigits(String(p.qty)) +
+                enToFaDigits(fmtQtyDisplay(p.qty)) +
                 (p.qtyUnit === 'kg' ? ' کیلوگرم' : '') +
                 '</span></span><span class="filler"></span><span class="amount tx-row-amount"><span class="tx-row-total">' +
                 toman(p.revenue) +
@@ -277,7 +278,7 @@
                 '</span><span class="name"><span class="tx-row-title">' +
                 esc(p.name) +
                 '</span><span class="sub">تعداد: ' +
-                enToFaDigits(String(p.qty)) +
+                enToFaDigits(fmtQtyDisplay(p.qty)) +
                 (p.qtyUnit === 'kg' ? ' کیلوگرم' : '') +
                 '</span></span><span class="filler"></span><span class="amount tx-row-amount"><span class="tx-row-total">' +
                 toman(p.revenue) +
@@ -454,7 +455,7 @@
     }
     function cls(pct){ return pct>0 ? 'up' : pct<0 ? 'down' : ''; }
     el.innerHTML =
-      '<div class="report-summary-title">خلاصه مدیریتی — ماه جاری تا امروز</div>' +
+      '<div class="report-summary-title">خلاصه مدیریتی — ماه جاری تا امروز (مستقل از بازه انتخابی زیر)</div>' +
       '<div class="report-summary">' +
       '<div class="report-summary-card sales"><div class="report-summary-label">فروش ماه</div><div class="report-summary-value sales">'+toman(m.mtdSales)+' ت</div><div class="report-summary-meta '+cls(m.salesDeltaPct)+'">'+delta(m.salesDeltaPct)+'</div></div>' +
       '<div class="report-summary-card profit"><div class="report-summary-label">سود ماه</div><div class="report-summary-value profit">'+toman(m.mtdProfit)+' ت</div><div class="report-summary-meta '+cls(m.profitDeltaPct)+'">'+delta(m.profitDeltaPct)+'</div></div>' +
@@ -476,7 +477,6 @@
       );
     };
     root.innerHTML =
-      '<h2 class="section-title">گزارش‌ها</h2>' +
       '<p class="tx-hint">خلاصه‌ای از فروش، سود، دریافت‌ها و وضعیت فعلی حساب‌ها و انبار.</p>' +
       '<div id="reports-summary"></div>' +
       '<div class="field"><label>بازه زمانی (فروش و فاکتور)</label>' +

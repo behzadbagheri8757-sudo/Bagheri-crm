@@ -15,16 +15,7 @@
   let sortHandler = null;
   let fabHandler = null;
   function navigateToCustomer(cid) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/customer', { id: cid });
-    } else {
-      location.href = '#/customer?id=' + encodeURIComponent(cid);
-    }
+    AppRouter.navigate('/customer', { id: cid });
   }
 
   function collectVisits() {
@@ -79,9 +70,10 @@
 
     const totalAll = collectVisits().length;
     const orderedN = rows.filter(r => r.visit.result === VISIT_RESULTS[0] || r.visit.ordered).length;
+    const hideDuplicateTotal = visitFilter === 'all' && rows.length === totalAll;
     sumEl.innerHTML = `
       <div class="card"><div class="label">تعداد (فیلتر)</div><div class="value">${enToFaDigits(String(rows.length))}</div></div>
-      <div class="card"><div class="label">کل ویزیت‌ها</div><div class="value">${enToFaDigits(String(totalAll))}</div></div>
+      ${hideDuplicateTotal ? '' : `<div class="card"><div class="label">کل ویزیت‌ها</div><div class="value">${enToFaDigits(String(totalAll))}</div></div>`}
       <div class="card wide"><div class="label">سفارش‌گرفته در فیلتر فعلی</div><div class="value accent-olive">${enToFaDigits(String(orderedN))}</div></div>
     `;
 
@@ -98,7 +90,7 @@
       const scoreBit = (typeof v.score === 'number')
         ? ` · امتیاز ${v.score}`
         : '';
-      return `<a class="ledger-row tx-row" href="#/customer?id=${encodeURIComponent(r.customerId)}" style="text-decoration:none;color:inherit;">
+      return `<a class="ledger-row tx-row" href="#/customer?id=${encodeURIComponent(r.customerId)}">
         <span class="name">
           <span class="tx-row-title">${esc(r.customerName)}</span>
           <span class="sub">${faDate(v.date)}${v.time ? ' ' + esc(v.time) : ''}${r.region ? ' · ' + esc(r.region) : ''}${scoreBit}</span>
@@ -106,9 +98,6 @@
           ${primaryCtx ? `<span class="sub tx-row-ctx">${esc(primaryCtx)}</span>` : ''}
         </span>
         <span class="filler"></span>
-        <span class="amount tx-row-amount ${cls}">
-          <span class="tx-row-total" style="font-size:.82rem;">${ordered ? 'سفارش' : 'ویزیت'}</span>
-        </span>
       </a>`;
     }).join('');
   }
@@ -138,7 +127,6 @@
       return `<button type="button" class="chip ${visitFilter === id ? 'active' : ''}" data-vf="${id}">${label}</button>`;
     };
     root.innerHTML = `
-      <h2 class="section-title">ویزیت مشتریان</h2>
       <div class="field"><input id="visit-search" placeholder="جستجوی نام مشتری، منطقه، نتیجه..." value="${esc(visitQuery)}" autocomplete="off"></div>
       <div class="chip-row" id="visit-chips">
         ${chip('all','همه')}

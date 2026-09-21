@@ -14,16 +14,7 @@
   let sortHandler = null;
   let fabHandler = null;
   function navigateToSupplier(sid) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/supplier', { id: sid });
-    } else {
-      location.href = '#/supplier?id=' + encodeURIComponent(sid);
-    }
+    AppRouter.navigate('/supplier', { id: sid });
   }
 
   function renderSupplierListOnly() {
@@ -64,14 +55,14 @@
         if (s.phone) metaBits.push(s.phone);
         if (purchaseCount) metaBits.push(purchaseCount + ' خرید');
         const meta = metaBits.length ? `<span class="sub">${esc(metaBits.join(' · '))}</span>` : '';
-        return `<a class="ledger-row tx-row" data-open-supplier="${esc(s.id)}" style="text-decoration:none;color:inherit;">
+        return `<a class="ledger-row tx-row" data-open-supplier="${esc(s.id)}">
           <span class="name">
             <span class="tx-row-title">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}</span>
             ${meta}
           </span>
           <span class="filler"></span>
           <span class="amount tx-row-amount ${color}">
-            <span class="tx-row-total" style="font-size:.88rem;">${amt}</span>
+            <span class="tx-row-total">${amt}</span>
           </span>
         </a>`;
       }).join('');
@@ -83,7 +74,6 @@
       return `<button type="button" class="chip ${supFilter === id ? 'active' : ''}" data-sf="${id}">${label}</button>`;
     };
     root.innerHTML = `
-      <h2 class="section-title">تامین‌کنندگان</h2>
       <div class="field"><input id="supplier-search" placeholder="جستجوی نام یا تلفن..." value="${esc(supQuery)}" autocomplete="off"></div>
       <div class="chip-row" id="supplier-chips">
         ${chip('all', 'همه')}

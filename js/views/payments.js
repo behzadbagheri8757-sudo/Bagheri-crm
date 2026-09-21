@@ -14,16 +14,7 @@
   let sortHandler = null;
   let fabHandler = null;
   function navigateToCustomer(cid) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/customer', { id: cid });
-    } else {
-      location.href = '#/customer?id=' + encodeURIComponent(cid);
-    }
+    AppRouter.navigate('/customer', { id: cid });
   }
 
   function paymentRows() {
@@ -266,10 +257,6 @@
     };
 
     root.innerHTML = `
-      <h2 class="section-title">
-        پرداخت‌ها / دریافت‌ها
-      </h2>
-
       <div class="field">
         <input
           id="payment-search"

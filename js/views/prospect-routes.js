@@ -8,16 +8,7 @@
 (function (global) {
   let addRouteHandler = null;
   function navigateToProspects() {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/prospects');
-    } else {
-      location.href = '#/prospects';
-    }
+    AppRouter.navigate('/prospects');
   }
 
   function drawRoutes(root) {
@@ -73,11 +64,11 @@
     addBtn.onclick = addRouteHandler;
 
     // Delegated events for delete and add neighborhood
-    list.addEventListener('click', function (e) {
+    list.addEventListener('click', async function (e) {
       const delBtn = e.target.closest('[data-del-route]');
       if (delBtn) {
         const id = delBtn.getAttribute('data-del-route');
-        if (!confirm('این مسیر حذف شود؟')) return;
+        if (!(await appConfirm('این مسیر حذف شود؟'))) return;
         deleteProspectRoute(id).then(() => {
           showToast('حذف شد');
           drawRoutes(root);

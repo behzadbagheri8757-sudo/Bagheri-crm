@@ -12,42 +12,15 @@
   let actionHandlersBound = false;
 
   function navigateToInvoices() {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/invoices');
-    } else {
-      location.href = '#/invoices';
-    }
+    AppRouter.navigate('/invoices');
   }
 
   function navigateToCustomer(cid) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/customer', { id: cid });
-    } else {
-      location.href = '#/customer?id=' + encodeURIComponent(cid);
-    }
+    AppRouter.navigate('/customer', { id: cid });
   }
 
   function navigateToInvoice(invId) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/invoice', { id: invId });
-    } else {
-      location.href = '#/invoice?id=' + encodeURIComponent(invId);
-    }
+    AppRouter.navigate('/invoice', { id: invId });
   }
 
   function invoicePaidAmount(inv) {
@@ -84,6 +57,10 @@
       return;
     }
 
+    if (typeof setHeaderTitle === 'function') {
+      setHeaderTitle('#' + (inv.number || '—'), { isRoot: false });
+    }
+
     const cust = data.customers.find(c => c.id === inv.customerId);
     const paid = invoicePaidAmount(inv);
     const remain = invoiceRemain(inv);
@@ -107,9 +84,12 @@
     }) : [];
 
 
-    const invProfit = (inv.items || []).reduce(function (a, it) {
+    const invItemsProfit = (inv.items || []).reduce(function (a, it) {
       return a + ((it.price || 0) - (it.buyPrice || 0)) * (it.qty || 0) - (it.discount || 0);
-    }, 0) - ((inv.discountType === 'percent') ? 0 : (inv.discount || 0));
+    }, 0);
+    // Use the canonical invoice-level discount calculation so percentage and
+    // fixed discounts are treated identically to reports/customerProfit.
+    const invProfit = invItemsProfit - invoiceDiscountAmount(inv);
 
     const itemRows = (inv.items || []).map(function (it, idx) {
       const line = (it.qty || 0) * (it.price || 0) - (it.discount || 0);
@@ -185,10 +165,10 @@
         <summary>جزئیات پرداخت و سود</summary>
         <div class="cards" style="margin-top:10px;margin-bottom:8px;">
           ${inv.discount ? `<div class="card"><div class="label">تخفیف فاکتور${inv.discountType === 'percent' ? ' (%)' : ''}</div><div class="value">${toman(inv.discount)}${inv.discountType === 'percent' ? ' %' : ' ت'}</div></div>` : ''}
-          <div class="card"><div class="label">نقد</div><div class="value" style="font-size:1rem;">${toman(inv.cashPaid || 0)}</div></div>
-          <div class="card"><div class="label">کارت</div><div class="value" style="font-size:1rem;">${toman(inv.cardPaid || 0)}</div></div>
-          <div class="card"><div class="label">انتقال</div><div class="value" style="font-size:1rem;">${toman(inv.transferPaid || 0)}</div></div>
-          <div class="card"><div class="label">چک</div><div class="value" style="font-size:1rem;">${toman(inv.checkPaid || 0)}</div></div>
+          ${inv.cashPaid ? `<div class="card"><div class="label">نقد</div><div class="value" style="font-size:1rem;">${toman(inv.cashPaid)} ت</div></div>` : ''}
+          ${inv.cardPaid ? `<div class="card"><div class="label">کارت</div><div class="value" style="font-size:1rem;">${toman(inv.cardPaid)} ت</div></div>` : ''}
+          ${inv.transferPaid ? `<div class="card"><div class="label">انتقال</div><div class="value" style="font-size:1rem;">${toman(inv.transferPaid)} ت</div></div>` : ''}
+          ${inv.checkPaid ? `<div class="card"><div class="label">چک</div><div class="value" style="font-size:1rem;">${toman(inv.checkPaid)} ت</div></div>` : ''}
           ${hasSnapshot ? `
             <div class="card"><div class="label">مانده قبلی مشتری</div><div class="value" style="font-size:1rem;">${toman(inv.prevBalance)} ت</div></div>
             <div class="card"><div class="label">مانده بعد از فاکتور</div><div class="value" style="font-size:1rem;">${toman(Math.abs(inv.newBalance || 0))} ت ${balanceStatusWord(inv.newBalance || 0)}</div></div>
@@ -277,12 +257,13 @@
                 drawInvoicePage(rootEl || root);
               } catch (err) {
                 console.error(err);
+                drawInvoicePage(rootEl || root);
                 showToast('ذخیره نشد');
               }
             })();
           } else if (action === 'unlink-visit') {
             (async function () {
-              if (!confirm('ارتباط این فاکتور با ویزیت حذف شود؟ (خود ویزیت و فاکتور حذف نمی‌شوند)')) return;
+              if (!(await appConfirm('ارتباط این فاکتور با ویزیت حذف شود؟ (خود ویزیت و فاکتور حذف نمی‌شوند)'))) return;
               delete inv.visitId;
               try {
                 await saveData();
@@ -299,7 +280,7 @@
                 showToast('این فاکتور دارای برگشت از فروش است و برای حفظ یکپارچگی موجودی قابل حذف نیست');
                 return;
               }
-              if (!confirm('با حذف این فاکتور، موجودی انبار و حساب مشتری اصلاح خواهد شد. ادامه می‌دهید؟')) return;
+              if (!(await appConfirm('با حذف این فاکتور، موجودی انبار و حساب مشتری اصلاح خواهد شد. ادامه می‌دهید؟'))) return;
               const previousData = JSON.parse(JSON.stringify(data));
               if (typeof revertInvoiceStockEffects === 'function') revertInvoiceStockEffects(inv);
               if (typeof revertInvoicePayments === 'function') revertInvoicePayments(inv);
@@ -307,7 +288,7 @@
               try {
                 await saveData();
               } catch (saveErr) {
-                data = previousData;
+                restoreDataInPlace(previousData);
                 throw saveErr;
               }
               if (typeof gameOnInvoiceDeleted === 'function') {

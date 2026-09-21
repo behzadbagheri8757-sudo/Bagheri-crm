@@ -20,49 +20,34 @@
   let fabHandler = null;
   let targetBtnHandler = null;
   function rankPill(rank) {
-    const safeRank = (rank || 'D').toString().replace(/[^A-Z+\-]/g, '');
-    return `<span class="rank-pill rank-pill-${safeRank}">${esc(safeRank)}</span>`;
+    // Shared helper (prospect-scoring.js): an incomplete V2 prospect has
+    // rank === null and must render as "ناقص", never fall back to "D".
+    return prospectRankBadgeHTML(rank);
   }
 
   function navigateToProspect(id) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/prospect', { id: id });
-    } else {
-      location.href = '#/prospect?id=' + encodeURIComponent(id);
-    }
+    AppRouter.navigate('/prospect', { id: id });
   }
 
   function navigateToEvaluation(shopId) {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      const params = shopId ? { shopId: shopId } : {};
-      AppRouter.navigate('/evaluation', params);
-    } else {
-      const url = shopId ? '#/evaluation?shopId=' + encodeURIComponent(shopId) : '#/evaluation';
-      location.href = url;
-    }
+    const params = shopId ? { shopId: shopId } : {};
+    AppRouter.navigate('/evaluation', params);
   }
 
   function renderTargetCard() {
     const el = document.getElementById('prospect-target');
     if (!el) return;
     const dt = prospectState.dailyTarget || { target: 0, count: 0 };
-    /* UI only: compact progress strip. Logic (target/count) unchanged.
-       Progress bar stays idle until at least 1 visit is recorded. */
+    /* Presentation-only: iOS-like Hero Activity Card.
+       Logic (target/count/percentage/remaining) and edit flow unchanged.
+       Progress bar stays empty while count is 0 (is-idle). */
     if (!dt.target) {
       el.innerHTML = `<div class="prospect-daily-target is-unset">
-        <span class="pdt-label">تارگت ویزیت امروز</span>
-        <span class="pdt-meta" style="opacity:.75;">تنظیم نشده</span>
-        <button type="button" class="pdt-edit" id="set-target-btn">تنظیم</button>
+        <div class="pdt-head">
+          <span class="pdt-label">هدف ارزیابی امروز</span>
+          <button type="button" class="pdt-edit" id="set-target-btn">تنظیم</button>
+        </div>
+        <div class="pdt-unset-msg">هنوز هدفی تنظیم نشده</div>
       </div>`;
     } else {
       const count = Number(dt.count) || 0;
@@ -72,24 +57,49 @@
       const pctLabel = Math.min(100, Math.round(pctRaw));
       const idle = count <= 0;
       const barW = idle ? 0 : Math.min(100, Math.max(0, pct));
+      const remaining = Math.max(0, target - count);
       el.innerHTML = `<div class="prospect-daily-target${idle ? ' is-idle' : ' is-active'}">
-        <span class="pdt-label">تارگت امروز</span>
+        <div class="pdt-head">
+          <span class="pdt-label">هدف ارزیابی امروز</span>
+          <span class="pdt-pct">${pctLabel}٪</span>
+        </div>
+        <div class="pdt-hero">
+          <span class="pdt-count">${count}</span>
+          <span class="pdt-caption">ارزیابی انجام شد</span>
+          <span class="pdt-of">از ${target}</span>
+        </div>
         <div class="pdt-bar-wrap"><div class="pdt-bar" role="progressbar" aria-valuenow="${count}" aria-valuemin="0" aria-valuemax="${target}"><span style="width:${barW}%"></span></div></div>
-        <span class="pdt-meta">${count} / ${target}${idle ? '' : ' · ' + pctLabel + '٪'}</span>
-        <button type="button" class="pdt-edit" id="set-target-btn">ویرایش</button>
+        <div class="pdt-foot">
+          <span class="pdt-remain">${remaining} ارزیابی باقی مانده</span>
+          <button type="button" class="pdt-edit" id="set-target-btn">ویرایش</button>
+        </div>
       </div>`;
     }
     const b = document.getElementById('set-target-btn');
     if (b) {
       targetBtnHandler = function () {
-        const v = prompt('تارگت ویزیت امروز (عدد):', String(dt.target || 20));
-        if (v == null) return;
-        const n = parseInt(v, 10);
-        if (!n || n <= 0) { showToast('عدد معتبر وارد کن'); return; }
-        setProspectDailyTargetValue(n).then(() => {
-          renderTargetCard();
-          showToast('تارگت ذخیره شد');
-        });
+        openSheet(`
+          <h3>هدف ارزیابی امروز</h3>
+          <div class="field"><label for="prospect-target-input">تعداد هدف</label><input id="prospect-target-input" type="text" inputmode="numeric" value="${esc(String(dt.target || 20))}"></div>
+          <div class="btn-row"><button type="button" class="btn" id="prospect-target-save">ذخیره</button></div>
+        `);
+        const input = document.getElementById('prospect-target-input');
+        const save = document.getElementById('prospect-target-save');
+        if(input) setTimeout(function(){ input.focus(); input.select(); }, 0);
+        if(save) save.onclick = function(){
+          const n = parseInt(faToEnDigits(input ? input.value : ''), 10);
+          if(!n || n <= 0){ showToast('عدد معتبر وارد کن'); if(input){ input.setAttribute('aria-invalid','true'); input.focus(); } return; }
+          save.disabled = true;
+          setProspectDailyTargetValue(n).then(function(){
+            closeModal();
+            renderTargetCard();
+            showToast('تارگت ذخیره شد');
+          }).catch(function(err){
+            console.error(err);
+            save.disabled = false;
+            showToast('ذخیره تارگت ناموفق بود');
+          });
+        };
       };
       b.onclick = targetBtnHandler;
     }
@@ -289,16 +299,7 @@
     });
     root.querySelector('[data-nav-routes]').addEventListener('click', function (e) {
       e.preventDefault();
-      if (
-        typeof isSpaShell === 'function' &&
-        isSpaShell() &&
-        typeof AppRouter !== 'undefined' &&
-        AppRouter.navigate
-      ) {
-        AppRouter.navigate('/locations');
-      } else {
-        location.href = '#/locations';
-      }
+      AppRouter.navigate('/locations');
     });
 
     // Delegated list click — once per draw (same pattern as Customers/Checks)

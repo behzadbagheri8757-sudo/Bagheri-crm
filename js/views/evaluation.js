@@ -1,33 +1,43 @@
-/* js/views/evaluation.js — SPA Evaluation form view (Phase 8).
-   Extracted from evaluation.html. Reuses PROSPECT_QUESTIONS,
-   PROSPECT_VISIT_TAGS, PROSPECT_RANK_INFO, prospectComputeScore,
-   prospectScoreToRank, prospectAnsweredCount, prospectState,
-   createProspectShop, addProspectVisit, queueProspectTargetMilestoneMessage.
+/* js/views/evaluation.js — SPA Evaluation V2 form view.
+   Creates a NEW prospect: Profile → Business Type → Q1..Q4 → Summary.
+   Reuses PROSPECT_PROFILES, PROSPECT_BUSINESS_TYPES, PROSPECT_QUESTIONS_V2,
+   PROSPECT_VISIT_TAGS, prospectComputeScoreV2, prospectRankBadgeHTML,
+   createProspectShopV2, queueProspectTargetMilestoneMessage.
    No new financial logic.
-   UX: one question at a time with auto-advance on option tap.
+
+   Evaluation is a CURRENT SNAPSHOT (spec §4) — this view only ever creates
+   the initial Snapshot. Re-visiting an EXISTING prospect never re-runs this
+   full form again; that is the lightweight Follow-up Visit sheet opened
+   from the Prospect Detail view (js/views/prospect.js), which can optionally
+   edit one Snapshot answer instead of repeating all four questions.
+
+   UX: one question at a time with auto-advance on option tap (same
+   interaction the legacy Evaluation used), now preceded by a Profile step
+   and a Business Type step per the V2 spec.
 */
 'use strict';
 
 (function (global) {
+  // step: 0=profile, 1=businessType, 2..5=Q1..Q4, 6=summary
+  const STEP_PROFILE = 0;
+  const STEP_TYPE = 1;
+  const STEP_Q_FIRST = 2;
+  const STEP_Q_COUNT = 4; // fixed for both profiles (spec §7, §8)
+  const STEP_SUMMARY = STEP_Q_FIRST + STEP_Q_COUNT; // 6
+
   let formState = {
-    mode: 'new', // new | visit
-    shopId: null,
     name: '',
     routeId: null,
     neighborhoodId: null,
     locationId: null,
+    profile: null,
+    businessType: null,
     answers: {},
     tags: [],
-    // Presentation-only: which question is shown (0-based index into PROSPECT_QUESTIONS)
-    currentQuestionIndex: 0,
-    // After last question answered, show tags + save
-    showSummary: false,
+    step: STEP_PROFILE,
   };
 
-  let routeHandlers = [];
-  let questionHandlers = [];
-  let tagHandlers = [];
-  let saveHandler = null;
+  let handlers = []; // {el, type, fn} — all cleared on unmount
 
   // Working context for NEW evaluations only. This is UI/session preference data,
   // not Prospect data, so keep it outside IndexedDB and outside the Prospect schema.
@@ -40,12 +50,10 @@
     } catch (e) {}
     return null;
   }
-
   function setWorkingEvaluationLocation(locationId) {
     if (!locationId) return;
     try { localStorage.setItem(EVAL_WORKING_LOCATION_KEY, String(locationId)); } catch (e) {}
   }
-
   function applyLocationToFormState(locationId) {
     formState.locationId = locationId || null;
     if (formState.locationId && typeof getLocationHierarchy === 'function') {
@@ -58,281 +66,338 @@
     }
   }
 
-  function navigateToProspects() {
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/prospects');
-    } else {
-      location.href = '#/prospects';
-    }
-  }
-
   function navigateToProspect(id, opts) {
     const justCreated = !!(opts && opts.justCreated);
-    if (
-      typeof isSpaShell === 'function' &&
-      isSpaShell() &&
-      typeof AppRouter !== 'undefined' &&
-      AppRouter.navigate
-    ) {
-      AppRouter.navigate('/prospect', justCreated ? { id: id, justCreated: '1' } : { id: id });
-    } else {
-      location.href = '#/prospect?id=' + encodeURIComponent(id) + (justCreated ? '&justCreated=1' : '');
-    }
+    AppRouter.navigate('/prospect', justCreated ? { id: id, justCreated: '1' } : { id: id });
   }
 
-  function updateLive() {
-    const score = prospectComputeScore(formState.answers);
-    const rank = prospectScoreToRank(score);
-    const info = PROSPECT_RANK_INFO[rank];
-    const n = prospectAnsweredCount(formState.answers);
-    const val = document.getElementById('live-score-value');
-    const sub = document.getElementById('live-score-sub');
-    const rk = document.getElementById('live-score-rank');
-    if (val) val.textContent = score;
-    if (sub) sub.textContent = enToFaDigits(String(n)) + ' از ' + enToFaDigits(String(PROSPECT_QUESTIONS.length)) + ' سؤال';
-    if (rk) {
-      rk.textContent = rank;
-      rk.className = 'rank-badge rank-pill-' + rank;
-    }
-    const btn = document.getElementById('save-eval');
-    if (btn) {
-      const nameOk = formState.mode === 'visit' ? true : formState.name.trim().length > 0;
-      const ansOk = n === PROSPECT_QUESTIONS.length;
-      const routeOk = formState.mode === 'visit' ? true : !!formState.locationId;
-      btn.disabled = !(nameOk && ansOk && routeOk);
-    }
+  function currentQuestions() {
+    return (formState.profile && PROSPECT_QUESTIONS_V2[formState.profile]) || [];
   }
 
-  function goToQuestion(index) {
-    const max = PROSPECT_QUESTIONS.length;
-    if (index < 0) index = 0;
-    if (index >= max) {
-      formState.showSummary = true;
-      formState.currentQuestionIndex = max - 1;
-    } else {
-      formState.showSummary = false;
-      formState.currentQuestionIndex = index;
+  function on(el, type, fn) {
+    if (!el) return;
+    el.addEventListener(type, fn);
+    handlers.push({ el: el, type: type, fn: fn });
+  }
+  function clearHandlers() {
+    handlers.forEach(function (h) {
+      try { h.el.removeEventListener(h.type, h.fn); } catch (e) {}
+    });
+    handlers = [];
+  }
+
+  function goToStep(step) {
+    const max = STEP_SUMMARY;
+    if (step < STEP_PROFILE) step = STEP_PROFILE;
+    if (step > max) step = max;
+    formState.step = step;
+  }
+
+  // ---- per-step renderers ----
+
+  function renderIdentitySection() {
+    return `
+      <div class="field"><label>نام مغازه</label><input id="eval-shop-name" value="${esc(formState.name)}" autocomplete="off"></div>
+      <div class="eval-location-context card" style="margin-top:10px;margin-bottom:14px;">
+        <div class="eval-location-context-main">
+          <span class="eval-location-pin" aria-hidden="true">${(typeof AppIcons !== 'undefined' && AppIcons.render) ? AppIcons.render('mapPin', { size: 18 }) : ''}</span>
+          <span class="eval-location-context-text">${esc(formState.locationId ? getLocationDisplayString(formState.locationId) : 'محدوده انتخاب نشده')}</span>
+        </div>
+        <button type="button" class="btn secondary small" id="eval-change-location">تغییر</button>
+      </div>
+    `;
+  }
+
+  function renderProfileStep() {
+    const cards = PROSPECT_PROFILES.map(function (p) {
+      const active = formState.profile === p.key;
+      return `<button type="button" class="eval-profile-card${active ? ' selected' : ''}" data-profile="${esc(p.key)}">
+        <span class="eval-profile-card-label">${esc(p.label)}</span>
+      </button>`;
+    }).join('');
+    return `
+      ${renderIdentitySection()}
+      <div class="eval-step-label">پروفایل کسب‌وکار</div>
+      <div class="eval-profile-grid">${cards}</div>
+    `;
+  }
+
+  function renderTypeStep() {
+    const types = (formState.profile && PROSPECT_BUSINESS_TYPES[formState.profile]) || [];
+    const chips = types.map(function (t) {
+      const active = formState.businessType === t.key;
+      return `<button type="button" class="chip-opt${active ? ' selected' : ''}" data-biztype="${esc(t.key)}">${esc(t.label)}</button>`;
+    }).join('');
+    return `
+      <div class="eval-step-label">نوع کسب‌وکار</div>
+      <div class="chip-wrap eval-q-options field-eval-opts">${chips}</div>
+      <div class="eval-back-row"><button type="button" class="btn secondary small" id="eval-step-back">مرحله قبلی</button></div>
+    `;
+  }
+
+  function renderQuestionStep() {
+    const questions = currentQuestions();
+    const qIdx = formState.step - STEP_Q_FIRST; // 0-based within this profile's questions
+    const q = questions[qIdx];
+    if (!q) return '<div class="empty">پروفایل انتخاب نشده</div>';
+    const opts = q.options.map(function (o) {
+      const active = formState.answers[q.id] === o.key;
+      return `<button type="button" class="chip-opt eval-q-opt${active ? ' selected' : ''}${o.unknown ? ' eval-q-opt-unknown' : ''}" data-qid="${esc(q.id)}" data-value="${esc(o.key)}">${esc(o.label)}</button>`;
+    }).join('');
+    return `
+      <div class="eval-progress-bar" aria-hidden="true">
+        <div class="eval-progress-fill" style="width:${((qIdx + (formState.answers[q.id] ? 1 : 0)) / STEP_Q_COUNT) * 100}%"></div>
+      </div>
+      <div class="eval-one-q card visit-card-enter field-eval-card">
+        <div class="eval-q-progress">سؤال ${enToFaDigits(String(qIdx + 1))} از ${enToFaDigits(String(STEP_Q_COUNT))}</div>
+        <div class="q-title">${esc(q.label)}</div>
+        ${q.hint ? `<div class="sub eval-q-hint">${esc(q.hint)}</div>` : ''}
+        <div class="chip-wrap eval-q-options field-eval-opts">${opts}</div>
+        <div class="eval-back-row"><button type="button" class="btn secondary small" id="eval-step-back">${qIdx === 0 ? 'نوع کسب‌وکار' : 'سؤال قبلی'}</button></div>
+      </div>
+    `;
+  }
+
+  function openSummaryNameEditSheet(root) {
+    openSheet(`
+      <h3>ویرایش نام فروشگاه</h3>
+      <div class="field" style="margin-top:10px;">
+        <label>نام فروشگاه</label>
+        <input id="eval-summary-name" value="${esc(formState.name)}" autocomplete="off">
+      </div>
+      <div class="btn-row" style="margin-top:14px;">
+        <button type="button" class="btn" id="eval-summary-name-save">ذخیره نام</button>
+      </div>
+    `);
+
+    const input = document.getElementById('eval-summary-name');
+    const saveBtn = document.getElementById('eval-summary-name-save');
+    if (input) input.focus();
+    if (saveBtn) saveBtn.addEventListener('click', function () {
+      formState.name = input ? input.value : formState.name;
+      closeModal();
+      drawEvaluation(root);
+    });
+  }
+
+  function openSummaryQuestionEditSheet(root, questionId) {
+    const questions = currentQuestions();
+    const q = questions.find(function (item) { return item.id === questionId; });
+    if (!q) return;
+    const currentValue = formState.answers[q.id] || null;
+    const options = q.options.map(function (o) {
+      return `<button type="button" class="chip-opt snapshot-edit-option${o.key === currentValue ? ' selected' : ''}" data-summary-edit-value="${esc(o.key)}">${esc(o.label)}</button>`;
+    }).join('');
+
+    openSheet(`
+      <h3>ویرایش پاسخ ارزیابی</h3>
+      <div class="sub" style="margin-bottom:10px;">${esc(q.shortLabel || q.label)}</div>
+      <div class="chip-wrap" id="eval-summary-edit-options">${options}</div>
+      <div class="btn-row" style="margin-top:14px;">
+        <button type="button" class="btn" id="eval-summary-answer-save">ثبت تغییر</button>
+      </div>
+    `);
+
+    let selectedValue = currentValue;
+    document.querySelectorAll('#eval-summary-edit-options [data-summary-edit-value]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        selectedValue = btn.getAttribute('data-summary-edit-value');
+        document.querySelectorAll('#eval-summary-edit-options [data-summary-edit-value]').forEach(function (b) {
+          b.classList.toggle('selected', b === btn);
+        });
+      });
+    });
+
+    const saveBtn = document.getElementById('eval-summary-answer-save');
+    if (saveBtn) saveBtn.addEventListener('click', function () {
+      if (selectedValue != null) formState.answers[q.id] = selectedValue;
+      closeModal();
+      drawEvaluation(root);
+    });
+  }
+
+  function renderSummaryStep() {
+    const result = prospectComputeScoreV2(formState.profile, formState.answers);
+    const questions = currentQuestions();
+    const isIncomplete = result.knownCount <= 2;
+    const missingItems = [];
+    if (!formState.name.trim()) missingItems.push('نام فروشگاه وارد نشده');
+    if (!formState.locationId) missingItems.push('موقعیت انتخاب نشده');
+    if (result.knownCount < STEP_Q_COUNT) {
+      const remaining = STEP_Q_COUNT - result.knownCount;
+      missingItems.push(`${enToFaDigits(String(result.knownCount))} سؤال پاسخ داده شده؛ ${enToFaDigits(String(remaining))} سؤال باقی مانده`);
     }
+    const missingHtml = missingItems.length
+      ? `<div class="eval-incomplete-note" style="margin-top:8px;">${missingItems.map(function (item) { return `<div class="sub">${esc(item)}</div>`; }).join('')}</div>`
+      : '';
+    const tagHtml = PROSPECT_VISIT_TAGS.map(function (t) {
+      return `<button type="button" class="chip-opt${formState.tags.includes(t.key) ? ' selected' : ''}" data-tag="${esc(t.key)}">${esc(t.label)}</button>`;
+    }).join('');
+    const answerRows = questions.map(function (q, idx) {
+      const key = formState.answers[q.id];
+      const opt = key ? q.options.find(function (o) { return o.key === key; }) : null;
+      const answerLabel = opt ? opt.label : '—';
+      return `<div class="answer-row answer-row-editable" data-jump-q="${esc(String(idx))}">
+        <div class="answer-q"><span class="answer-index">${String(idx + 1).padStart(2, '0')}</span><span>${esc(q.shortLabel || q.label)}</span></div>
+        <div class="answer-a">${esc(answerLabel)} <span class="answer-edit-hint">ویرایش</span></div>
+      </div>`;
+    }).join('');
+
+    const scoreBlockHtml = isIncomplete
+      ? `<div class="eval-summary-score-row">${missingHtml}</div>`
+      : `<div class="live-score">
+           <div><div class="num">${enToFaDigits(String(result.score))}</div>
+             <div class="sub">${enToFaDigits(String(result.knownCount))} از ${enToFaDigits(String(STEP_Q_COUNT))} سؤال</div></div>
+           <div style="text-align:left">${prospectRankBadgeHTML(result.rank)}</div>
+         </div>`;
+
+    return `
+      <div class="eval-progress-bar" aria-hidden="true"><div class="eval-progress-fill" style="width:100%"></div></div>
+      <div class="card eval-summary-identity" style="margin-bottom:12px;">
+        <div class="eval-summary-identity-row">
+          <div>
+            <div class="tx-row-title">${esc(formState.name.trim() || 'بدون نام')}</div>
+            <div class="sub">${esc(formState.locationId ? getLocationDisplayString(formState.locationId) : 'محدوده انتخاب نشده')}</div>
+          </div>
+          <button type="button" class="btn secondary small" id="eval-jump-profile">ویرایش نام</button>
+        </div>
+      </div>
+      ${isIncomplete ? '' : missingHtml}
+      ${scoreBlockHtml}
+      <details class="tx-details" open style="margin-top:12px;">
+        <summary>پاسخ‌ها</summary>
+        <div class="card evaluation-answers-card" style="margin-top:8px;">${answerRows}</div>
+      </details>
+      <div class="card" style="margin-top:12px;">
+        <div class="label" style="margin-bottom:8px;">نتیجه این ویزیت (اختیاری)</div>
+        <div class="chip-wrap">${tagHtml}</div>
+      </div>
+      <div class="btn-row tx-actions-primary" style="margin-top:14px;">
+        <button type="button" class="btn secondary small" id="eval-step-back">بازگشت به سؤالات</button>
+        <button type="button" class="btn" id="save-eval">ثبت مغازه</button>
+      </div>
+    `;
+  }
+
+  function saveEnabled() {
+    return formState.name.trim().length > 0 && !!formState.locationId && !!formState.profile;
+  }
+
+  function stepBodyHtml() {
+    if (formState.step === STEP_PROFILE) return renderProfileStep();
+    if (formState.step === STEP_TYPE) return renderTypeStep();
+    if (formState.step === STEP_SUMMARY) return renderSummaryStep();
+    return renderQuestionStep();
   }
 
   function drawEvaluation(root) {
-    const shopId = formState.shopId;
-    const isVisit = formState.mode === 'visit';
-    const totalQ = PROSPECT_QUESTIONS.length;
-    const qIdx = formState.currentQuestionIndex;
-    const showingSummary = formState.showSummary;
-
-    // Live score always available from existing answers
-    const score = prospectComputeScore(formState.answers);
-    const rank = prospectScoreToRank(score);
-    const info = PROSPECT_RANK_INFO[rank];
-    const nAnswered = prospectAnsweredCount(formState.answers);
-
-    let mainBodyHtml = '';
-
-    if (!showingSummary) {
-      // ONE question at a time
-      const q = PROSPECT_QUESTIONS[qIdx];
-      const opts = q.options.map(o =>
-        `<button type="button" class="chip-opt eval-q-opt ${formState.answers[q.id] === o.key ? 'selected' : ''}" data-group="${q.id}" data-value="${esc(o.key)}">${esc(o.label)}</button>`
-      ).join('');
-
-      mainBodyHtml = `
-        <div class="eval-progress-bar" aria-hidden="true">
-          <div class="eval-progress-fill" style="width:${((qIdx + (formState.answers[q.id] ? 1 : 0)) / totalQ) * 100}%"></div>
-        </div>
-        <div class="eval-one-q card visit-card-enter field-eval-card">
-          <div class="eval-q-progress">سؤال ${enToFaDigits(String(qIdx + 1))} از ${enToFaDigits(String(totalQ))}</div>
-          <div class="q-title">${esc(q.label)}</div>
-          <div class="chip-wrap eval-q-options field-eval-opts">${opts}</div>
-          ${qIdx > 0 ? `<div class="eval-back-row"><button type="button" class="btn secondary small" id="eval-q-back">سؤال قبلی</button></div>` : ''}
-        </div>
-      `;
-    } else {
-      // Summary: tags + live score + save (existing final flow)
-      const tagHtml = PROSPECT_VISIT_TAGS.map(t =>
-        `<button type="button" class="chip-opt ${formState.tags.includes(t.key) ? 'selected' : ''}" data-group="tags" data-value="${esc(t.key)}" data-multi="1">${esc(t.label)}</button>`
-      ).join('');
-
-      mainBodyHtml = `
-        <div class="eval-progress-bar" aria-hidden="true">
-          <div class="eval-progress-fill" style="width:100%"></div>
-        </div>
-        <div class="live-score">
-          <div><div class="num" id="live-score-value">${enToFaDigits(String(score))}</div>
-            <div class="sub" id="live-score-sub">${enToFaDigits(String(nAnswered))} از ${enToFaDigits(String(totalQ))} سؤال</div></div>
-          <div style="text-align:left"><span class="rank-badge rank-pill-${rank}" id="live-score-rank">${rank}</span>
-            <div class="sub" style="margin-top:4px;max-width:160px;">${esc(info.desc)}</div></div>
-        </div>
-        <div class="card" style="margin-top:12px;">
-          <div class="label" style="margin-bottom:8px;">نتیجه این ویزیت (اختیاری)</div>
-          <div class="chip-wrap">${tagHtml}</div>
-        </div>
-        <div class="btn-row tx-actions-primary" style="margin-top:14px;">
-          <button type="button" class="btn secondary small" id="eval-q-back">بازگشت به سؤالات</button>
-          <button type="button" class="btn" id="save-eval" disabled>${isVisit ? 'ثبت ویزیت' : 'ثبت مغازه'}</button>
-        </div>
-      `;
-    }
-
     root.innerHTML = `
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="#/prospects">← لیست</a>
       </div>
-      <h2 class="section-title">${isVisit ? 'ثبت ویزیت / ارزیابی' : 'ارزیابی مشتری بالقوه'}</h2>
-      ${isVisit
-        ? `<div class="card" style="margin-bottom:12px;"><b>${esc(formState.name)}</b>
-            <div class="sub">${esc(getLocationDisplayString(formState.locationId))}</div></div>`
-        : `<div class="field"><label>نام مغازه</label><input id="shop-name" value="${esc(formState.name)}" autocomplete="off"></div>
-           <div class="eval-location-context card" style="margin-top:10px;">
-             <div class="eval-location-context-main">
-               <span class="eval-location-pin" aria-hidden="true">📍</span>
-               <span class="eval-location-context-text">${esc(formState.locationId ? getLocationDisplayString(formState.locationId) : 'محدوده انتخاب نشده')}</span>
-             </div>
-             <button type="button" class="btn secondary small" id="eval-change-location">تغییر</button>
-           </div>`
-      }
-      ${mainBodyHtml}
+      <h2 class="section-title">ارزیابی مشتری بالقوه</h2>
+      ${stepBodyHtml()}
     `;
 
-    // Name input (new mode only)
-    if (!isVisit) {
-      const nameIn = document.getElementById('shop-name');
-      if (nameIn) {
-        nameIn.addEventListener('input', function (e) {
-          formState.name = e.target.value;
-          updateLive();
+    clearHandlers();
+
+    if (formState.step === STEP_PROFILE) {
+      on(document.getElementById('eval-shop-name'), 'input', function (e) {
+        formState.name = e.target.value;
+      });
+      on(document.getElementById('eval-change-location'), 'click', function () {
+        const idPrefix = 'eval-context-loc';
+        openSheet(
+          '<h3>محدوده ارزیابی</h3>' +
+          '<div class="sub" style="margin-bottom:10px;">محدوده جدید را انتخاب کن؛ انتخاب مسیر یا محله همان لحظه فعال می‌شود.</div>' +
+          renderLocationPickerHTML(idPrefix, formState.locationId)
+        );
+        wireLocationPicker(idPrefix);
+        const regionSel = document.getElementById(idPrefix + '-region');
+        const routeSel = document.getElementById(idPrefix + '-route');
+        const neighSel = document.getElementById(idPrefix + '-neigh');
+        const applyContext = function () {
+          const locationId = (neighSel && neighSel.value) || (routeSel && routeSel.value) || null;
+          if (!locationId) return;
+          applyLocationToFormState(locationId);
+          setWorkingEvaluationLocation(locationId);
+          const label = document.querySelector('.eval-location-context-text');
+          if (label) label.textContent = getLocationDisplayString(locationId);
+        };
+        [regionSel, routeSel, neighSel].forEach(function (el) {
+          if (el) el.addEventListener('change', applyContext);
         });
-      }
-    }
-
-    if (!isVisit) {
-      const changeLocationBtn = document.getElementById('eval-change-location');
-      if (changeLocationBtn) {
-        changeLocationBtn.addEventListener('click', function () {
-          const idPrefix = 'eval-context-loc';
-          const current = formState.locationId || null;
-          openSheet(
-            '<h3>محدوده ارزیابی</h3>' +
-            '<div class="sub" style="margin-bottom:10px;">محدوده جدید را انتخاب کن؛ انتخاب مسیر یا محله همان لحظه فعال می‌شود.</div>' +
-            renderLocationPickerHTML(idPrefix, current)
-          );
-          wireLocationPicker(idPrefix);
-          const regionSel = document.getElementById(idPrefix+'-region');
-          const routeSel = document.getElementById(idPrefix+'-route');
-          const neighSel = document.getElementById(idPrefix+'-neigh');
-          const applyContext = function () {
-            const locationId = (neighSel && neighSel.value) || (routeSel && routeSel.value) || null;
-            if (!locationId) return;
-            applyLocationToFormState(locationId);
-            setWorkingEvaluationLocation(locationId);
-            const label = document.querySelector('.eval-location-context-text');
-            if (label) label.textContent = getLocationDisplayString(locationId);
-            updateLive();
-          };
-          [regionSel, routeSel, neighSel].forEach(function (el) {
-            if (el) el.addEventListener('change', applyContext);
-          });
-        });
-      }
-    }
-
-    // Clear previous handlers
-    routeHandlers = [];
-    questionHandlers = [];
-    tagHandlers = [];
-
-    // Event delegation for all chip-opt buttons
-    root.querySelectorAll('.chip-opt').forEach(el => {
-      const handler = function () {
-        const group = el.getAttribute('data-group');
-        const value = el.getAttribute('data-value');
-        const multi = el.getAttribute('data-multi') === '1';
-
-        if (group === 'tags') {
-          const i = formState.tags.indexOf(value);
-          if (i >= 0) formState.tags.splice(i, 1);
-          else formState.tags.push(value);
-          el.classList.toggle('selected');
-          return;
-        }
-        if (group.startsWith('q')) {
-          // Record answer using existing state
-          formState.answers[group] = value;
-          // Visual select on current view
-          root.querySelectorAll('[data-group="' + group + '"]').forEach(b =>
-            b.classList.toggle('selected', b.getAttribute('data-value') === value)
-          );
-          updateLive();
-
-          // Auto-advance to next question (or summary after last)
-          const currentIdx = PROSPECT_QUESTIONS.findIndex(qq => qq.id === group);
-          if (currentIdx >= 0 && currentIdx < PROSPECT_QUESTIONS.length - 1) {
-            // Brief delay so selection is visible, then advance
-            setTimeout(function () {
-              goToQuestion(currentIdx + 1);
-              drawEvaluation(root);
-            }, 180);
-          } else if (currentIdx === PROSPECT_QUESTIONS.length - 1) {
-            setTimeout(function () {
-              formState.showSummary = true;
-              drawEvaluation(root);
-            }, 180);
+      });
+      root.querySelectorAll('[data-profile]').forEach(function (btn) {
+        on(btn, 'click', function () {
+          const newProfile = btn.getAttribute('data-profile');
+          if (formState.profile !== newProfile) {
+            // Switching profile invalidates the previous question set
+            // (spec §19: Retail answers must never mix with Food Service).
+            formState.profile = newProfile;
+            formState.businessType = null;
+            formState.answers = {};
           }
-        }
-      };
-      el.addEventListener('click', handler);
-      if (el.getAttribute('data-group') === 'tags') tagHandlers.push({ el, handler });
-      else if (el.getAttribute('data-group') && el.getAttribute('data-group').startsWith('q')) {
-        questionHandlers.push({ el, handler });
-      }
-    });
-
-    // Back button (question or summary)
-    const backBtn = document.getElementById('eval-q-back');
-    if (backBtn) {
-      const backHandler = function () {
-        if (formState.showSummary) {
-          formState.showSummary = false;
-          formState.currentQuestionIndex = PROSPECT_QUESTIONS.length - 1;
-        } else if (formState.currentQuestionIndex > 0) {
-          formState.currentQuestionIndex -= 1;
-        }
+          goToStep(STEP_TYPE);
+          drawEvaluation(root);
+        });
+      });
+    } else if (formState.step === STEP_TYPE) {
+      on(document.getElementById('eval-step-back'), 'click', function () {
+        goToStep(STEP_PROFILE);
         drawEvaluation(root);
-      };
-      backBtn.addEventListener('click', backHandler);
-      questionHandlers.push({ el: backBtn, handler: backHandler });
-    }
-
-    // Save button (only present on summary)
-    const saveBtn = document.getElementById('save-eval');
-    if (saveBtn) {
-      saveHandler = function () {
-        if (saveBtn.disabled) return;
-        saveBtn.disabled = true;
-        (async function () {
-          try {
-            if (formState.mode === 'visit') {
-              const shop = await addProspectVisit(formState.shopId, {
-                answers: formState.answers,
-                tags: formState.tags,
-              });
-              if (typeof queueProspectTargetMilestoneMessage === 'function') {
-                queueProspectTargetMilestoneMessage(prospectState.dailyTarget);
-              }
-              showToast('ویزیت ثبت شد');
-              navigateToProspect(shop.id);
-            } else {
-              const shop = await createProspectShop({
+      });
+      root.querySelectorAll('[data-biztype]').forEach(function (btn) {
+        on(btn, 'click', function () {
+          formState.businessType = btn.getAttribute('data-biztype');
+          root.querySelectorAll('[data-biztype]').forEach(function (b) {
+            b.classList.toggle('selected', b === btn);
+          });
+          setTimeout(function () {
+            goToStep(STEP_Q_FIRST);
+            drawEvaluation(root);
+          }, 150);
+        });
+      });
+    } else if (formState.step === STEP_SUMMARY) {
+      on(document.getElementById('eval-step-back'), 'click', function () {
+        goToStep(STEP_Q_FIRST + STEP_Q_COUNT - 1);
+        drawEvaluation(root);
+      });
+      on(document.getElementById('eval-jump-profile'), 'click', function () {
+        openSummaryNameEditSheet(root);
+      });
+      root.querySelectorAll('[data-jump-q]').forEach(function (row) {
+        on(row, 'click', function () {
+          const idx = parseInt(row.getAttribute('data-jump-q'), 10) || 0;
+          const q = currentQuestions()[idx];
+          if (q) openSummaryQuestionEditSheet(root, q.id);
+        });
+      });
+      root.querySelectorAll('[data-tag]').forEach(function (btn) {
+        on(btn, 'click', function () {
+          const value = btn.getAttribute('data-tag');
+          const i = formState.tags.indexOf(value);
+          if (i >= 0) formState.tags.splice(i, 1); else formState.tags.push(value);
+          btn.classList.toggle('selected');
+        });
+      });
+      const saveBtn = document.getElementById('save-eval');
+      if (saveBtn) {
+        saveBtn.disabled = !saveEnabled();
+        on(saveBtn, 'click', function () {
+          if (saveBtn.disabled) return;
+          saveBtn.disabled = true;
+          (async function () {
+            try {
+              const shop = await createProspectShopV2({
                 name: formState.name,
                 routeId: formState.routeId,
                 neighborhoodId: formState.neighborhoodId,
                 locationId: formState.locationId,
+                profile: formState.profile,
+                businessType: formState.businessType,
                 answers: formState.answers,
                 tags: formState.tags,
               });
@@ -341,18 +406,39 @@
               }
               showToast('مغازه ثبت شد');
               navigateToProspect(shop.id, { justCreated: true });
+            } catch (e) {
+              console.error(e);
+              showToast('خطا در ذخیره');
+              saveBtn.disabled = false;
             }
-          } catch (e) {
-            console.error(e);
-            showToast('خطا در ذخیره');
-            saveBtn.disabled = false;
-          }
-        })();
-      };
-      saveBtn.onclick = saveHandler;
+          })();
+        });
+      }
+    } else {
+      // Question step
+      on(document.getElementById('eval-step-back'), 'click', function () {
+        const qIdx = formState.step - STEP_Q_FIRST;
+        goToStep(qIdx === 0 ? STEP_TYPE : formState.step - 1);
+        drawEvaluation(root);
+      });
+      root.querySelectorAll('.eval-q-opt').forEach(function (btn) {
+        on(btn, 'click', function () {
+          const qid = btn.getAttribute('data-qid');
+          const value = btn.getAttribute('data-value');
+          formState.answers[qid] = value;
+          root.querySelectorAll('[data-qid="' + qid + '"]').forEach(function (b) {
+            b.classList.toggle('selected', b.getAttribute('data-value') === value);
+          });
+          // Auto-advance to next question (or summary after last) — same
+          // brief-delay pattern the legacy Evaluation used, so the tap
+          // feedback stays visible before the view changes (spec §22).
+          setTimeout(function () {
+            goToStep(formState.step + 1);
+            drawEvaluation(root);
+          }, 180);
+        });
+      });
     }
-
-    updateLive();
   }
 
   function mount(root, params) {
@@ -362,72 +448,33 @@
     const nav = document.getElementById('nav');
     if (nav) nav.style.display = '';
 
-    // Reset form state
-    const shopId = params && params.shopId ? params.shopId : null;
-    if (shopId) {
-      const shop = prospectState.shops.find(s => s.id === shopId);
-      if (shop) {
-        formState.mode = 'visit';
-        formState.shopId = shopId;
-        formState.name = shop.name;
-        formState.routeId = shop.routeId;
-        formState.neighborhoodId = shop.neighborhoodId;
-        formState.locationId = shop.locationId || null;
-      } else {
-        formState.mode = 'new';
-        formState.shopId = null;
-        formState.name = '';
-        formState.routeId = null;
-        formState.neighborhoodId = null;
-        applyLocationToFormState(getWorkingEvaluationLocation());
-      }
-    } else {
-      formState.mode = 'new';
-      formState.shopId = null;
-      formState.name = '';
-      formState.routeId = null;
-      formState.neighborhoodId = null;
-      applyLocationToFormState(getWorkingEvaluationLocation());
-    }
-    formState.answers = {};
-    formState.tags = [];
-    formState.currentQuestionIndex = 0;
-    formState.showSummary = false;
+    // This view only creates NEW prospects (spec §4, §13: re-visiting an
+    // existing prospect is a lightweight Follow-up Visit, handled from the
+    // Prospect Detail view instead of here).
+    formState = {
+      name: '',
+      routeId: null,
+      neighborhoodId: null,
+      locationId: null,
+      profile: null,
+      businessType: null,
+      answers: {},
+      tags: [],
+      step: STEP_PROFILE,
+    };
+    applyLocationToFormState(getWorkingEvaluationLocation());
 
     drawEvaluation(root);
-
-    refreshToken = ViewHost.setRefresh(()=>drawEvaluation(root));
-
-
+    refreshToken = ViewHost.setRefresh(function () { drawEvaluation(root); });
 
     return function unmount() {
       ViewHost.clearRefresh(refreshToken);
       refreshToken = null;
-      // Remove all event listeners
-      routeHandlers.forEach(function (h) {
-        try { h.el.removeEventListener('click', h.handler); } catch (e) {}
-      });
-      routeHandlers = [];
-
-      questionHandlers.forEach(function (h) {
-        try { h.el.removeEventListener('click', h.handler); } catch (e) {}
-      });
-      questionHandlers = [];
-
-      tagHandlers.forEach(function (h) {
-        try { h.el.removeEventListener('click', h.handler); } catch (e) {}
-      });
-      tagHandlers = [];
-
+      clearHandlers();
       if (window.__evalLocationCleanup) {
         try { window.__evalLocationCleanup(); } catch (e) {}
         window.__evalLocationCleanup = null;
       }
-      if (saveHandler) {
-        const btn = document.getElementById('save-eval');
-        if (btn) btn.onclick = null;
-      }
-      saveHandler = null;
       root.innerHTML = '';
     };
   }
