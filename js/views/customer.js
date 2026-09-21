@@ -551,7 +551,11 @@
               '<span class="filler"></span>' +
               '<span class="amount">' +
               toman(p.amount) +
-              ' ت</span></div>'
+              ' ت' +
+              (p.invoiceId || p.method === 'return' || !['cash','card','transfer','discount'].includes(p.method)
+                ? ''
+                : '<br><button type="button" class="btn small secondary" data-edit-standalone-payment="' + esc(p.id) + '">ویرایش / حذف</button>') +
+              '</span></div>'
             );
           })
           .join('')
@@ -910,6 +914,12 @@
       '<a class="btn small secondary" href="#/visits">همه ویزیت‌ها</a>' +
       '</div>' +
       '<div class="customer-tx-list customer-visit-list">' + visitRows + '</div>';
+
+    root.querySelectorAll('[data-edit-standalone-payment]').forEach(function (btn) {
+      btn.onclick = function () {
+        openEditStandalonePayment(c.id, btn.getAttribute('data-edit-standalone-payment'));
+      };
+    });
 
     document.getElementById('act-invoice').onclick = function () {
       openAddInvoice(c.id);
