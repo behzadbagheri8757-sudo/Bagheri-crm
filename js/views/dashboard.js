@@ -91,16 +91,16 @@
      come from calculateAllCustomerActions() as-is. This function only
      looks up the customer's name (read-only) and renders the existing
      dashboard-block/ledger-row markup used elsewhere on this page. */
-  function todaysActionsHtml() {
+  function todaysActionsHtml(ctx) {
     // Prefer unified queue; fall back to legacy customer-only actions.
     let items = [];
     try {
       if (typeof calculateAllActions === 'function') {
-        items = (calculateAllActions() || []).filter(function (a) {
+        items = (calculateAllActions(ctx) || []).filter(function (a) {
           return a && a.actionType !== 'no_action';
         });
       } else if (typeof calculateAllCustomerActions === 'function') {
-        items = (calculateAllCustomerActions() || []).filter(function (a) {
+        items = (calculateAllCustomerActions(ctx) || []).filter(function (a) {
           return a && a.actionType !== 'no_action';
         });
       }
@@ -216,7 +216,7 @@
     return String(n).replace(/[0-9]/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'[d]; });
   }
 
-  function watchSummaryHtml() {
+  function watchSummaryHtml(ctx) {
     var count = 0;
     var haveCount = false;
 
@@ -234,7 +234,7 @@
       // Fallback when lifecycle module not loaded (mirrors prior behavior)
       var customers = data.customers.filter(function (c) { return c && c.active !== false; });
       for (var ci = 0; ci < customers.length; ci++) {
-        try { count += (extractWatchObservations(customers[ci].id) || []).length; } catch (e) { /* skip */ }
+         try { count += (extractWatchObservations(customers[ci].id, undefined, ctx) || []).length; } catch (e) { /* skip */ }
       }
       haveCount = true;
     }
@@ -253,13 +253,15 @@
       '</div>';
   }
 
-  function recentInvoicesHtml() {
+  function recentInvoicesHtml(ctx) {
     const invs = (data.invoices || []).slice().sort(function (a, b) {
       return (b.date || '').localeCompare(a.date || '') || String(b.number || '').localeCompare(String(a.number || ''));
     }).slice(0, 5);
     if (!invs.length) return '';
     const rows = invs.map(function (inv) {
-      const cust = (data.customers || []).find(function (c) { return c.id === inv.customerId; });
+      const cust = ctx && typeof ctx.customerById === 'function'
+        ? ctx.customerById(inv.customerId)
+        : (data.customers || []).find(function (c) { return c.id === inv.customerId; });
       return '<a class="ledger-row" href="#/invoice?id=' + encodeURIComponent(inv.id) + '"><span class="name">فاکتور #' + esc(String(inv.number || '')) + '<span class="sub">' + esc(cust ? cust.name : '—') + ' — ' + faDate(inv.date) + '</span></span><span class="filler"></span><span class="amount">' + money(inv.total) + '</span></a>';
     }).join('');
     /* Inner section only — parent .dash-activity-group provides the surface */
@@ -389,13 +391,13 @@
     try { return Number(value).toLocaleString('fa-IR'); } catch(e) { return String(value || ''); }
   }
 
-  async function renderInto(root, isStale) {
+  async function renderInto(root, isStale, ctx) {
     // Lifecycle reconcile before painting Watch summary (additive; fail-open)
     if (typeof reconcileWatchLifecycle === 'function') {
-      try { await reconcileWatchLifecycle(); } catch (eRec) { console.warn('watch lifecycle reconcile failed', eRec); }
+      try { await reconcileWatchLifecycle(null, ctx); } catch (eRec) { console.warn('watch lifecycle reconcile failed', eRec); }
     }
-    const metrics = typeof commandCenterMetrics === 'function' ? commandCenterMetrics(new Date()) : { mtdSales: globalTotals().monthSales, mtdProfit: 0, salesDeltaPct: null, profitDeltaPct: null };
-    const g = globalTotals();
+    const metrics = typeof commandCenterMetrics === 'function' ? commandCenterMetrics(new Date(), ctx) : { mtdSales: globalTotals(ctx).monthSales, mtdProfit: 0, salesDeltaPct: null, profitDeltaPct: null };
+    const g = globalTotals(ctx);
     const invVal = inventoryValue();
     if (typeof isStale === 'function' && isStale()) return;
 
@@ -405,8 +407,8 @@
          C. Quick Actions — tools (de-emphasized)
          D. Recent Activity — invoices + visits (one activity surface)
          Data sources, helpers, IDs, and event bindings are unchanged. */
-    const focusActions = todaysActionsHtml();
-    const activityInvoices = recentInvoicesHtml();
+     const focusActions = todaysActionsHtml(ctx);
+     const activityInvoices = recentInvoicesHtml(ctx);
     const activityVisits = recentVisitsHtml();
     const activityBody = activityInvoices + activityVisits;
     const activityBlock = activityBody
@@ -443,7 +445,7 @@
       activityBlock +
       '</div>';
 
-    bindMonthlyTarget(root, function () { renderInto(root, isStale); });
+     bindMonthlyTarget(root, function () { renderInto(root, isStale, ctx); });
     bindActionQueueToggle(root);
     bindQuickActions(root);
   }
@@ -456,7 +458,10 @@
     let refreshToken = null;
     const isStale = function () { return cancelled; };
     function refreshDashboard() {
-      renderInto(root, isStale).catch(function (e) { if (!cancelled) console.error('DashboardView refresh failed', e); });
+      var ctx = typeof createComputationContext === 'function'
+        ? createComputationContext({ data: data })
+        : null;
+      renderInto(root, isStale, ctx).catch(function (e) { if (!cancelled) console.error('DashboardView refresh failed', e); });
     }
     refreshDashboard();
     if (typeof ViewHost !== 'undefined' && ViewHost.setRefresh) refreshToken = ViewHost.setRefresh(refreshDashboard);

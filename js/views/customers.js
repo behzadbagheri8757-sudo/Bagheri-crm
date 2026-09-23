@@ -30,11 +30,12 @@
      Read-only use of the existing frozen Priority Engine; no new
      scoring, no new thresholds (see spec §9.6 performance rule). */
   let custPriorityMap = null;
+  let custCtx = null;
   function buildPriorityLookup() {
     const map = Object.create(null);
     if (typeof calculateAllCustomerPriorities !== 'function') return map;
     let list = [];
-    try { list = calculateAllCustomerPriorities() || []; } catch (e) { return map; }
+    try { list = calculateAllCustomerPriorities(custCtx) || []; } catch (e) { return map; }
     list.forEach(function (p) { if (p && p.customerId) map[p.customerId] = p; });
     return map;
   }
@@ -60,7 +61,7 @@
     }
 
     rows = rows.map(function (c) {
-      return { c: c, t: customerTotals(c.id) };
+      return { c: c, t: customerTotals(c.id, custCtx) };
     });
 
     if (custFilter === 'debt') rows = rows.filter(function (x) { return x.t.balance > 0; });
@@ -110,16 +111,17 @@
         const riskLevel = pr ? pr.riskLevel : null;
         const riskCls = riskLevel ? 'radar-risk-' + riskLevel : '';
         const behavior = (typeof customerBehavior === 'function')
-          ? (function(){ try { return customerBehavior(c.id) || {}; } catch(e){ return {}; } })()
+          ? (function(){ try { return customerBehavior(c.id, custCtx) || {}; } catch(e){ return {}; } })()
           : {};
         const watchCount = (typeof getActiveWatchOccurrences === 'function')
           ? (function(){ try { return (getActiveWatchOccurrences(c.id) || []).length; } catch(e){ return 0; } })()
           : 0;
-        const status = (typeof customerStatus === 'function') ? customerStatus(c.id) : null;
+        const status = (typeof customerStatus === 'function') ? customerStatus(c.id, custCtx) : null;
 
         let badgeLabel = 'فعال';
         let badgeTone = 'neutral';
-        if (riskLevel === 'critical') { badgeLabel = 'فوری'; badgeTone = 'danger'; }
+        if (c.active === false) { badgeLabel = 'غیرفعال'; badgeTone = 'muted'; }
+        else if (riskLevel === 'critical') { badgeLabel = 'فوری'; badgeTone = 'danger'; }
         else if (riskLevel === 'high') { badgeLabel = 'پیگیری'; badgeTone = 'warning'; }
         else if (behavior.behindPattern === true) { badgeLabel = 'عقب‌افتاده'; badgeTone = 'warning'; }
         else if (status === 'lost') { badgeLabel = 'از دست رفته'; badgeTone = 'muted'; }
@@ -128,7 +130,7 @@
         else if (status === 'active') { badgeLabel = 'فعال'; badgeTone = 'success'; }
 
         const days = (typeof customerStats === 'function')
-          ? (function(){ try { return customerStats(c.id).daysSinceLast; } catch(e){ return Infinity; } })()
+        ? (function(){ try { return customerStats(c.id, custCtx).daysSinceLast; } catch(e){ return Infinity; } })()
           : Infinity;
         const daysText = Number.isFinite(days)
           ? ('آخرین خرید: ' + Math.max(0, Math.round(days)) + ' روز پیش')
@@ -306,6 +308,9 @@
     custFilter = (params && ['debt', 'settled', 'credit'].indexOf(params.filter) !== -1) ? params.filter : 'all';
     custSortByDebt = false;
     locFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
+    custCtx = typeof createComputationContext === 'function'
+      ? createComputationContext({ data: data })
+      : null;
     custPriorityMap = null; // fresh on entering the page
     drawCustomersPage(root);
 
@@ -313,6 +318,9 @@
     // change risk/story output — invalidate the cache then, not on every
     // keystroke render.
     refreshToken = ViewHost.setRefresh(function () {
+      custCtx = typeof createComputationContext === 'function'
+        ? createComputationContext({ data: data })
+        : null;
       custPriorityMap = null;
       renderCustomerListOnly();
     });
@@ -321,6 +329,7 @@
     return function unmount() {
       ViewHost.clearRefresh(refreshToken);
       refreshToken = null;
+      custCtx = null;
       if (searchHandler) {
         const se = document.getElementById('customer-search');
         if (se) se.removeEventListener('input', searchHandler);

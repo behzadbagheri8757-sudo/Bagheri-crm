@@ -197,6 +197,7 @@
     }
 
     const opts = data.customers
+      .filter(c => c.active !== false)
       .slice()
       .sort((a, b) =>
         (a.name || '').localeCompare(b.name || '', 'fa')

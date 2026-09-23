@@ -209,16 +209,22 @@
 
     var nav = document.getElementById('nav');
     if (nav) nav.style.display = '';
+    var ctx = typeof createComputationContext === 'function'
+      ? createComputationContext({ data: data })
+      : null;
 
     function refresh() {
       if (cancelled) return;
+      ctx = typeof createComputationContext === 'function'
+        ? createComputationContext({ data: data })
+        : null;
       renderWatchList(root);
     }
 
     // Reconcile first (existing lifecycle logic; fail-open) so a direct
     // deep link to #/watches shows current data, same as the Dashboard does.
     if (typeof reconcileWatchLifecycle === 'function') {
-      reconcileWatchLifecycle().then(refresh).catch(function (e) {
+      reconcileWatchLifecycle(null, ctx).then(refresh).catch(function (e) {
         console.warn('watch lifecycle reconcile failed', e);
         refresh();
       });
@@ -292,14 +298,20 @@
 
     var nav = document.getElementById('nav');
     if (nav) nav.style.display = '';
+    var ctx = typeof createComputationContext === 'function'
+      ? createComputationContext({ data: data })
+      : null;
 
     function refresh() {
       if (cancelled) return;
+      ctx = typeof createComputationContext === 'function'
+        ? createComputationContext({ data: data })
+        : null;
       renderWatchDetail(root, detailOccId);
     }
 
     if (typeof reconcileWatchLifecycle === 'function') {
-      reconcileWatchLifecycle().then(refresh).catch(function (e) {
+      reconcileWatchLifecycle(null, ctx).then(refresh).catch(function (e) {
         console.warn('watch lifecycle reconcile failed', e);
         refresh();
       });

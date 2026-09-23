@@ -95,7 +95,7 @@
         <div class="btn-row"><a class="btn secondary" href="#/customers">رفتن به مشتریان</a></div>`);
       return;
     }
-    const opts = data.customers.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','fa'))
+    const opts = data.customers.filter(c => c.active !== false).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','fa'))
       .map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
     openSheet(`
       <h3>فاکتور جدید</h3>
