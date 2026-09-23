@@ -27,12 +27,14 @@
    scrollY 1:1 and reverses identically. Removed the now-duplicate "داشبورد"
    <h2> inside Dashboard's own content — the header already shows it as the
    page title since the brand-name/page-title fix) */
+/* CHANGED: v63 -> v64 (Computation Bank is now part of the offline app shell. Added js/computation-bank.js to PRECACHE_URLS and bumped the shell cache version so the execution-scoped bank is available offline. No business logic changed.)
+   */
 /* CHANGED: v61 -> v62 (offline-shell fix only: css/shamsi-calendar.css and
    js/shamsi-calendar.js are loaded by index.html on every page load but were
    missing from PRECACHE_URLS, so a freshly-activated cache version had no
    guarantee they'd be cached before the first offline use. Added both to the
    precache list; no other asset, route, or business logic touched.) */
-const CACHE_NAME = 'baqeri-shell-v63';
+const CACHE_NAME = 'baqeri-shell-v64';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
@@ -48,6 +50,7 @@ const PRECACHE_URLS = [
   './js/db.js',
   './js/location.js',
   './js/calc.js',
+  './js/computation-bank.js',
   './js/stock.js',
   './js/backup.js',
   './js/pin-lock.js',
