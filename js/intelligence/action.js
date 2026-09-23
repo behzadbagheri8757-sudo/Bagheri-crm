@@ -189,12 +189,12 @@
     return null; // positive stock is not actionable context for the allowed samples
   }
 
-  function visitContext(customerId) {
+  function visitContext(customerId, ctx) {
     if (!customerId) return null;
     // Prefer existing visitOverdueDays helper when present
     if (typeof visitOverdueDays === 'function') {
       try {
-        var overdue = visitOverdueDays(customerId);
+        var overdue = visitOverdueDays(customerId, ctx);
         if (overdue != null && isFinite(overdue) && overdue > 0) {
           // "ویزیت نزدیک" only when slightly overdue / due soon — keep short
           if (overdue <= 7) return 'در ویزیت بعدی';
@@ -206,8 +206,8 @@
     // Fallback: visitCadence + last visit if both available
     if (typeof visitCadence === 'function' && typeof customerBehavior === 'function' && typeof daysAgo === 'function') {
       try {
-        var cadence = visitCadence(customerId);
-        var b = customerBehavior(customerId);
+        var cadence = visitCadence(customerId, ctx);
+        var b = customerBehavior(customerId, ctx);
         if (cadence && b && b.lastVisit && b.lastVisit.date) {
           var days = daysAgo(b.lastVisit.date);
           if (days != null && isFinite(days) && days >= 0) {
@@ -245,7 +245,7 @@
     return null;
   }
 
-  function _applyCurrentContextFilter(cid, signals) {
+  function _applyCurrentContextFilter(cid, signals, ctx) {
     if (!Array.isArray(signals) || !signals.length) return signals || [];
 
     const skuCategories = {
@@ -257,7 +257,9 @@
     };
 
     let customer = null;
-    if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
+    if (ctx && typeof ctx.customerById === 'function') {
+      customer = ctx.customerById(cid);
+    } else if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
       for (let i = 0; i < data.customers.length; i++) {
         if (data.customers[i] && data.customers[i].id === cid) {
           customer = data.customers[i];
@@ -342,14 +344,21 @@
     });
   }
 
-  function calculateCustomerAction(cid, precomputedPriority, opts) {
+  function calculateCustomerAction(cid, precomputedPriority, opts, skipMemo) {
+    opts = opts || {};
+    var ctx = opts.ctx || null;
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('customerActions', cid, function () {
+        return calculateCustomerAction(cid, precomputedPriority, opts, true);
+      });
+    }
     const priority = precomputedPriority || (
       (typeof calculateCustomerPriority === 'function')
         ? calculateCustomerPriority(cid, opts)
         : { customerId: cid, priorityScore: 0, riskLevel: 'low', signals: [] }
     );
 
-    const actionCandidates = _applyCurrentContextFilter(cid, priority.signals);
+    const actionCandidates = _applyCurrentContextFilter(cid, priority.signals, ctx);
     const winner = _pickActionSignal(actionCandidates);
 
     if (!winner) {
@@ -378,7 +387,7 @@
     // P-07: append real operational contexts only (short, non-duplicative).
     var contexts = [];
     var sc = stockContext(winner.productId);
-    var vc = visitContext(cid);
+    var vc = visitContext(cid, ctx);
     var fc = feedbackContext(winner);
     if (sc) contexts.push(sc);
     if (vc) contexts.push(vc);
@@ -396,7 +405,7 @@
       story = priority.customerStory;
     } else if (typeof buildCustomerStory === 'function') {
       try {
-        story = buildCustomerStory(cid);
+        story = buildCustomerStory(cid, ctx);
       } catch (eSt) {
         story = null;
       }
@@ -419,12 +428,17 @@
   const URGENCY_SCORE = { critical: 40, high: 30, medium: 20, low: 10 };
   const PROSPECT_IMPACT = { 'A+': 30, 'A': 20, 'B': 10, 'C': 0, 'D': 0 };
 
-  function calculateAllCustomerActions() {
+  function calculateAllCustomerActions(ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('allCustomerActions', 'all', function () {
+        return calculateAllCustomerActions(ctx, true);
+      });
+    }
     if (typeof data === 'undefined' || !Array.isArray(data.customers)) return [];
-    const economicRankMap = (typeof _buildEconomicRankMap === 'function') ? _buildEconomicRankMap() : null;
+    const economicRankMap = (typeof _buildEconomicRankMap === 'function') ? _buildEconomicRankMap(ctx) : null;
     const customers = data.customers.filter(function (c) { return c && c.active !== false; });
     const results = customers.map(function (c) {
-      return calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap });
+      return calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap, ctx: ctx });
     });
     results.sort(function (a, b) {
       const ua = URGENCY_RANK[a.urgency] || 0;
@@ -435,7 +449,12 @@
     return results;
   }
 
-  function _customerImpactMap() {
+  function _customerImpactMap(ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('customerImpactMap', 'all', function () {
+        return _customerImpactMap(ctx, true);
+      });
+    }
     const map = Object.create(null);
     if (typeof data === 'undefined' || !Array.isArray(data.customers)) return map;
     if (typeof customerTotals !== 'function') {
@@ -449,7 +468,7 @@
       if (!c || c.active === false) return;
       let invTotal = null;
       try {
-        const t = customerTotals(c.id);
+        const t = customerTotals(c.id, ctx);
         if (t && typeof t.invTotal === 'number' && isFinite(t.invTotal)) invTotal = t.invTotal;
       } catch (e) {}
       rows.push({ id: c.id, invTotal: invTotal });
@@ -470,19 +489,19 @@
     return map;
   }
 
-  function _customerTiming(cid) {
-    const overdue = (typeof visitOverdueDays === 'function') ? visitOverdueDays(cid) : 0;
+  function _customerTiming(cid, ctx) {
+    const overdue = (typeof visitOverdueDays === 'function') ? visitOverdueDays(cid, ctx) : 0;
     if (overdue > 14) return 30;
     if (overdue > 7) return 25;
     return 10;
   }
 
-  function _customerWhyNow(cid) {
-    const overdue = (typeof visitOverdueDays === 'function') ? visitOverdueDays(cid) : 0;
+  function _customerWhyNow(cid, ctx) {
+    const overdue = (typeof visitOverdueDays === 'function') ? visitOverdueDays(cid, ctx) : 0;
     if (overdue > 0) return 'ویزیت ' + Math.round(overdue) + ' روز عقب‌افتاده';
     if (typeof customerBehavior === 'function') {
       try {
-        const b = customerBehavior(cid);
+        const b = customerBehavior(cid, ctx);
         if (b && b.lastVisit && b.lastVisit.date && typeof daysAgo === 'function') {
           const d = daysAgo(b.lastVisit.date);
           if (d != null && isFinite(d) && d !== Infinity) {
@@ -545,22 +564,27 @@
     return out;
   }
 
-  function calculateAllActions() {
-    const impactMap = _customerImpactMap();
-    const economicRankMap = (typeof _buildEconomicRankMap === 'function') ? _buildEconomicRankMap() : null;
+  function calculateAllActions(ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('allActions', 'all', function () {
+        return calculateAllActions(ctx, true);
+      });
+    }
+    const impactMap = _customerImpactMap(ctx);
+    const economicRankMap = (typeof _buildEconomicRankMap === 'function') ? _buildEconomicRankMap(ctx) : null;
     const actions = [];
 
     if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
       data.customers.forEach(function (c) {
         if (!c || c.active === false) return;
-        const base = calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap });
+        const base = calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap, ctx: ctx });
         if (!base || base.actionType === 'no_action') return;
 
         const urgencyPts = URGENCY_SCORE[base.urgency] || 10;
         const impactPts = impactMap[c.id] != null ? impactMap[c.id] : 15;
-        const timingPts = _customerTiming(c.id);
+        const timingPts = _customerTiming(c.id, ctx);
         const unifiedScore = urgencyPts + impactPts + timingPts;
-        const whyNow = _customerWhyNow(c.id);
+        const whyNow = _customerWhyNow(c.id, ctx);
 
         actions.push({
           type: 'customer',

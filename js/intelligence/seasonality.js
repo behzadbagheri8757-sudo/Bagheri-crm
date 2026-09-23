@@ -103,7 +103,13 @@
    * Returns { months: { 'YYYY-MM': amount }, spanMonths, overallMean, byCalMonth: {1..12: mean} }
    * or null if insufficient.
    */
-  function _buildMonthlySeries(customerId, productId) {
+  function _buildMonthlySeries(customerId, productId, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      var _key = String(customerId) + '|' + String(productId == null ? '' : productId);
+      return ctx.memo('monthlySeries', _key, function(){
+        return _buildMonthlySeries(customerId, productId, ctx, true);
+      });
+    }
     if (typeof data === 'undefined' || !Array.isArray(data.invoices)) return null;
     var byMonth = Object.create(null);
     var minDate = null;
@@ -170,9 +176,9 @@
   /**
    * @returns {number} 0 neutral; (0,1] strength of historical seasonal low for this month
    */
-  function getSeasonalFactor(customerId, productId, date) {
+  function getSeasonalFactor(customerId, productId, date, ctx) {
     if (!customerId) return 0;
-    var series = _buildMonthlySeries(customerId, productId != null ? productId : null);
+    var series = _buildMonthlySeries(customerId, productId != null ? productId : null, ctx);
     if (!series) return 0;
 
     var cm = _calendarMonth(date || (typeof todayISO === 'function' ? todayISO() : new Date().toISOString()));
@@ -200,7 +206,7 @@
    * Non-decline signals are left unchanged.
    * Never changes status, sourceLevel, or baseline.
    */
-  function adjustSignalForSeasonality(signal) {
+  function adjustSignalForSeasonality(signal, ctx) {
     if (!signal || !_isDeclineSignal(signal)) return signal;
     // Idempotent: do not adjust the same signal twice
     if (signal.seasonalFactor !== undefined || signal.seasonallySuppressed !== undefined) {
@@ -211,7 +217,7 @@
     var pid = signal.productId != null ? signal.productId : null;
     var when = signal.detectedAt || (typeof todayISO === 'function' ? todayISO() : new Date().toISOString());
 
-    var factor = getSeasonalFactor(cid, pid, when);
+    var factor = getSeasonalFactor(cid, pid, when, ctx);
     signal.seasonalFactor = factor;
 
     if (!(factor > 0)) {

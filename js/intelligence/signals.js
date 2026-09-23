@@ -231,9 +231,9 @@
   /* ---------------------------------------------------------
      8: LONG_NO_VISIT
      --------------------------------------------------------- */
-  function _longNoVisitSignal(cid, b, out) {
+  function _longNoVisitSignal(cid, b, out, ctx) {
     // Fallback only when visit cadence is unavailable.
-    if (typeof visitCadence === 'function' && visitCadence(cid)) return;
+    if (typeof visitCadence === 'function' && visitCadence(cid, ctx)) return;
     if (!b.lastVisit) return;
     if (b.invoiceCount < 2) return;
 
@@ -260,9 +260,9 @@
      Buffer = min(7, cadence * 0.5). Does not replace LONG_NO_VISIT
      fallback for customers without cadence.
      --------------------------------------------------------- */
-  function _visitOverdueSignal(cid, b, out) {
+  function _visitOverdueSignal(cid, b, out, ctx) {
     if (typeof visitCadence !== 'function') return;
-    const cadence = visitCadence(cid);
+    const cadence = visitCadence(cid, ctx);
     if (!cadence) return;
 
     let daysSince = null;
@@ -270,8 +270,12 @@
       daysSince = (typeof daysAgo === 'function') ? daysAgo(b.lastVisit.date) : null;
     }
     if (daysSince == null || !isFinite(daysSince)) {
-      if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
-        const cust = data.customers.find(function (c) { return c && c.id === cid; });
+      const cust = (ctx && typeof ctx.customerById === 'function')
+        ? ctx.customerById(cid)
+        : (typeof data !== 'undefined' && Array.isArray(data.customers)
+            ? data.customers.find(function (c) { return c && c.id === cid; })
+            : null);
+      if (cust) {
         const visits = (cust && Array.isArray(cust.visits)) ? cust.visits.slice() : [];
         if (visits.length) {
           visits.sort(function (a, b2) {
@@ -328,12 +332,14 @@
      and is non-empty. Uses data.checks + data.customers directly
      (as explicitly allowed by the spec), never mutated.
      --------------------------------------------------------- */
-  function _paymentSignals(cid, out) {
+  function _paymentSignals(cid, out, ctx) {
     if (typeof data === 'undefined' || !Array.isArray(data.checks) || data.checks.length === 0) {
       return;
     }
     const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0, 10);
-    const custChecks = data.checks.filter(function (c) { return c && c.customerId === cid; });
+    const custChecks = (typeof customerChecks === 'function')
+      ? customerChecks(cid, ctx)
+      : data.checks.filter(function (c) { return c && c.customerId === cid; });
     if (!custChecks.length) return;
 
     const bounced = custChecks.filter(function (c) { return c.status === 'bounced'; });
@@ -372,12 +378,17 @@
   /* ---------------------------------------------------------
      Main entry point
      --------------------------------------------------------- */
-  function extractCustomerSignals(cid) {
+  function extractCustomerSignals(cid, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('customerSignals', cid, function () {
+        return extractCustomerSignals(cid, ctx, true);
+      });
+    }
     const out = [];
     if (!cid) return out;
     if (typeof customerBehavior !== 'function') return out;
 
-    const b = customerBehavior(cid);
+    const b = customerBehavior(cid, ctx);
     if (!b) return out;
 
     // Signals 1-3 require at least a comparable previous-30-day baseline;
@@ -388,14 +399,14 @@
     _consecutiveNoOrderSignal(cid, b, out);
     _basketShrinkSignal(cid, b, out);
     _keyProductLostSignal(cid, b, out);
-    _visitOverdueSignal(cid, b, out);
-    _longNoVisitSignal(cid, b, out);
+    _visitOverdueSignal(cid, b, out, ctx);
+    _longNoVisitSignal(cid, b, out, ctx);
     _visitConversionLowSignal(cid, b, out);
 
     // openingBalance is intentionally never inspected here — signals are
     // based only on actual recorded behavior (invoices/visits/checks),
     // never on the pre-existing opening balance itself (spec #7).
-    _paymentSignals(cid, out);
+    _paymentSignals(cid, out, ctx);
 
     // ------------------------------------------------------------------
     // PATCH: Product Gap ≠ Account Risk by default.
@@ -438,13 +449,13 @@
     var skuSignals = [];
     if (typeof extractSkuSignals === 'function') {
       try {
-        skuSignals = extractSkuSignals(cid) || [];
+        skuSignals = extractSkuSignals(cid, ctx) || [];
       } catch (eSku) {
         skuSignals = [];
       }
     }
     if (skuSignals.length) {
-      _dedupeSkuAgainstAccountSignals(out, skuSignals);
+        _dedupeSkuAgainstAccountSignals(out, skuSignals, ctx);
       for (var si = 0; si < skuSignals.length; si++) {
         if (skuSignals[si]) {
           // P-01: guarantee sourceLevel on SKU-origin signals (sku_intelligence
@@ -492,7 +503,7 @@
     if (typeof adjustSignalForSeasonality === 'function') {
       try {
         for (var sei = 0; sei < out.length; sei++) {
-          if (out[sei]) adjustSignalForSeasonality(out[sei]);
+          if (out[sei]) adjustSignalForSeasonality(out[sei], ctx);
         }
       } catch (eSea) { /* fail-open */ }
     }
@@ -503,7 +514,7 @@
   /* F4 — KEY_PRODUCT_LOST / BASKET_SHRINK deduplication against SKU signals.
      Mutates accountSignals in place; may filter skuSignals array length by
      leaving suppressed account signals removed from accountSignals. */
-  function _dedupeSkuAgainstAccountSignals(accountSignals, skuSignals) {
+  function _dedupeSkuAgainstAccountSignals(accountSignals, skuSignals, ctx) {
     if (!accountSignals || !skuSignals || !skuSignals.length) return;
 
     var skuProductIds = Object.create(null);
@@ -543,7 +554,7 @@
         var remainingCount = 0;
         if (typeof customerBehavior === 'function') {
           try {
-            var b = customerBehavior(s.customerId);
+            var b = customerBehavior(s.customerId, ctx);
             var declining = (b && Array.isArray(b.decliningProducts)) ? b.decliningProducts : [];
             var lost = declining.filter(function (p) {
               return p && p.earlyQty >= 5 && p.lateQty === 0;
@@ -617,9 +628,9 @@
     return (p && p.name) ? p.name : (pid || '');
   }
 
-  function _watchRawInvoiceSplit(cid) {
+  function _watchRawInvoiceSplit(cid, ctx) {
     if (typeof customerInvoices !== 'function') return null;
-    var invs = customerInvoices(cid).slice().sort(function (a, b) {
+    var invs = customerInvoices(cid, ctx).slice().sort(function (a, b) {
       return String(a.date || '').localeCompare(String(b.date || ''));
     });
     var count = invs.length;
@@ -696,8 +707,8 @@
      "Meaningful decline" per product: earlyQty >= 2 and lateQty <= earlyQty*0.5
      — chosen independently of calc.js's decliningProducts thresholds
      (which require invoiceCount>=4, earlyQty>=2, lateQty<earlyQty*0.6). */
-  function _basketShrinkWatch(cid, out) {
-    var split = _watchRawInvoiceSplit(cid);
+  function _basketShrinkWatch(cid, out, ctx) {
+    var split = _watchRawInvoiceSplit(cid, ctx);
     if (!split) return;
     var earlyKeys = Object.keys(split.early);
     var decliningCount = 0;
@@ -722,8 +733,8 @@
      given by spec: earlyQty >= 3, lateQty === 0.
      ASSUMPTION (spec gives no level bands for this rule — reported,
      not guessed silently): same medium/low convention as 6C above. */
-  function _keyProductLostWatch(cid, out) {
-    var split = _watchRawInvoiceSplit(cid);
+  function _keyProductLostWatch(cid, out, ctx) {
+    var split = _watchRawInvoiceSplit(cid, ctx);
     if (!split) return;
     var earlyKeys = Object.keys(split.early);
     var lostCount = 0;
@@ -765,21 +776,31 @@
      computed extractCustomerSignals(cid) this render cycle (e.g.
      customer.js, which must call both per spec §15) pass it in to
      avoid a redundant recomputation. When omitted, computed internally. */
-  function extractWatchObservations(cid, confirmedSignalsOverride) {
+  function extractWatchObservations(cid, confirmedSignalsOverride, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      // The optional confirmedSignalsOverride is part of the function input.
+      // Keep override and self-computed results in separate memo slots so a
+      // prior call cannot silently satisfy a later call with a different
+      // input shape.
+      var watchMemoKey = String(cid) + ':' + (Array.isArray(confirmedSignalsOverride) ? 'override' : 'self');
+      return ctx.memo('watchObservations', watchMemoKey, function () {
+        return extractWatchObservations(cid, confirmedSignalsOverride, ctx, true);
+      });
+    }
     var out = [];
     if (!cid) return out;
     if (typeof customerBehavior !== 'function') return out;
-    var b = customerBehavior(cid);
+    var b = customerBehavior(cid, ctx);
     if (!b) return out;
 
     _purchaseDeclineWatch(cid, b, out);
     _behindPatternWatch(cid, b, out);
-    _basketShrinkWatch(cid, out);
-    _keyProductLostWatch(cid, out);
+    _basketShrinkWatch(cid, out, ctx);
+    _keyProductLostWatch(cid, out, ctx);
 
     if (typeof extractSkuWatchObservations === 'function') {
       try {
-        var skuW = extractSkuWatchObservations(cid) || [];
+        var skuW = extractSkuWatchObservations(cid, ctx) || [];
         for (var i = 0; i < skuW.length; i++) {
           if (skuW[i]) out.push(skuW[i]);
         }
@@ -792,7 +813,7 @@
     } else {
       confirmed = [];
       if (typeof extractCustomerSignals === 'function') {
-        try { confirmed = extractCustomerSignals(cid) || []; } catch (eConf) { confirmed = []; }
+        try { confirmed = extractCustomerSignals(cid, ctx) || []; } catch (eConf) { confirmed = []; }
       }
     }
 

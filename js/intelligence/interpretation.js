@@ -91,14 +91,19 @@
    * Build a short customer story from existing Intelligence outputs.
    * @returns {{ customerId: string, summary: string, themes: object }}
    */
-  function buildCustomerStory(customerId) {
+  function buildCustomerStory(customerId, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('customerStories', customerId, function () {
+        return buildCustomerStory(customerId, ctx, true);
+      });
+    }
     var empty = { customerId: customerId, summary: '', themes: { risk: null, opportunity: null, observation: null } };
     if (!customerId) return empty;
 
     var signals = [];
     try {
       if (typeof extractCustomerSignals === 'function') {
-        signals = extractCustomerSignals(customerId) || [];
+        signals = extractCustomerSignals(customerId, ctx) || [];
       }
     } catch (e) {
       signals = [];

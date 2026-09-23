@@ -83,9 +83,14 @@
     return s.status === 'active';
   }
 
-  function calculateCustomerRisk(cid) {
+  function calculateCustomerRisk(cid, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('customerRisk', cid, function () {
+        return calculateCustomerRisk(cid, ctx, true);
+      });
+    }
     const signals = (typeof extractCustomerSignals === 'function')
-      ? (extractCustomerSignals(cid) || [])
+      ? (extractCustomerSignals(cid, ctx) || [])
       : [];
 
     const riskSignals = signals.filter(function (s) {

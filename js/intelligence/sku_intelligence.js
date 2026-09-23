@@ -120,22 +120,28 @@
     return x;
   }
 
-  function _productName(productId) {
+  function _productName(productId, ctx) {
     if (typeof data === 'undefined' || !Array.isArray(data.products)) return productId || '';
-    var p = data.products.find(function (x) { return x && x.id === productId; });
+    var p = ctx && typeof ctx.productById === 'function'
+      ? ctx.productById(productId)
+      : data.products.find(function (x) { return x && x.id === productId; });
     return (p && p.name) ? p.name : (productId || '');
   }
 
-  function _productActive(productId) {
+  function _productActive(productId, ctx) {
     if (typeof data === 'undefined' || !Array.isArray(data.products)) return true;
-    var p = data.products.find(function (x) { return x && x.id === productId; });
+    var p = ctx && typeof ctx.productById === 'function'
+      ? ctx.productById(productId)
+      : data.products.find(function (x) { return x && x.id === productId; });
     if (!p) return true;
     return p.active !== false;
   }
 
-  function _productStock(productId) {
+  function _productStock(productId, ctx) {
     if (typeof data === 'undefined' || !Array.isArray(data.products)) return null;
-    var p = data.products.find(function (x) { return x && x.id === productId; });
+    var p = ctx && typeof ctx.productById === 'function'
+      ? ctx.productById(productId)
+      : data.products.find(function (x) { return x && x.id === productId; });
     if (!p) return null;
     return typeof p.stockQty === 'number' ? p.stockQty : null;
   }
@@ -143,7 +149,10 @@
   /* ---------------------------------------------------------
      Stage 1 — Aggregation (fresh every call — F2)
      --------------------------------------------------------- */
-  function _aggregatePairMap(customerId) {
+  function _aggregatePairMap(customerId, ctx) {
+    if (ctx && ctx.aggregatePairMapCache && ctx.aggregatePairMapCache[customerId]) {
+      return ctx.aggregatePairMapCache[customerId];
+    }
     var map = Object.create(null);
     if (typeof data === 'undefined') return map;
 
@@ -221,6 +230,9 @@
       map[keys[x]].returns.sort(function (a, b) {
         return String(a.date || '').localeCompare(String(b.date || ''));
       });
+    }
+    if (ctx && ctx.aggregatePairMapCache) {
+      ctx.aggregatePairMapCache[customerId] = map;
     }
     return map;
   }
@@ -362,7 +374,7 @@
   /* ---------------------------------------------------------
      Stage 6 — Importance (F5 profit weight redistribution)
      --------------------------------------------------------- */
-  function _computeImportance(pair, historical, customerId, totalCustomerRevenue, totalCustomerProfit, totalInvoices) {
+  function _computeImportance(pair, historical, customerId, totalCustomerRevenue, totalCustomerProfit, totalInvoices, ctx) {
     var skuRevenue = 0;
     for (var i = 0; i < pair.purchases.length; i++) skuRevenue += pair.purchases[i].revenue || 0;
 
@@ -371,7 +383,7 @@
     var basketShare = 0;
     if (totalInvoices > 0) {
       var present = 0;
-      var invs = (typeof customerInvoices === 'function') ? customerInvoices(customerId) : [];
+       var invs = (typeof customerInvoices === 'function') ? customerInvoices(customerId, ctx) : [];
       for (var j = 0; j < invs.length; j++) {
         var items = invs[j].items || [];
         for (var k = 0; k < items.length; k++) {
@@ -390,9 +402,11 @@
       // Approximate SKU profit from purchase events if buyPrice present on products
       var skuProfit = 0;
       var anyBuy = false;
-      var prod = (typeof data !== 'undefined' && Array.isArray(data.products))
-        ? data.products.find(function (x) { return x && x.id === pair.productId; })
-        : null;
+      var prod = ctx && typeof ctx.productById === 'function'
+        ? ctx.productById(pair.productId)
+        : ((typeof data !== 'undefined' && Array.isArray(data.products))
+          ? data.products.find(function (x) { return x && x.id === pair.productId; })
+          : null);
       var buy = prod ? (prod.buy || prod.buyPrice || 0) : 0;
       if (buy > 0) {
         anyBuy = true;
@@ -540,10 +554,10 @@
     return false;
   }
 
-  function _accountWideDecline(customerId) {
+  function _accountWideDecline(customerId, ctx) {
     if (typeof customerBehavior !== 'function') return false;
     try {
-      var b = customerBehavior(customerId);
+      var b = customerBehavior(customerId, ctx);
       if (!b) return false;
       if (b.amountTrend === 'down') return true;
       var declining = Array.isArray(b.decliningProducts) ? b.decliningProducts : [];
@@ -603,7 +617,7 @@
   /* ---------------------------------------------------------
      Stage 9–11 — Eligibility, combination, signal build
      --------------------------------------------------------- */
-  function _analyzePair(pair, customerId, custInvs, totalRev, totalProfit, accountDecline) {
+  function _analyzePair(pair, customerId, custInvs, totalRev, totalProfit, accountDecline, ctx) {
     var historical = _computeBaseline(pair.purchases, null);
     if (historical.purchaseCount < 1) return null;
 
@@ -631,14 +645,14 @@
 
     var recent = _computeBaseline(pair.purchases, SKU_PARAMS.recentWindowSize);
     var current = _computeCurrent(pair, historical, recent, custInvs);
-    var importance = _computeImportance(pair, historical, customerId, totalRev, totalProfit, custInvs.length);
+    var importance = _computeImportance(pair, historical, customerId, totalRev, totalProfit, custInvs.length, ctx);
     var confidence = _computeConfidence(historical, recent, pair);
     var trend = _trendClass(historical, recent);
-    var stockQty = _productStock(pair.productId);
+    var stockQty = _productStock(pair.productId, ctx);
     var stockOut = (stockQty != null && stockQty <= 0);
-    var productName = _productName(pair.productId);
+    var productName = _productName(pair.productId, ctx);
 
-    if (!_productActive(pair.productId)) return null;
+    if (!_productActive(pair.productId, ctx)) return null;
 
     var candidates = [];
 
@@ -695,8 +709,7 @@
       var qtyRatio = compareQty / historical.typicalQuantity;
       // Also consider median recent event qty
       var eventRatio = recent.typicalQuantity / historical.typicalQuantity;
-      var effectiveRatio = Math.max(qtyRatio, eventRatio); // conservative: use less severe
-      // Actually for drop detection use the lower of the two (more drop) only if returns don't neutralize
+      // For drop detection use the lower of the two (more drop) only if returns don't neutralize.
       // BUGFIX (proven by runtime repro): "returnsExplain" never actually
       // checked whether any return exists for this SKU — it only compared
       // ratios. That meant a single large outlier order in the recent
@@ -893,38 +906,44 @@
   /* ---------------------------------------------------------
      Public entry: extractSkuSignals (F2 freshness)
      --------------------------------------------------------- */
-  function extractSkuSignals(customerId) {
+  function extractSkuSignals(customerId, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('skuSignals', customerId, function () {
+        return extractSkuSignals(customerId, ctx, true);
+      });
+    }
     var out = [];
     if (!customerId) return out;
     if (typeof data === 'undefined') return out;
 
-    // F2: rebuild aggregation from current data every call
-    var map = _aggregatePairMap(customerId);
+    // F2: rebuild aggregation from current data every call, unless a caller
+    // in the same execution cycle already computed it (see ctx.aggregatePairMapCache).
+    var map = _aggregatePairMap(customerId, ctx);
     var keys = Object.keys(map);
     if (!keys.length) return out;
 
-    var custInvs = (typeof customerInvoices === 'function') ? customerInvoices(customerId) : [];
+    var custInvs = (typeof customerInvoices === 'function') ? customerInvoices(customerId, ctx) : [];
     var totalRev = 0;
     try {
       if (typeof customerTotals === 'function') {
-        var t = customerTotals(customerId);
+        var t = customerTotals(customerId, ctx);
         if (t && typeof t.invTotal === 'number') totalRev = t.invTotal;
       }
     } catch (e) {}
     var totalProfit = null;
     try {
       if (typeof customerProfit === 'function') {
-        totalProfit = customerProfit(customerId);
+        totalProfit = customerProfit(customerId, ctx);
       }
     } catch (e2) {}
 
-    var accountDecline = _accountWideDecline(customerId);
+    var accountDecline = _accountWideDecline(customerId, ctx);
     var pairResults = [];
 
     for (var i = 0; i < keys.length; i++) {
       var pair = map[keys[i]];
       if (!pair.purchases.length) continue;
-      var result = _analyzePair(pair, customerId, custInvs, totalRev, totalProfit, accountDecline);
+      var result = _analyzePair(pair, customerId, custInvs, totalRev, totalProfit, accountDecline, ctx);
       if (result && result.signal) pairResults.push(result);
     }
 
@@ -1010,13 +1029,18 @@
      each rule's minimum-purchase-count gate (spec §8), and the contract
      does not forbid additional fields. Reported explicitly, not guessed
      silently. */
-  function _extractSkuRawMetrics(customerId) {
+  function _extractSkuRawMetrics(customerId, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('skuRawMetrics', customerId, function () {
+        return _extractSkuRawMetrics(customerId, ctx, true);
+      });
+    }
     var out = [];
     if (!customerId || typeof data === 'undefined') return out;
-    var map = _aggregatePairMap(customerId);
+    var map = _aggregatePairMap(customerId, ctx);
     var keys = Object.keys(map);
     if (!keys.length) return out;
-    var custInvs = (typeof customerInvoices === 'function') ? customerInvoices(customerId) : [];
+    var custInvs = (typeof customerInvoices === 'function') ? customerInvoices(customerId, ctx) : [];
 
     for (var i = 0; i < keys.length; i++) {
       var pair = map[keys[i]];
@@ -1026,7 +1050,7 @@
       // Confirmed SKU Intelligence (_analyzePair, line ~619). A product the
       // business no longer carries must not generate a Watch — the
       // underlying "delay"/"drop" would never be able to resolve.
-      if (!_productActive(pair.productId)) continue;
+      if (!_productActive(pair.productId, ctx)) continue;
 
       var historical = _computeBaseline(pair.purchases, null);
       if (historical.purchaseCount < 1) continue;
@@ -1035,7 +1059,7 @@
       // Same stock-context semantics as Confirmed: only used to suppress
       // timing/quantity-style dims below, never a full exclusion (unlike
       // the active gate above).
-      var stockQty = _productStock(pair.productId);
+      var stockQty = _productStock(pair.productId, ctx);
       var stockOut = (stockQty != null && stockQty <= 0);
 
       var eventRatio = null;
@@ -1059,7 +1083,7 @@
 
       out.push({
         productId: pair.productId,
-        productName: _productName(pair.productId),
+        productName: _productName(pair.productId, ctx),
         typicalCycle: historical.typicalCycle,
         currentGap: current.currentGap,
         eventRatio: eventRatio,
@@ -1080,11 +1104,16 @@
   }
 
   /* SKU Watch rules (spec §8) + Combined SKU Watch collapsing (spec §9). */
-  function extractSkuWatchObservations(customerId) {
+  function extractSkuWatchObservations(customerId, ctx, skipMemo) {
+    if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
+      return ctx.memo('skuWatchObservations', customerId, function () {
+        return extractSkuWatchObservations(customerId, ctx, true);
+      });
+    }
     var out = [];
     if (!customerId) return out;
     var raw;
-    try { raw = _extractSkuRawMetrics(customerId) || []; } catch (eRaw) { raw = []; }
+    try { raw = _extractSkuRawMetrics(customerId, ctx) || []; } catch (eRaw) { raw = []; }
     if (!raw.length) return out;
 
     for (var i = 0; i < raw.length; i++) {

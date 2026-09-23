@@ -50,7 +50,9 @@
   var _mem = Object.create(null);
   var _idb = null;
   var _hydrated = false;
+  var _hydratePromise = null;
   var _deferSave = false; // true while reconcileWatchLifecycle batches multiple _persist calls
+  var _idbBatchTx = null; // one IDB transaction for a reconcile batch
 
   function _nowISO() {
     return new Date().toISOString();
@@ -90,7 +92,9 @@
     try {
       if (typeof localStorage === 'undefined' || !localStorage) return;
       localStorage.setItem(WATCH_LS_KEY, JSON.stringify(_mem));
-    } catch (e) { /* quota */ }
+    } catch (e) {
+      console.error('Watch lifecycle localStorage save failed', e);
+    }
   }
 
   function _openIdb(cb) {
@@ -123,9 +127,16 @@
   function _idbPut(rec) {
     if (!_idb || !rec) return;
     try {
-      var tx = _idb.transaction(WATCH_STORE, 'readwrite');
-      tx.objectStore(WATCH_STORE).put(rec);
-    } catch (e) { /* ignore */ }
+      var tx = _idbBatchTx || _idb.transaction(WATCH_STORE, 'readwrite');
+      var req = tx.objectStore(WATCH_STORE).put(rec);
+      req.onerror = function () { console.error('Watch lifecycle IDB put failed', req.error); };
+      if (!_idbBatchTx) {
+        tx.onerror = function () { console.error('Watch lifecycle IDB transaction failed', tx.error); };
+        tx.onabort = function () { console.error('Watch lifecycle IDB transaction aborted', tx.error); };
+      }
+    } catch (e) {
+      console.error('Watch lifecycle IDB put threw', e);
+    }
   }
 
   function _idbClearAndPutAll(rows, cb) {
@@ -151,32 +162,50 @@
   function _idbHydrate(cb) {
     if (!_idb) {
       if (cb) cb();
-      return;
+      return Promise.resolve();
     }
-    try {
-      var tx = _idb.transaction(WATCH_STORE, 'readonly');
-      var req = tx.objectStore(WATCH_STORE).getAll();
-      req.onsuccess = function () {
-        var rows = req.result || [];
-        for (var i = 0; i < rows.length; i++) {
-          var row = rows[i];
-          if (row && row.id) _mem[row.id] = row;
-        }
-        _hydrated = true;
-        _saveLS();
+    if (_hydratePromise) {
+      return _hydratePromise.then(function () { if (cb) cb(); });
+    }
+    _hydratePromise = new Promise(function (resolve) {
+      try {
+        var tx = _idb.transaction(WATCH_STORE, 'readonly');
+        var req = tx.objectStore(WATCH_STORE).getAll();
+        req.onsuccess = function () {
+          var rows = req.result || [];
+          for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            if (row && row.id) _mem[row.id] = row;
+          }
+          _hydrated = true;
+          _saveLS();
+          resolve();
+          if (cb) cb();
+        };
+        req.onerror = function () {
+          console.error('Watch lifecycle IDB hydrate failed', req.error);
+          resolve();
+          if (cb) cb();
+        };
+      } catch (e) {
+        console.error('Watch lifecycle IDB hydrate threw', e);
+        resolve();
         if (cb) cb();
-      };
-      req.onerror = function () { if (cb) cb(); };
-    } catch (e) {
-      if (cb) cb();
-    }
+      }
+    });
+    return _hydratePromise;
+  }
+
+  function _ensureHydrated() {
+    if (_hydrated || !_idb) return Promise.resolve();
+    return _idbHydrate();
   }
 
   function _persist(rec) {
     if (!rec || !rec.id) return;
     _mem[rec.id] = rec;
-    if (!_deferSave) _saveLS();
     _idbPut(rec);
+    if (!_deferSave) _saveLS();
   }
 
   _loadLS();
@@ -201,9 +230,20 @@
       if (!r || r.status !== 'active') continue;
       if (customerId && String(r.customerId) !== String(customerId)) continue;
       var k = _identityKey(r.customerId, r.watchCategory, r.productId);
-      // Prefer newest if duplicate active (should not happen; safety)
-      if (!map[k] || String(r.lastEvaluatedAt || r.firstDetectedAt || '') > String(map[k].lastEvaluatedAt || map[k].firstDetectedAt || '')) {
+      var current = map[k];
+      var rTs = String(r.lastEvaluatedAt || r.firstDetectedAt || '');
+      var cTs = current ? String(current.lastEvaluatedAt || current.firstDetectedAt || '') : '';
+      if (!current) {
         map[k] = r;
+      } else if (rTs > cTs) {
+        current.status = 'resolved';
+        current.resolution = { type: 'duplicate_cleanup', resolvedAt: _nowISO(), note: null };
+        _persist(current);
+        map[k] = r;
+      } else {
+        r.status = 'resolved';
+        r.resolution = { type: 'duplicate_cleanup', resolvedAt: _nowISO(), note: null };
+        _persist(r);
       }
     }
     return map;
@@ -241,14 +281,19 @@
   // `watches` are forced empty instead of calling extractWatchObservations
   // — the auto-resolve loop then naturally clears anything of theirs that
   // was active, since it will not appear in `seenKeys`.
-  function _isCustomerActive(cid) {
+  function _isCustomerActive(cid, ctx) {
+    if (ctx && typeof ctx.customerById === 'function') {
+      var c = ctx.customerById(cid);
+      if (!c) return false;
+      return c.active !== false;
+    }
     if (typeof data === 'undefined' || !Array.isArray(data.customers)) return true;
-    var c = data.customers.find(function (x) { return x && x.id === cid; });
-    if (!c) return false; // unknown/removed customer: treat as inactive (generate nothing, allow cleanup)
-    return c.active !== false;
+    var c2 = data.customers.find(function (x) { return x && x.id === cid; });
+    if (!c2) return false;
+    return c2.active !== false;
   }
 
-  function reconcileWatchLifecycle(customerId) {
+  function reconcileWatchLifecycle(customerId, ctx) {
     return new Promise(function (resolve) {
       function run() {
         var customerIds = [];
@@ -287,13 +332,19 @@
         var persistCount = 0;
 
         _deferSave = true;
+        _idbBatchTx = _idb ? _idb.transaction(WATCH_STORE, 'readwrite') : null;
+        if (_idbBatchTx) {
+          var batchTx = _idbBatchTx;
+          batchTx.onerror = function () { console.error('Watch lifecycle reconcile transaction failed', batchTx.error); };
+          batchTx.onabort = function () { console.error('Watch lifecycle reconcile transaction aborted', batchTx.error); };
+        }
         try {
           for (var ci = 0; ci < customerIds.length; ci++) {
             var cid = customerIds[ci];
             var watches = [];
-            if (_isCustomerActive(cid) && typeof extractWatchObservations === 'function') {
+            if (_isCustomerActive(cid, ctx) && typeof extractWatchObservations === 'function') {
               try {
-                watches = extractWatchObservations(cid) || [];
+                watches = extractWatchObservations(cid, undefined, ctx) || [];
               } catch (eW) {
                 watches = [];
               }
@@ -345,6 +396,7 @@
             }
           }
         } finally {
+          _idbBatchTx = null;
           // Always clear the defer flag, even if something above threw,
           // so a stray exception can never permanently disable localStorage
           // saves for recordWatchReason/dismissWatchOccurrence.
@@ -358,12 +410,7 @@
         resolve(touched);
       }
 
-      // Ensure hydrate has at least tried; memory already has LS data.
-      if (_hydrated || !_idb) {
-        run();
-      } else {
-        _idbHydrate(function () { run(); });
-      }
+      _ensureHydrated().then(run);
     });
   }
 
