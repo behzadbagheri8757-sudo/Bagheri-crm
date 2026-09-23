@@ -2353,10 +2353,10 @@ button.inv-header-save.btn{
 .inv-payment-panel{
   position:fixed;
   left:50%;
-  bottom:calc(18px + env(safe-area-inset-bottom,0px));
+  bottom:calc(18px + env(safe-area-inset-bottom,0px) + var(--keyboard-height,0px));
   transform:translateX(-50%);
   width:min(400px,calc(100vw - 28px));
-  max-height:min(68vh,480px);
+  max-height:calc(100vh - var(--keyboard-height,0px) - 40px);
   overflow:auto;
   z-index:80;
   margin:0;
