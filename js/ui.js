@@ -47,11 +47,13 @@ function normalizeVisibleDigits(root){
     const observer = new MutationObserver(function(mutations){
       mutations.forEach(function(m){
         m.addedNodes && Array.from(m.addedNodes).forEach(function(n){
-          if(n.nodeType === 1 || n.nodeType === 3) normalizeVisibleDigits(n.nodeType === 1 ? n : n.parentElement);
+          if(n.nodeType === 1 || n.nodeType === 3) {
+            normalizeVisibleDigits(n.nodeType === 1 ? n : n.parentElement);
+          }
         });
       });
     });
-    observer.observe(target, {childList:true,subtree:true});
+    observer.observe(target, {childList:true, subtree:true});
     normalizeVisibleDigits(target);
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true});
@@ -604,12 +606,14 @@ function daysAgo(iso){
   if(isNaN(d)) return Infinity;
   return Math.floor((Date.now()-d.getTime())/86400000);
 }
-function showToast(msg){
+function showToast(msg, opts){
+  opts = opts || {};
   const t = document.getElementById('toast');
   t.textContent = msg;
+  t.classList.toggle('error', opts.type === 'error');
   t.classList.add('show');
   clearTimeout(showToast._h);
-  showToast._h = setTimeout(()=>t.classList.remove('show'), 2000);
+  showToast._h = setTimeout(()=>t.classList.remove('show'), opts.type === 'error' ? 4500 : 2000);
 }
 
 
@@ -740,6 +744,11 @@ function closeModal(){
   const overlay = document.getElementById('overlay');
   const root = document.getElementById('modalRoot');
   if(!overlay){ if(root) root.innerHTML=''; return; }
+  const invoiceBottomNav = document.getElementById('bottom-nav');
+  if (invoiceBottomNav && invoiceBottomNav.dataset.invoiceHiddenPrev != null) {
+    invoiceBottomNav.hidden = invoiceBottomNav.dataset.invoiceHiddenPrev === '1';
+    delete invoiceBottomNav.dataset.invoiceHiddenPrev;
+  }
   overlay.classList.remove('show');
   const sheetEl = overlay.querySelector('.sheet');
   if(sheetEl) sheetEl.classList.remove('show');
@@ -752,7 +761,8 @@ function closeModal(){
   }, 240);
 }
 
-function openSheet(html){
+function openSheet(html, opts){
+  opts = opts || {};
   const root = document.getElementById('modalRoot');
 
   // Generic sheets can also re-render in response to a control change.
@@ -811,14 +821,20 @@ function openSheet(html){
   try{ document.body.classList.add('modal-open'); }catch(_e){}
   const overlay = document.getElementById('overlay');
   const sheet = overlay.querySelector('.sheet');
+  if (opts.dirtyCheck) {
+    sheet.dataset.dirtyCheck = '1';
+    sheet.dataset.dirty = '0';
+    sheet.addEventListener('input', function(){ sheet.dataset.dirty = '1'; });
+    sheet.addEventListener('change', function(){ sheet.dataset.dirty = '1'; });
+  }
   requestAnimationFrame(() => {
     overlay.classList.add('show');
     sheet.classList.add('show');
   });
-  overlay.addEventListener('click', (e)=>{ if(e.target.id==='overlay') closeModal(); });
+  overlay.addEventListener('click', async (e)=>{ if(e.target.id==='overlay'){ if(sheet.dataset.dirtyCheck === '1' && sheet.dataset.dirty === '1'){ if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌رود؟')) closeModal(); } else closeModal(); } });
   overlay.addEventListener('touchmove', function(e){
     if(!e.target.closest('.sheet')) e.preventDefault();
   }, {passive:false});
-  document.getElementById('closeX').addEventListener('click', closeModal);
-  bindSheetDragToDismiss(sheet, sheet.querySelector('.sheet-handle'), closeModal);
+  document.getElementById('closeX').addEventListener('click', async function(){ if(sheet.dataset.dirtyCheck === '1' && sheet.dataset.dirty === '1'){ if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌رود؟')) closeModal(); } else closeModal(); });
+  bindSheetDragToDismiss(sheet, sheet.querySelector('.sheet-handle'), async function(){ if(sheet.dataset.dirtyCheck === '1' && sheet.dataset.dirty === '1'){ if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌رود؟')) closeModal(); } else closeModal(); });
 }

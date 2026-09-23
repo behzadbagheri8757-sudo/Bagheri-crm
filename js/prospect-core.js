@@ -36,7 +36,9 @@ function daysSinceLastEvaluation(shopId){
   if(!shop || !Array.isArray(shop.visits) || !shop.visits.length) return null;
   let latest = null;
   for(let i = 0; i < shop.visits.length; i++){
-    const d = shop.visits[i] && shop.visits[i].date;
+    const visit = shop.visits[i];
+    if(!visit || visit.type === 'snapshot_edit') continue;
+    const d = visit.date;
     if(!d) continue;
     if(latest == null || String(d) > String(latest)) latest = d;
   }
@@ -76,6 +78,10 @@ async function createProspectShop(payload){
   });
   await persistProspectShop(shop);
   prospectState.shops.push(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
   await registerProspectVisitForTarget();
   // Game Center hook (derived only — never rolls back CRM)
   if (typeof gameOnEvaluation === 'function') {
@@ -105,6 +111,10 @@ async function addProspectVisit(shopId, payload){
   shop.latestRank = rank;
   if((payload.tags||[]).includes('became_customer')) shop.status = 'converted';
   await persistProspectShop(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
   await registerProspectVisitForTarget();
   // Game Center hook (derived only — never rolls back CRM)
   if (typeof gameOnEvaluation === 'function') {
@@ -166,6 +176,10 @@ async function createProspectShopV2(payload){
   });
   await persistProspectShop(shop);
   prospectState.shops.push(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
   await registerProspectVisitForTarget();
   // Game Center hook (derived only — never rolls back CRM)
   if (typeof gameOnEvaluation === 'function') {
@@ -266,7 +280,13 @@ async function addFollowUpVisit(shopId, payload){
   shop.visits.push(visit);
   if((payload.tags || []).includes('became_customer')) shop.status = 'converted';
   await persistProspectShop(shop);
-  await registerProspectVisitForTarget();
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
+  if (visit.type === 'followup' && !snapshotEditRecord) {
+    await registerProspectVisitForTarget();
+  }
   // Game Center hook (derived only — never rolls back CRM)
   if (typeof gameOnEvaluation === 'function') {
     try {

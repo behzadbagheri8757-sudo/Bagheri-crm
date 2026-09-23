@@ -534,11 +534,11 @@ async function loadData(){
     const record = await dbGet(RECORD_KEY);
     if(record && record.value){
       data = normalizeData(JSON.parse(record.value));
-      _lastPersistedData = JSON.parse(JSON.stringify(data));
+      _lastPersistedData = JSON.stringify(data);
     } else {
       // Empty DB is a valid initial state. Keep an explicit last-known-good
       // snapshot so a first save failure can roll RAM back deterministically.
-      _lastPersistedData = JSON.parse(JSON.stringify(data));
+      _lastPersistedData = JSON.stringify(data);
       if(window.storage){
         // fallback: recover from an older window.storage-based save, if this
         // file was ever previously run inside a Claude artifact sandbox
@@ -611,12 +611,12 @@ async function saveData(){
   try{
     data.schemaVersion = CURRENT_SCHEMA_VERSION;
     await dbPut(RECORD_KEY, JSON.stringify(data));
-    _lastPersistedData = JSON.parse(JSON.stringify(data));
+    _lastPersistedData = JSON.stringify(data);
   }catch(e){
     console.error('save failed', e);
     // Global last-known-good rollback closes the remaining integrity gap for
     // mutation paths that do not maintain their own previousData snapshot.
-    try{ restoreDataInPlace(_lastPersistedData); }catch(rollbackErr){ console.error('global save rollback failed', rollbackErr); }
+    try{ restoreDataInPlace(JSON.parse(_lastPersistedData)); }catch(rollbackErr){ console.error('global save rollback failed', rollbackErr); }
     showToast('⚠️ ذخیره نشد؛ تغییر انجام‌شده برگردانده شد');
     throw e;
   }
@@ -627,11 +627,7 @@ async function saveData(){
 
 function nextInvoiceNumber(){
   const seq = Number(data.invoiceSeq);
-  const maxExisting = (data.invoices||[]).reduce((m, inv)=>{
-    const n = Number(inv && inv.number);
-    return Number.isFinite(n) ? Math.max(m, n) : m;
-  }, 1000);
-  data.invoiceSeq = Math.max(Number.isFinite(seq) ? seq : 1000, maxExisting) + 1;
+  data.invoiceSeq = (Number.isFinite(seq) ? seq : 1000) + 1;
   return data.invoiceSeq;
 }
 

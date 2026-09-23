@@ -721,6 +721,7 @@ function validateBackupShape(parsed){
 }
 
 const RESTORE_JOURNAL_KEY = 'restoreJournal_v2';
+const RESTORE_JOURNAL_FAILED_KEY = 'restoreJournal_failed';
 
 function _deepClone(v){ return JSON.parse(JSON.stringify(v)); }
 function _stableValue(v){
@@ -793,7 +794,7 @@ async function _applyCrmSnapshot(snapshotData){
   const next=normalizeData(_deepClone(snapshotData));
   await dbPut(RECORD_KEY, JSON.stringify(next));
   data=next;
-  if(typeof _lastPersistedData!=='undefined') _lastPersistedData=_deepClone(next);
+  if(typeof _lastPersistedData!=='undefined') _lastPersistedData=JSON.stringify(next);
 }
 async function _restoreSnapshot(snapshot){
   await _applyCrmSnapshot(snapshot.data);
@@ -856,8 +857,18 @@ async function _recoverPendingRestoreJournal(){
     await dbDelete(RESTORE_JOURNAL_KEY);
     return {ok:true,recovered:true};
   }catch(e){
-    console.error('Pending restore recovery failed; journal retained for retry',e);
-    throw new Error('بازیابی ایمن اطلاعات ناقص است؛ برنامه بدون ادامه‌ی کار متوقف شد. دوباره برنامه را باز کنید.');
+    console.warn('Pending restore recovery failed; preserving journal under restoreJournal_failed and allowing boot',e);
+    try{
+      await dbPut(RESTORE_JOURNAL_FAILED_KEY, JSON.stringify({
+        failedAt:new Date().toISOString(),
+        error:String(e && e.message || e),
+        journal:journal
+      }));
+      await dbDelete(RESTORE_JOURNAL_KEY);
+    }catch(moveErr){
+      console.error('Failed to archive restore journal failure; allowing boot anyway',moveErr);
+    }
+    return {ok:true, recovered:false, failed:true};
   }
 }
 
@@ -882,7 +893,7 @@ async function _restoreParsedBackup(parsed){
     const nextData=normalizeData(_deepClone(parsed));
     await dbPut(RECORD_KEY, JSON.stringify(nextData));
     data=nextData;
-    if(typeof _lastPersistedData!=='undefined') _lastPersistedData=_deepClone(nextData);
+    if(typeof _lastPersistedData!=='undefined') _lastPersistedData=JSON.stringify(nextData);
     if(parsed.prospectScout){ if(!await restoreProspectScoutBundleStrict(parsed.prospectScout)) throw new Error('Prospect restore failed'); }
     // BUGFIX (Audit #8): intelligence/watchLifecycle are optional/additive
     // bundles (see validateBackupShape comments above) — an older or
@@ -937,8 +948,7 @@ async function importBackupJSON(file){
     _normalizeBackupEnvelope(parsed);
     if(!validateBackupShape(parsed)){ showToast(validateBackupShape.lastError || 'این فایل، فایل بکاپ معتبر یا کامل نیست'); return; }
     const ok=await _restoreParsedBackup(parsed);
-    if(ok==='warn'){ render(); showToast('اطلاعات بازیابی شد؛ اما تاریخچهٔ Watch بازیابی نشد'); }
-    else if(ok){ render(); showToast('اطلاعات با موفقیت بازیابی شد'); }
+    if(ok){ render(); showToast('اطلاعات با موفقیت بازیابی شد'); }
     else { render(); showToast('بازیابی انجام نشد؛ اطلاعات قبلی حفظ شد'); }
   }catch(e){
     console.error('importBackupJSON failed',e);
@@ -1028,10 +1038,22 @@ async function restoreFromAutoBackup(key){
   }
 }
 
-function exportExcel(){
+async function exportExcel(){
   if(typeof XLSX === 'undefined'){
-    showToast('کتابخانه اکسل لود نشد؛ برای این خروجی به اینترنت نیاز است');
-    return;
+    if(!window.__baqeriXlsxPromise){
+      window.__baqeriXlsxPromise = new Promise(function(resolve){
+        var s = document.createElement('script');
+        s.src = './vendor/xlsx.full.min.js';
+        s.async = false;
+        s.onload = function(){ resolve(typeof XLSX !== 'undefined'); };
+        s.onerror = function(){ resolve(false); };
+        document.head.appendChild(s);
+      });
+    }
+    if(!await window.__baqeriXlsxPromise){
+      showToast('کتابخانه اکسل لود نشد؛ برای این خروجی به اینترنت نیاز است');
+      return;
+    }
   }
   const wb = XLSX.utils.book_new();
 
