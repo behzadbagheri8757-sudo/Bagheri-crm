@@ -1,0 +1,143 @@
+name: BAGHERI CRM Runtime Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  runtime-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout BAGHERI CRM
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install --save-dev playwright
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start BAGHERI CRM
+        run: |
+          nohup python3 -m http.server 8080 > server.log 2>&1 &
+          sleep 3
+          curl --fail http://127.0.0.1:8080/index.html
+
+      - name: Create runtime test
+        run: |
+          mkdir -p tests
+
+          cat > tests/runtime.spec.js <<'EOF'
+          const { test, expect } = require('@playwright/test');
+
+          test('BAGHERI CRM boots without page errors', async ({ page }) => {
+            const errors = [];
+
+            page.on('pageerror', error => {
+              errors.push(error.message);
+            });
+
+            page.on('console', message => {
+              if (message.type() === 'error') {
+                errors.push(message.text());
+              }
+            });
+
+            await page.goto('http://127.0.0.1:8080/index.html', {
+              waitUntil: 'networkidle'
+            });
+
+            await page.waitForTimeout(3000);
+
+            expect(errors, errors.join('\n')).toEqual([]);
+          });
+
+          test('BAGHERI CRM loads Service Worker registration code', async ({ page }) => {
+            await page.goto('http://127.0.0.1:8080/index.html', {
+              waitUntil: 'networkidle'
+            });
+
+            await page.waitForTimeout(2000);
+
+            const supported = await page.evaluate(() => {
+              return 'serviceWorker' in navigator;
+            });
+
+            expect(supported).toBeTruthy();
+          });
+
+          test('BAGHERI CRM critical shell files exist', async ({ request }) => {
+            const files = [
+              '/index.html',
+              '/css/app.css',
+              '/js/db.js',
+              '/js/nav.js',
+              '/js/app.js',
+              '/js/models.js',
+              '/js/ui.js',
+              '/js/router.js',
+              '/js/view.host.js',
+              '/js/views/dashboard.js',
+              '/js/calc.js',
+              '/js/stock.js',
+              '/js/backup.js',
+              '/js/icons.js',
+              '/js/computation-bank.js',
+              '/sw.js'
+            ];
+
+            for (const file of files) {
+              const response = await request.get(
+                `http://127.0.0.1:8080${file}`
+              );
+
+              expect(
+                response.ok(),
+                `${file} returned HTTP ${response.status()}`
+              ).toBeTruthy();
+            }
+          });
+
+          test('BAGHERI CRM can enter offline mode after initial load', async ({ page, context }) => {
+            await page.goto('http://127.0.0.1:8080/index.html', {
+              waitUntil: 'networkidle'
+            });
+
+            await page.waitForTimeout(3000);
+
+            await context.setOffline(true);
+
+            await page.reload({
+              waitUntil: 'domcontentloaded'
+            });
+
+            await page.waitForTimeout(3000);
+
+            await expect(page.locator('body')).toBeVisible();
+
+            await context.setOffline(false);
+          });
+          EOF
+
+      - name: Run Playwright
+        run: npx playwright test tests/runtime.spec.js --reporter=line
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bagheri-playwright-results
+          path: |
+            test-results/
+            playwright-report/
+            server.log
+          if-no-files-found: ignore
