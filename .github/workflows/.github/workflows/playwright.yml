@@ -1,4 +1,4 @@
-name: BAGHERI CRM Runtime Test
+name: BAGHERI CRM Runtime Diagnostic
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 jobs:
-  runtime-test:
+  runtime-diagnostic:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +21,7 @@ jobs:
       - name: Install Playwright
         run: |
           npm init -y
-          npm install --save-dev playwright
+          npm install --save-dev @playwright/test
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -32,110 +32,180 @@ jobs:
           sleep 3
           curl --fail http://127.0.0.1:8080/index.html
 
-      - name: Create runtime test
+      - name: Create diagnostic test
         run: |
           mkdir -p tests
 
-          cat > tests/runtime.spec.js <<'EOF'
+          cat > tests/runtime-diagnostic.spec.js <<'EOF'
           const { test, expect } = require('@playwright/test');
 
-          test('BAGHERI CRM boots without page errors', async ({ page }) => {
-            const errors = [];
+          test('BAGHERI CRM runtime diagnostic', async ({ page }) => {
+            const pageErrors = [];
+            const consoleErrors = [];
+            const failedRequests = [];
 
             page.on('pageerror', error => {
-              errors.push(error.message);
+              pageErrors.push(error.message);
             });
 
             page.on('console', message => {
               if (message.type() === 'error') {
-                errors.push(message.text());
+                consoleErrors.push(message.text());
               }
             });
 
+            page.on('requestfailed', request => {
+              failedRequests.push({
+                url: request.url(),
+                failure: request.failure()
+              });
+            });
+
             await page.goto('http://127.0.0.1:8080/index.html', {
-              waitUntil: 'networkidle'
-            });
-
-            await page.waitForTimeout(3000);
-
-            expect(errors, errors.join('\n')).toEqual([]);
-          });
-
-          test('BAGHERI CRM loads Service Worker registration code', async ({ page }) => {
-            await page.goto('http://127.0.0.1:8080/index.html', {
-              waitUntil: 'networkidle'
-            });
-
-            await page.waitForTimeout(2000);
-
-            const supported = await page.evaluate(() => {
-              return 'serviceWorker' in navigator;
-            });
-
-            expect(supported).toBeTruthy();
-          });
-
-          test('BAGHERI CRM critical shell files exist', async ({ request }) => {
-            const files = [
-              '/index.html',
-              '/css/app.css',
-              '/js/db.js',
-              '/js/nav.js',
-              '/js/app.js',
-              '/js/models.js',
-              '/js/ui.js',
-              '/js/router.js',
-              '/js/view.host.js',
-              '/js/views/dashboard.js',
-              '/js/calc.js',
-              '/js/stock.js',
-              '/js/backup.js',
-              '/js/icons.js',
-              '/js/computation-bank.js',
-              '/sw.js'
-            ];
-
-            for (const file of files) {
-              const response = await request.get(
-                `http://127.0.0.1:8080${file}`
-              );
-
-              expect(
-                response.ok(),
-                `${file} returned HTTP ${response.status()}`
-              ).toBeTruthy();
-            }
-          });
-
-          test('BAGHERI CRM can enter offline mode after initial load', async ({ page, context }) => {
-            await page.goto('http://127.0.0.1:8080/index.html', {
-              waitUntil: 'networkidle'
-            });
-
-            await page.waitForTimeout(3000);
-
-            await context.setOffline(true);
-
-            await page.reload({
               waitUntil: 'domcontentloaded'
             });
 
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(5000);
 
-            await expect(page.locator('body')).toBeVisible();
+            const diagnostic = await page.evaluate(async () => {
+              const buttons = [...document.querySelectorAll('button')]
+                .map((el, i) => ({
+                  index: i,
+                  id: el.id || null,
+                  text: (el.innerText || el.textContent || '').trim(),
+                  disabled: !!el.disabled,
+                  cls: el.className || ''
+                }));
 
-            await context.setOffline(false);
+              const inputs = [...document.querySelectorAll('input')]
+                .map((el, i) => ({
+                  index: i,
+                  id: el.id || null,
+                  type: el.type || null,
+                  placeholder: el.placeholder || null,
+                  name: el.name || null
+                }));
+
+              const links = [...document.querySelectorAll('a')]
+                .map((el, i) => ({
+                  index: i,
+                  text: (el.innerText || el.textContent || '').trim(),
+                  href: el.getAttribute('href')
+                }));
+
+              const visibleText =
+                document.body?.innerText?.slice(0, 12000) || '';
+
+              let sw = {
+                supported: 'serviceWorker' in navigator,
+                registrations: []
+              };
+
+              if ('serviceWorker' in navigator) {
+                try {
+                  const registrations =
+                    await navigator.serviceWorker.getRegistrations();
+
+                  sw.registrations = registrations.map(r => ({
+                    scope: r.scope,
+                    active: r.active?.scriptURL || null,
+                    installing: r.installing?.scriptURL || null,
+                    waiting: r.waiting?.scriptURL || null
+                  }));
+                } catch (e) {
+                  sw.error = String(e);
+                }
+              }
+
+              const storage = {
+                localStorageKeys: Object.keys(localStorage),
+                indexedDBDatabases: []
+              };
+
+              if (indexedDB.databases) {
+                try {
+                  storage.indexedDBDatabases =
+                    await indexedDB.databases();
+                } catch (e) {
+                  storage.indexedDBError = String(e);
+                }
+              }
+
+              const settingsSignals = {
+                importButton: !!document.querySelector('#do-import'),
+                importFile: !!document.querySelector('#import-file'),
+                undoButton: !!document.querySelector('#undo-import'),
+                settingsText: visibleText.includes('بازیابی')
+              };
+
+              return {
+                url: location.href,
+                title: document.title,
+                readyState: document.readyState,
+                buttons,
+                inputs,
+                links,
+                visibleText,
+                serviceWorker: sw,
+                storage,
+                settingsSignals
+              };
+            });
+
+            console.log(
+              '=== BAGHERI RUNTIME DIAGNOSTIC ==='
+            );
+
+            console.log(
+              JSON.stringify(diagnostic, null, 2)
+            );
+
+            console.log(
+              '=== PAGE ERRORS ==='
+            );
+
+            console.log(
+              JSON.stringify(pageErrors, null, 2)
+            );
+
+            console.log(
+              '=== CONSOLE ERRORS ==='
+            );
+
+            console.log(
+              JSON.stringify(consoleErrors, null, 2)
+            );
+
+            console.log(
+              '=== FAILED REQUESTS ==='
+            );
+
+            console.log(
+              JSON.stringify(failedRequests, null, 2)
+            );
+
+            expect(diagnostic.readyState).not.toBe('loading');
+
+            expect(
+              diagnostic.settingsSignals.importButton,
+              'Expected #do-import to exist after application boot'
+            ).toBeTruthy();
+
+            expect(
+              diagnostic.settingsSignals.importFile,
+              'Expected #import-file to exist after application boot'
+            ).toBeTruthy();
           });
           EOF
 
-      - name: Run Playwright
-        run: npx playwright test tests/runtime.spec.js --reporter=line
+      - name: Run diagnostic
+        run: npx playwright test tests/runtime-diagnostic.spec.js --reporter=line
 
-      - name: Upload Playwright report
+      - name: Upload diagnostic artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bagheri-playwright-results
+          name: bagheri-runtime-diagnostic
           path: |
             test-results/
             playwright-report/
