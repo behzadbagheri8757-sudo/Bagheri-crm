@@ -32,6 +32,15 @@
   // key -> baseline record
   var _mem = Object.create(null);
   var _idb = null;
+  // FIX (LS/IDB Arbitration): _loadLS() runs synchronously at module load;
+  // _openIdb()+_idbHydrate() finish asynchronously afterward. If _store() is
+  // called (e.g. via updateBaselineIfShifted) in that window, its write goes
+  // to _mem + localStorage immediately but _idbPut() no-ops (_idb not open
+  // yet). When the async hydrate later resolves, it used to overwrite _mem
+  // unconditionally from the (now stale) IDB snapshot, silently reverting
+  // that newer write in both memory and localStorage. _dirty tracks keys
+  // written via _store() since load so hydrate never clobbers them.
+  var _dirty = Object.create(null);
 
   function _key(customerId, productId) {
     return String(customerId) + '|' + String(productId || '');
@@ -145,7 +154,7 @@
         var rows = req.result || [];
         for (var i = 0; i < rows.length; i++) {
           var row = rows[i];
-          if (row && row.key) _mem[row.key] = row;
+          if (row && row.key && !_dirty[row.key]) _mem[row.key] = row;
         }
         _saveLS();
         if (cb) cb();
@@ -174,6 +183,7 @@
       reason: reason || 'establish'
     };
     _mem[k] = rec;
+    _dirty[k] = true;
     _saveLS();
     _idbPut(rec);
     return rec;
@@ -267,6 +277,7 @@
 
   function clearBaselineCache() {
     _mem = Object.create(null);
+    _dirty = Object.create(null);
     try {
       if (typeof localStorage !== 'undefined' && localStorage) {
         localStorage.removeItem(BASELINE_PARAMS.lsKey);

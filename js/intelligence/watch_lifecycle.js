@@ -49,6 +49,15 @@
   // id -> occurrence (session source of truth after hydrate)
   var _mem = Object.create(null);
   var _idb = null;
+  // FIX (LS/IDB Arbitration): recordWatchReason/dismissWatchOccurrence write
+  // straight to _mem (see _persist) without waiting for the async IDB
+  // hydrate to finish — _loadLS() already sets _hydrated=true synchronously
+  // whenever localStorage had prior data, so callers can mutate before
+  // _idbHydrate's getAll() resolves. That resolution used to overwrite _mem
+  // unconditionally from the (now stale) IDB snapshot, silently reverting a
+  // reason/dismissal the seller had just recorded. _dirtyIds tracks every id
+  // written via _persist() since load so hydrate never clobbers it.
+  var _dirtyIds = Object.create(null);
   var _hydrated = false;
   var _hydratePromise = null;
   var _deferSave = false; // true while reconcileWatchLifecycle batches multiple _persist calls
@@ -175,7 +184,7 @@
           var rows = req.result || [];
           for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
-            if (row && row.id) _mem[row.id] = row;
+            if (row && row.id && !_dirtyIds[row.id]) _mem[row.id] = row;
           }
           _hydrated = true;
           _saveLS();
@@ -204,6 +213,7 @@
   function _persist(rec) {
     if (!rec || !rec.id) return;
     _mem[rec.id] = rec;
+    _dirtyIds[rec.id] = true;
     _idbPut(rec);
     if (!_deferSave) _saveLS();
   }
@@ -529,6 +539,7 @@
         cleaned.push(r);
       }
       _mem = Object.create(null);
+      _dirtyIds = Object.create(null);
       for (var j = 0; j < cleaned.length; j++) {
         _mem[cleaned[j].id] = cleaned[j];
       }
@@ -545,6 +556,7 @@
 
   function clearWatchLifecycle() {
     _mem = Object.create(null);
+    _dirtyIds = Object.create(null);
     try {
       if (typeof localStorage !== 'undefined' && localStorage) {
         localStorage.removeItem(WATCH_LS_KEY);
