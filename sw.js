@@ -34,7 +34,12 @@
    missing from PRECACHE_URLS, so a freshly-activated cache version had no
    guarantee they'd be cached before the first offline use. Added both to the
    precache list; no other asset, route, or business logic touched.) */
-const CACHE_NAME = 'baqeri-shell-v64';
+/* CHANGED: v64 -> v65 (classification fix only: js/pin-lock.js moved into
+   CRITICAL_SHELLS — bootSpaShell() hard-gates boot on it whenever a PIN is
+   configured, so it is boot-critical, not merely a nice-to-have precache
+   entry. It was already in PRECACHE_URLS; no asset list, route, or business
+   logic otherwise changed.) */
+const CACHE_NAME = 'baqeri-shell-v65';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
@@ -120,7 +125,14 @@ const CRITICAL_SHELLS = [
   './js/ui.js',
   './js/router.js',
   './js/view.host.js',
-  './js/views/dashboard.js'
+  './js/views/dashboard.js',
+  // js/pin-lock.js: bootSpaShell() (js/nav.js) hard-gates boot on
+  // window.pinLock whenever a PIN is configured (localStorage
+  // baqeri_pin_lock_v1) — if the module is missing it shows an error screen
+  // and returns before loadData()/render() ever run. That makes it required
+  // for offline boot for any user with PIN lock enabled, so it belongs here
+  // like the other boot-path files above, not just in PRECACHE_URLS.
+  './js/pin-lock.js'
 ];
 
 /**
