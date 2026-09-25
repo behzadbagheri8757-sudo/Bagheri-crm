@@ -642,10 +642,24 @@ function _validateSupplierBundle(suppliers, productIds){
       }
     }
     if(s.payments != null){
-      if(!Array.isArray(s.payments) || !_uniqueIds(s.payments)) return false;
+      if(!Array.isArray(s.payments)) return false;
+      // supplier.payments[].id is OPTIONAL, not an invariant: js/models.js
+      // documents the legacy {date, amount} shape (no id) as valid, no
+      // runtime code (supplier.js delete/edit, calc.js totals) looks payments
+      // up by id — all lookups are index/reference based — and normalizeData()
+      // (js/db.js) never backfills an id for this array. Requiring id here
+      // rejected self-produced backups containing legacy records (backup
+      // self-compatibility bug). Still enforce uniqueness among ids that ARE
+      // present, to catch actual corruption/duplication.
+      const seenPayIds = new Set();
       for(const p of s.payments){
         if(!_isPlainObject(p) || !_isFiniteNonNegative(p.amount)) return false;
         if(p.faceAmount != null && !_isFiniteNonNegative(p.faceAmount)) return false;
+        if(p.id != null && String(p.id) !== ''){
+          const key = String(p.id);
+          if(seenPayIds.has(key)) return false;
+          seenPayIds.add(key);
+        }
       }
     }
   }
