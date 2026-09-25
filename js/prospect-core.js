@@ -36,7 +36,9 @@ function daysSinceLastEvaluation(shopId){
   if(!shop || !Array.isArray(shop.visits) || !shop.visits.length) return null;
   let latest = null;
   for(let i = 0; i < shop.visits.length; i++){
-    const d = shop.visits[i] && shop.visits[i].date;
+    const visit = shop.visits[i];
+    if(!visit || visit.type === 'snapshot_edit') continue;
+    const d = visit.date;
     if(!d) continue;
     if(latest == null || String(d) > String(latest)) latest = d;
   }
@@ -76,6 +78,10 @@ async function createProspectShop(payload){
   });
   await persistProspectShop(shop);
   prospectState.shops.push(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
   await registerProspectVisitForTarget();
   // Game Center hook (derived only — never rolls back CRM)
   if (typeof gameOnEvaluation === 'function') {
@@ -105,6 +111,10 @@ async function addProspectVisit(shopId, payload){
   shop.latestRank = rank;
   if((payload.tags||[]).includes('became_customer')) shop.status = 'converted';
   await persistProspectShop(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
   await registerProspectVisitForTarget();
   // Game Center hook (derived only — never rolls back CRM)
   if (typeof gameOnEvaluation === 'function') {
@@ -114,6 +124,194 @@ async function addProspectVisit(shopId, payload){
       console.warn('Game hook failed:', e);
     }
   }
+  return shop;
+}
+
+/* ==========================================================================
+   PROSPECT EVALUATION V2 — Snapshot + Event model (spec §4, §11, §13-§15).
+   Independent of the legacy createProspectShop/addProspectVisit above.
+   Evaluation is a CURRENT SNAPSHOT; a Visit is an independent REPEATABLE
+   EVENT. Initial evaluation writes the Snapshot + one 'initial' visit event.
+   A follow-up visit never re-runs the full evaluation: it only appends a
+   lightweight event, optionally editing one Snapshot answer.
+   ========================================================================== */
+
+async function createProspectShopV2(payload){
+  const profile = payload.profile;
+  const result = prospectComputeScoreV2(profile, payload.answers || {});
+  const nowIso = prospectNowISO();
+  const snapshot = {
+    profile: profile,
+    businessType: payload.businessType || null,
+    answers: {...(payload.answers || {})},
+    score: result.score,
+    rank: result.rank,
+    knownCount: result.knownCount,
+    scoringVersion: PROSPECT_SCORING_VERSION_V2,
+    updatedAt: nowIso,
+  };
+  const visit = normalizeProspectVisit({
+    date: nowIso,
+    type: 'initial',
+    answers: {...(payload.answers || {})},
+    score: result.score,
+    rank: result.rank,
+    knownCount: result.knownCount,
+    scoringVersion: PROSPECT_SCORING_VERSION_V2,
+    tags: [...(payload.tags || [])],
+  });
+  const shop = normalizeProspectShop({
+    name: (payload.name || '').trim(),
+    routeId: payload.routeId || null,
+    neighborhoodId: payload.neighborhoodId || null,
+    locationId: payload.locationId || null,
+    scoringVersion: PROSPECT_SCORING_VERSION_V2,
+    profile: profile,
+    businessType: payload.businessType || null,
+    snapshot: snapshot,
+    latestScore: result.score != null ? result.score : 0,
+    latestRank: result.rank,
+    visits: [visit],
+    status: (payload.tags || []).includes('became_customer') ? 'converted' : 'active',
+  });
+  await persistProspectShop(shop);
+  prospectState.shops.push(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
+  await registerProspectVisitForTarget();
+  // Game Center hook (derived only — never rolls back CRM)
+  if (typeof gameOnEvaluation === 'function') {
+    try {
+      await gameOnEvaluation(shop.id, visit.id, visit.date);
+    } catch (e) {
+      console.warn('Game hook failed:', e);
+    }
+  }
+  return shop;
+}
+
+/**
+ * Lightweight Follow-up Visit (spec §13). Records an event (outcome tags,
+ * note, next follow-up date) WITHOUT repeating the 4-question evaluation.
+ * If `payload.snapshotEdit` is given ({questionId, value}), only that one
+ * Snapshot answer is changed and the score/rank/knownCount recompute —
+ * everything else about the Snapshot is left untouched (spec §14-§15).
+ */
+/**
+ * Targeted Snapshot answer edit from the current Snapshot UI.
+ * This records an audit/history event but does NOT count as a new prospect
+ * visit and does not increment the daily visit target.
+ */
+async function editProspectSnapshotAnswer(shopId, questionId, newValue){
+  const shop = prospectState.shops.find(s=>s.id===shopId);
+  if(!shop || !shop.snapshot || !questionId) return null;
+  const questions = (typeof PROSPECT_QUESTIONS_V2 !== 'undefined' && shop.snapshot.profile)
+    ? (PROSPECT_QUESTIONS_V2[shop.snapshot.profile] || []) : [];
+  const question = questions.find(q=>q.id===questionId);
+  if(!question || !question.options.some(o=>o.key===newValue)) return null;
+
+  const oldValue = shop.snapshot.answers ? shop.snapshot.answers[questionId] : null;
+  if(oldValue === newValue) return shop;
+
+  shop.snapshot.answers = shop.snapshot.answers || {};
+  shop.snapshot.answers[questionId] = newValue;
+  const result = prospectComputeScoreV2(shop.snapshot.profile, shop.snapshot.answers);
+  shop.snapshot.score = result.score;
+  shop.snapshot.rank = result.rank;
+  shop.snapshot.knownCount = result.knownCount;
+  shop.snapshot.updatedAt = prospectNowISO();
+  shop.latestScore = result.score != null ? result.score : 0;
+  shop.latestRank = result.rank;
+
+  const editEvent = normalizeProspectVisit({
+    date: prospectNowISO(),
+    type: 'snapshot_edit',
+    scoringVersion: PROSPECT_SCORING_VERSION_V2,
+    score: result.score,
+    rank: result.rank,
+    knownCount: result.knownCount,
+    snapshotEdit: { questionId: questionId, from: (oldValue != null ? oldValue : null), to: newValue },
+  });
+  shop.visits.push(editEvent);
+  await persistProspectShop(shop);
+  return shop;
+}
+
+async function addFollowUpVisit(shopId, payload){
+  const shop = prospectState.shops.find(s=>s.id===shopId);
+  if(!shop) return null;
+
+  let snapshotEditRecord = null;
+  if(payload.snapshotEdit && payload.snapshotEdit.questionId && shop.snapshot){
+    const qId = payload.snapshotEdit.questionId;
+    const newValue = payload.snapshotEdit.value;
+    const oldValue = shop.snapshot.answers ? shop.snapshot.answers[qId] : null;
+    if(newValue !== oldValue){
+      shop.snapshot.answers = shop.snapshot.answers || {};
+      shop.snapshot.answers[qId] = newValue;
+      const result = prospectComputeScoreV2(shop.snapshot.profile, shop.snapshot.answers);
+      shop.snapshot.score = result.score;
+      shop.snapshot.rank = result.rank;
+      shop.snapshot.knownCount = result.knownCount;
+      shop.snapshot.updatedAt = prospectNowISO();
+      shop.latestScore = result.score != null ? result.score : 0;
+      shop.latestRank = result.rank;
+      snapshotEditRecord = { questionId: qId, from: (oldValue != null ? oldValue : null), to: newValue };
+    }
+  }
+
+  const visit = normalizeProspectVisit({
+    date: prospectNowISO(),
+    type: 'followup',
+    tags: [...(payload.tags || [])],
+    note: payload.note || '',
+    nextFollowUpDate: payload.nextFollowUpDate || null,
+    snapshotEdit: snapshotEditRecord,
+    scoringVersion: PROSPECT_SCORING_VERSION_V2,
+    // Record the Snapshot's score/rank AT THE TIME of this visit for the
+    // Visit History timeline — the Snapshot itself is the current-state
+    // source of truth (spec §36), this is just a point-in-time echo of it.
+    score: shop.snapshot ? shop.snapshot.score : null,
+    rank: shop.snapshot ? shop.snapshot.rank : null,
+    knownCount: shop.snapshot ? shop.snapshot.knownCount : null,
+  });
+  shop.visits.push(visit);
+  if((payload.tags || []).includes('became_customer')) shop.status = 'converted';
+  await persistProspectShop(shop);
+  if ((payload.tags || []).includes('became_customer') && !shop.linkedCustomerId) {
+    try { await convertProspectToCustomer(shop.id); }
+    catch (e) { console.error('Prospect conversion failed:', e); }
+  }
+  if (visit.type === 'followup' && !snapshotEditRecord) {
+    await registerProspectVisitForTarget();
+  }
+  // Game Center hook (derived only — never rolls back CRM)
+  if (typeof gameOnEvaluation === 'function') {
+    try {
+      await gameOnEvaluation(shop.id, visit.id, visit.date);
+    } catch (e) {
+      console.warn('Game hook failed:', e);
+    }
+  }
+  return shop;
+}
+
+/** Edit an existing V2 follow-up visit only inside the UI edit window. */
+async function editProspectFollowUpVisit(shopId, visitId, payload){
+  const shop = prospectState.shops.find(s=>s.id===shopId);
+  if(!shop || !Array.isArray(shop.visits)) return null;
+  const visit = shop.visits.find(v=>v && v.id===visitId);
+  if(!visit || visit.type !== 'followup') throw new Error('این ویزیت قابل ویرایش نیست');
+  const ts = new Date(visit.date).getTime();
+  if(!isFinite(ts) || Date.now() - ts < 0 || Date.now() - ts > (3 * 60 * 60 * 1000)) {
+    throw new Error('مهلت ویرایش این ویزیت تمام شده است');
+  }
+  visit.tags = Array.isArray(payload.tags) ? [...payload.tags] : [];
+  visit.note = typeof payload.note === 'string' ? payload.note : '';
+  visit.nextFollowUpDate = payload.nextFollowUpDate || null;
+  await persistProspectShop(shop);
   return shop;
 }
 
@@ -349,37 +547,4 @@ async function convertProspectToCustomer(shopId){
   await persistProspectShop(shop);
 
   return { customerId: customer.id, created: true, customer };
-}
-
-async function bootProspectPage(activeNavId, afterLoad){
-  try{
-    /* PIN gate (minimal): unlock before any CRM/prospect render. Does not touch data/FIFO. */
-    try{
-      var pinConfigured = false;
-      try{ pinConfigured = !!(localStorage.getItem('baqeri_pin_lock_v1')); }catch(_e){}
-      if(pinConfigured){
-        if(!window.pinLock || typeof window.pinLock.ensureUnlocked !== 'function'){
-          document.body.innerHTML = '<div style="padding:24px;text-align:center;font-family:sans-serif;direction:rtl;">قفل PIN فعال است اما ماژول قفل بارگذاری نشد. صفحه را دوباره باز کنید.</div>';
-          return;
-        }
-        await window.pinLock.ensureUnlocked();
-      } else if(window.pinLock && typeof window.pinLock.ensureUnlocked === 'function'){
-        await window.pinLock.ensureUnlocked();
-      }
-    }catch(pinErr){
-      console.error('pin lock gate failed', pinErr);
-      document.body.innerHTML = '<div style="padding:24px;text-align:center;font-family:sans-serif;direction:rtl;">خطا در قفل PIN. صفحه را دوباره باز کنید.</div>';
-      return;
-    }
-    if(typeof loadData==='function') await loadData();
-    if(typeof renderSharedNav==='function') renderSharedNav(activeNavId);
-    if(typeof renderBottomNav==='function') renderBottomNav(activeNavId);
-    if(typeof ensureAppBackButton==='function') ensureAppBackButton(activeNavId);
-    await loadProspectData();
-    if(typeof afterLoad==='function') await afterLoad();
-    if(typeof flushProspectPendingToast==='function') flushProspectPendingToast();
-  }catch(e){
-    console.error('bootProspectPage failed', e);
-    if(typeof showToast==='function') showToast('خطا در بارگذاری ارزیابی مغازه‌ها');
-  }
 }

@@ -81,6 +81,7 @@ function consumeLayersFIFO(productId, qty){
     });
     need -= take;
   }
+  if(need <= 1e-9) need = 0;
   return { ok: need<=0, allocations, shortfall: Math.max(0, need) };
 }
 
@@ -532,10 +533,17 @@ function validateSaleAvailability(items, creditStockByProduct, creditFifoByProdu
     if(stock < 0){
       return { ok:false, code:'NEGATIVE_STOCK', error:'موجودی کافی نیست یا موجودی FIFO با موجودی کالا ناسازگار است.\n\n«'+name+'»: موجودی کالا منفی است.' };
     }
-    if(need > stock){
-      return { ok:false, code:'STOCK', error:'موجودی کافی نیست یا موجودی FIFO با موجودی کالا ناسازگار است.\n\n«'+name+'»: موجودی واقعی برای فروش کافی نیست.\nموجودی: '+stock+'\nدرخواستی: '+need };
+    if(need > stock + 1e-9){
+      // UI FIX: this message is shown via showToast() (a single-line/short
+      // fixed-position pill, not a modal) in at least three places (new
+      // invoice, edit invoice, applyInvoiceStockEffects throw). The previous
+      // 4-line message overflowed/clipped inside the toast on mobile
+      // (iPhone). Shortened to one line; product name and the actual
+      // shortage (کمبود) are kept, no calculation changed.
+      const shortfall = need - stock;
+      return { ok:false, code:'STOCK', error:'موجودی «'+name+'» کافی نیست — کسری '+shortfall+' (موجودی: '+stock+')' };
     }
-    if(need > fifo){
+    if(need > fifo + 1e-9){
       return { ok:false, code:'FIFO_DESYNC', error:'موجودی کافی نیست یا موجودی FIFO با موجودی کالا ناسازگار است.\n\n«'+name+'»: موجودی FIFO با موجودی کالا ناسازگار است.\nموجودی کالا: '+stock+'\nموجودی لایه‌های قابل مصرف: '+fifo+'\nدرخواستی: '+need };
     }
   }
