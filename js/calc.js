@@ -2,54 +2,35 @@
    Phase 0 extract: no logic changes.
 */
 // ---------- derived calculations ----------
-function customerInvoices(cid, ctx){
-  return ctx && typeof ctx.customerInvoices === 'function'
-    ? ctx.customerInvoices(cid)
-    : data.invoices.filter(i=>i.customerId===cid);
-}
-function customerPayments(cid, ctx){
-  return ctx && typeof ctx.customerPayments === 'function'
-    ? ctx.customerPayments(cid)
-    : data.payments.filter(p=>p.customerId===cid);
-}
-function customerChecks(cid, ctx){
-  return ctx && typeof ctx.customerChecks === 'function'
-    ? ctx.customerChecks(cid)
-    : data.checks.filter(c=>c.customerId===cid);
-}
+function customerInvoices(cid){ return data.invoices.filter(i=>i.customerId===cid); }
+function customerPayments(cid){ return data.payments.filter(p=>p.customerId===cid); }
+function customerChecks(cid){ return data.checks.filter(c=>c.customerId===cid); }
 
 // برای هشدار «برگشت بیشتر از فروش قبلی»: مجموع فروخته‌شده و مجموع قبلاً برگشت‌داده‌شده‌ی
 // یک کالای مشخص به یک مشتری مشخص
-function productSoldQtyToCustomer(cid, productId, ctx){
-  return customerInvoices(cid, ctx).reduce((s,inv)=>
+function productSoldQtyToCustomer(cid, productId){
+  return customerInvoices(cid).reduce((s,inv)=>
     s + inv.items.filter(it=>it.productId===productId).reduce((a,it)=>a+(it.qty||0),0), 0);
 }
-function productReturnedQtyByCustomer(cid, productId, ctx){
-  return customerPayments(cid, ctx).filter(p=>p.method==='return').reduce((s,p)=>
+function productReturnedQtyByCustomer(cid, productId){
+  return customerPayments(cid).filter(p=>p.method==='return').reduce((s,p)=>
     s + (p.returnItems||[]).filter(ri=>ri.productId===productId).reduce((a,ri)=>a+(ri.qty||0),0), 0);
 }
-function productReturnAvailableQty(cid, productId, ctx){
-  return Math.max(0, productSoldQtyToCustomer(cid, productId, ctx) - productReturnedQtyByCustomer(cid, productId, ctx));
+function productReturnAvailableQty(cid, productId){
+  return Math.max(0, productSoldQtyToCustomer(cid, productId) - productReturnedQtyByCustomer(cid, productId));
 }
 
-function customerTotals(cid, ctx){
-  const calculate = function(){
-    const invTotal = customerInvoices(cid, ctx).reduce((s,i)=>s+i.total,0);
-    const payTotal = customerPayments(cid, ctx).reduce((s,p)=>s+p.amount,0);
-    const checkTotal = customerChecks(cid, ctx).reduce((s,c)=>s+c.amount,0);
-    const cashOnlyTotal = customerPayments(cid, ctx).filter(p=>['cash','card','transfer'].includes(p.method)).reduce((s,p)=>s+p.amount,0);
-    const discountTotal = customerPayments(cid, ctx).filter(p=>p.method==='discount').reduce((s,p)=>s+p.amount,0);
-    const returnTotal = customerPayments(cid, ctx).filter(p=>p.method==='return').reduce((s,p)=>s+p.amount,0);
-    const c = ctx && typeof ctx.customerById === 'function'
-      ? ctx.customerById(cid)
-      : data.customers.find(x=>x.id===cid);
-    const openingBalance = c ? (c.openingBalance||0) : 0;
-    const balance = openingBalance + invTotal - payTotal - checkTotal;
-    return { invTotal, payTotal, checkTotal, cashOnlyTotal, discountTotal, returnTotal, openingBalance, balance };
-  };
-  return ctx && typeof ctx.memo === 'function'
-    ? ctx.memo('customerTotals', cid, calculate)
-    : calculate();
+function customerTotals(cid){
+  const invTotal = customerInvoices(cid).reduce((s,i)=>s+i.total,0);
+  const payTotal = customerPayments(cid).reduce((s,p)=>s+p.amount,0);
+  const checkTotal = customerChecks(cid).reduce((s,c)=>s+c.amount,0);
+  const cashOnlyTotal = customerPayments(cid).filter(p=>['cash','card','transfer'].includes(p.method)).reduce((s,p)=>s+p.amount,0);
+  const discountTotal = customerPayments(cid).filter(p=>p.method==='discount').reduce((s,p)=>s+p.amount,0);
+  const returnTotal = customerPayments(cid).filter(p=>p.method==='return').reduce((s,p)=>s+p.amount,0);
+  const c = data.customers.find(x=>x.id===cid);
+  const openingBalance = c ? (c.openingBalance||0) : 0;
+  const balance = openingBalance + invTotal - payTotal - checkTotal;
+  return { invTotal, payTotal, checkTotal, cashOnlyTotal, discountTotal, returnTotal, openingBalance, balance };
 }
 
 // تخفیف کلی فاکتور: مبلغ ثابت (پیش‌فرض/قدیمی) یا درصد از جمع جزء فاکتور
@@ -128,22 +109,17 @@ function invoiceEffectiveRemain(inv){
   return Math.max(0, (inv.total||0) - invoiceEffectivePaid(inv));
 }
 
-function customerProfit(cid, ctx, skipMemo){
-  if(ctx && typeof ctx.memo === 'function' && !skipMemo){
-    return ctx.memo('customerProfit', cid, function(){ return customerProfit(cid, ctx, true); });
-  }
+function customerProfit(cid){
   // سود فاکتورها (با تخفیف ردیف و تخفیف کلی)
-  let s = customerInvoices(cid, ctx).reduce((sum,inv)=>{
+  let s = customerInvoices(cid).reduce((sum,inv)=>{
     const itemsProfit = inv.items.reduce((a,it)=>a + (it.price - (it.buyPrice||0)) * it.qty - (it.discount||0), 0);
     return sum + itemsProfit - invoiceDiscountAmount(inv);
   },0);
   // کسر حاشیه برگشت از فروش: (قیمت برگشت − قیمت خرید) × تعداد — فقط وقتی returnItems ثبت شده
-  customerPayments(cid, ctx).filter(p=>p.method==='return').forEach(p=>{
+  customerPayments(cid).filter(p=>p.method==='return').forEach(p=>{
     (p.returnItems||[]).forEach(ri=>{
       if(!(ri.qty>0)) return;
-      const prod = ctx && typeof ctx.productById === 'function'
-        ? ctx.productById(ri.productId)
-        : data.products.find(x=>x.id===ri.productId);
+      const prod = data.products.find(x=>x.id===ri.productId);
       // FIX (audit H-1): cost basis must come from the actual invoice this return is
       // linked to (payment.invoiceId) — not "last sold anywhere" — so it matches the
       // FIFO cost stock.js already computed for this exact return. Falls back to the
@@ -167,7 +143,7 @@ function customerProfit(cid, ctx, skipMemo){
           });
           if(allocs.length){
             let skip=0;
-            for(const x of customerPayments(cid, ctx)){
+            for(const x of customerPayments(cid)){
               if(x.method!=='return' || x.invoiceId!==p.invoiceId) continue;
               if(x.id===p.id) break;
               (x.returnItems||[]).forEach(xri=>{ if(xri.productId===ri.productId) skip += Number(xri.qty)||0; });
@@ -185,7 +161,7 @@ function customerProfit(cid, ctx, skipMemo){
         }
       }
       if(!sourceItem){
-         const sold = customerInvoices(cid, ctx).flatMap(inv=>inv.items.filter(it=>it.productId===ri.productId));
+        const sold = customerInvoices(cid).flatMap(inv=>inv.items.filter(it=>it.productId===ri.productId));
         sourceItem = sold.length ? sold[sold.length-1] : null;
       }
       const qty=Number(ri.qty)||0;
@@ -204,17 +180,14 @@ function customerProfit(cid, ctx, skipMemo){
     });
   });
   // کسر تراکنش «تخفیف (کاهش بدهی)» از سود گزارش‌شده
-  s -= customerPayments(cid, ctx).filter(p=>p.method==='discount').reduce((a,p)=>a+(p.amount||0),0);
+  s -= customerPayments(cid).filter(p=>p.method==='discount').reduce((a,p)=>a+(p.amount||0),0);
   return s;
 }
 
-function customerStats(cid, ctx, skipMemo){
-  if(ctx && typeof ctx.memo === 'function' && !skipMemo){
-    return ctx.memo('customerStats', cid, function(){ return customerStats(cid, ctx, true); });
-  }
-  const invs = customerInvoices(cid, ctx);
-  const pays = customerPayments(cid, ctx);
-  const t = customerTotals(cid, ctx);
+function customerStats(cid){
+  const invs = customerInvoices(cid);
+  const pays = customerPayments(cid);
+  const t = customerTotals(cid);
   const sortedInvs = invs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
   const lastInvoice = sortedInvs[sortedInvs.length-1];
   const firstInvoice = sortedInvs[0];
@@ -225,15 +198,13 @@ function customerStats(cid, ctx, skipMemo){
     firstInvoiceDate: firstInvoice ? firstInvoice.date : null,
     lastInvoiceDate: lastInvoice ? lastInvoice.date : null,
     lastPaymentDate: lastPayment ? lastPayment.date : null,
-    profit: customerProfit(cid, ctx),
+    profit: customerProfit(cid),
     daysSinceLast: lastInvoice ? daysAgo(lastInvoice.date) : Infinity,
   };
 }
 
-function customerStatus(cid, ctx){
-  const c = data.customers.find(function(x){ return x.id === cid; });
-  if(c && c.active === false) return 'inactive';
-  const st = customerStats(cid, ctx);
+function customerStatus(cid){
+  const st = customerStats(cid);
   if(st.count===0) return 'new';
   if(st.daysSinceLast > 60) return 'lost';
   if(st.daysSinceLast > 21) return 'inactive';
@@ -334,17 +305,14 @@ function isSameDay(iso, ref){
   return d.toDateString() === ref.toDateString();
 }
 
-function globalTotals(ctx, skipMemo){
-  if(ctx && typeof ctx.memo === 'function' && !skipMemo){
-    return ctx.memo('globalTotals', 'all', function(){ return globalTotals(ctx, true); });
-  }
+function globalTotals(){
   const totalSales = data.invoices.reduce((s,i)=>s+i.total,0);
   // همان منطق customerProfit برای همه مشتریان (فاکتور − حاشیه برگشت − تخفیف تراکنشی)
-  const totalProfit = data.customers.reduce((s,c)=>s + customerProfit(c.id, ctx), 0);
+  const totalProfit = data.customers.reduce((s,c)=>s + customerProfit(c.id), 0);
   const totalReceived = data.payments.filter(p=>['cash','card','transfer'].includes(p.method)).reduce((s,p)=>s+p.amount,0);
   const outstandingChecks = data.checks.filter(c=>c.status!=='cleared').reduce((s,c)=>s+c.amount,0);
   const customerDebt = data.customers.reduce((s,c)=>{
-    const t = customerTotals(c.id, ctx);
+    const t = customerTotals(c.id);
     return s + Math.max(t.balance,0);
   },0);
   const supplierDebt = data.suppliers.reduce((s,sp)=>s+supplierTotals(sp.id).balance,0);
@@ -458,8 +426,8 @@ function _behaviorSalesInRange(invs, startISO, endISO){
 }
 
 /** Sales-return payments only (method==='return'). READ-ONLY. Does not touch stock/FIFO. */
-function _behaviorReturnPayments(cid, ctx){
-  return (typeof customerPayments === 'function' ? customerPayments(cid, ctx) : [])
+function _behaviorReturnPayments(cid){
+  return (typeof customerPayments === 'function' ? customerPayments(cid) : [])
     .filter(p => p && p.method === 'return');
 }
 
@@ -506,10 +474,7 @@ function _behaviorISODaysAgo(n){
  * Visit cadence (days) from consecutive customer visit gaps.
  * <2 visits → null. Median gap, clamped to 1..90. Read-only.
  */
-function visitCadence(cid, ctx, skipMemo){
-  if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
-    return ctx.memo('visitCadence', cid, function(){ return visitCadence(cid, ctx, true); });
-  }
+function visitCadence(cid){
   if(!cid || typeof data === 'undefined' || !Array.isArray(data.customers)) return null;
   const cust = data.customers.find(function(c){ return c && c.id === cid; });
   const visits = (cust && Array.isArray(cust.visits)) ? cust.visits : [];
@@ -556,11 +521,8 @@ function visitCadence(cid, ctx, skipMemo){
  * Days the customer is overdue relative to their visit cadence.
  * No cadence → 0. Read-only.
  */
-function visitOverdueDays(cid, ctx, skipMemo){
-  if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
-    return ctx.memo('visitOverdueDays', cid, function(){ return visitOverdueDays(cid, ctx, true); });
-  }
-  const cadence = visitCadence(cid, ctx);
+function visitOverdueDays(cid){
+  const cadence = visitCadence(cid);
   if(!cadence) return 0;
   if(!cid || typeof data === 'undefined' || !Array.isArray(data.customers)) return 0;
   const cust = data.customers.find(function(c){ return c && c.id === cid; });
@@ -705,16 +667,11 @@ function _behaviorVisitInvoiceStats(invs, visits){
  * Purchase truth = invoices minus sales-returns (payments method==='return').
  * Visits = observation only. Returns null when data is insufficient. Never mutates data.
  */
-function customerBehavior(cid, ctx, skipMemo){
-  if(ctx && typeof ctx.memo === 'function' && !skipMemo){
-    return ctx.memo('customerBehavior', cid, function(){ return customerBehavior(cid, ctx, true); });
-  }
-  const invs = customerInvoices(cid, ctx).slice().sort((a,b)=>
+function customerBehavior(cid){
+  const invs = customerInvoices(cid).slice().sort((a,b)=>
     (a.date||'').localeCompare(b.date||'') || String(a.number||'').localeCompare(String(b.number||'')));
-  const returns = _behaviorReturnPayments(cid, ctx);
-  const cust = ctx && typeof ctx.customerById === 'function'
-    ? ctx.customerById(cid)
-    : (data.customers || []).find(c => c.id === cid);
+  const returns = _behaviorReturnPayments(cid);
+  const cust = (data.customers || []).find(c => c.id === cid);
   const visits = ((cust && cust.visits) || []).slice().sort((a,b)=>
     (b.date||'').localeCompare(a.date||'') || (b.time||'').localeCompare(a.time||''));
 
@@ -804,9 +761,7 @@ function customerBehavior(cid, ctx, skipMemo){
     .filter(p => p.qty > 0.0001)
     .filter(p => {
       if(!p.productId) return true;
-      const prod = ctx && typeof ctx.productById === 'function'
-        ? ctx.productById(p.productId)
-        : (data.products || []).find(x => x.id === p.productId);
+      const prod = (data.products || []).find(x => x.id === p.productId);
       return !prod || prod.active !== false;
     })
     .sort((a,b)=> b.qty - a.qty)
@@ -829,24 +784,11 @@ function customerBehavior(cid, ctx, skipMemo){
     }
     accSold(early, earlyMap);
     accSold(late, lateMap);
-    /* Return allocation follows the same rule as _behaviorReturnsInRange:
-       linked returns use the original invoice date; account-only or
-       unresolvable returns fall back to the return's own date. */
+    /* Approximate return allocation by return payment date vs mid invoice date */
     const midDate = invs[mid] && invs[mid].date ? invs[mid].date : null;
-    let returnInvById = null;
-    if(Array.isArray(invs)){
-      returnInvById = {};
-      invs.forEach(inv => {
-        if(inv && inv.id) returnInvById[inv.id] = inv;
-      });
-    }
     if(midDate){
       returns.forEach(p => {
-        let refDate = p.date || '';
-        if(returnInvById && p.invoiceId && returnInvById[p.invoiceId] && returnInvById[p.invoiceId].date){
-          refDate = returnInvById[p.invoiceId].date;
-        }
-        const target = refDate < midDate ? earlyMap : lateMap;
+        const target = (p.date || '') < midDate ? earlyMap : lateMap;
         (p.returnItems || []).forEach(ri => {
           const key = ri.productId || ('n:' + (ri.name||''));
           if(!target[key]) target[key] = { productId: ri.productId||null, name: ri.name||'—', qty: 0 };
@@ -860,9 +802,7 @@ function customerBehavior(cid, ctx, skipMemo){
       if(e >= 2 && l < e * 0.6){
         const pid = earlyMap[key].productId;
         if(pid){
-          const prod = ctx && typeof ctx.productById === 'function'
-            ? ctx.productById(pid)
-            : (data.products || []).find(x => x.id === pid);
+          const prod = (data.products || []).find(x => x.id === pid);
           if(prod && prod.active === false) return; // exclude inactive from CURRENT signals
         }
         decliningProducts.push({
@@ -953,7 +893,7 @@ function _ccPreviousJalaliMonth(jy, jm){
   return jm === 1 ? {jy:jy-1, jm:12} : {jy:jy, jm:jm-1};
 }
 
-function _ccReturnMarginForPayment(cid, p, ctx){
+function _ccReturnMarginForPayment(cid, p){
   let margin = 0;
   (p.returnItems || []).forEach(function(ri){
     if(!(Number(ri.qty)>0)) return;
@@ -976,7 +916,7 @@ function _ccReturnMarginForPayment(cid, p, ctx){
         });
         if(allocs.length){
           let skip=0;
-           for(const x of customerPayments(cid, ctx)){
+          for(const x of customerPayments(cid)){
             if(x.method!=='return' || x.invoiceId!==p.invoiceId) continue;
             if(x.id===p.id) break;
             (x.returnItems||[]).forEach(function(xri){
@@ -1000,7 +940,7 @@ function _ccReturnMarginForPayment(cid, p, ctx){
       }
     }
     if(!sourceItem){
-       const sold = customerInvoices(cid, ctx).flatMap(function(inv){
+      const sold = customerInvoices(cid).flatMap(function(inv){
         return (inv.items||[]).filter(function(it){ return it.productId===ri.productId; });
       });
       sourceItem = sold.length ? sold[sold.length-1] : null;
@@ -1022,8 +962,8 @@ function _ccReturnMarginForPayment(cid, p, ctx){
   return margin;
 }
 
-function _ccCustomerProfitInJalaliRange(cid, jy, jm, jdMin, jdMax, ctx){
-  const invs = customerInvoices(cid, ctx).filter(function(inv){ return _ccInJalaliRange(inv.date, jy, jm, jdMin, jdMax); });
+function _ccCustomerProfitInJalaliRange(cid, jy, jm, jdMin, jdMax){
+  const invs = customerInvoices(cid).filter(function(inv){ return _ccInJalaliRange(inv.date, jy, jm, jdMin, jdMax); });
   let profit = invs.reduce(function(sum, inv){
     const itemsProfit = (inv.items||[]).reduce(function(a,it){
       return a + ((Number(it.price)||0) - (Number(it.buyPrice)||0)) * (Number(it.qty)||0) - (Number(it.discount)||0);
@@ -1031,26 +971,22 @@ function _ccCustomerProfitInJalaliRange(cid, jy, jm, jdMin, jdMax, ctx){
     return sum + itemsProfit - invoiceDiscountAmount(inv);
   },0);
 
-  customerPayments(cid, ctx).filter(function(p){
+  customerPayments(cid).filter(function(p){
     return _ccInJalaliRange(p.date, jy, jm, jdMin, jdMax);
   }).forEach(function(p){
-    if(p.method==='return') profit -= _ccReturnMarginForPayment(cid, p, ctx);
+    if(p.method==='return') profit -= _ccReturnMarginForPayment(cid, p);
     if(p.method==='discount') profit -= Number(p.amount)||0;
   });
   return profit;
 }
 
-function _ccProfitInJalaliRange(jy, jm, jdMin, jdMax, ctx){
+function _ccProfitInJalaliRange(jy, jm, jdMin, jdMax){
   return (data.customers||[]).reduce(function(sum,c){
-    return sum + _ccCustomerProfitInJalaliRange(c.id, jy, jm, jdMin, jdMax, ctx);
+    return sum + _ccCustomerProfitInJalaliRange(c.id, jy, jm, jdMin, jdMax);
   },0);
 }
 
-function commandCenterMetrics(refDate, ctx, skipMemo){
-  if(ctx && typeof ctx.memo === 'function' && !skipMemo){
-    var metricKey = refDate instanceof Date ? refDate.toISOString() : String(refDate || '');
-    return ctx.memo('commandCenterMetrics', metricKey, function(){ return commandCenterMetrics(refDate, ctx, true); });
-  }
+function commandCenterMetrics(refDate){
   const ref = refDate instanceof Date ? refDate : new Date(refDate || Date.now());
   const cur = _ccJalaliParts(ref);
   if(!cur) return {mtdSales:0,mtdProfit:0,mtdCount:0,priorSales:0,priorProfit:0,priorCount:0,priorDayCount:0,salesDeltaPct:null,profitDeltaPct:null};
@@ -1069,8 +1005,8 @@ function commandCenterMetrics(refDate, ctx, skipMemo){
     }
   });
 
-  const mtdProfit = _ccProfitInJalaliRange(cur.jy, cur.jm, 1, cur.jd, ctx);
-  const priorProfit = _ccProfitInJalaliRange(prev.jy, prev.jm, 1, prevMax, ctx);
+  const mtdProfit = _ccProfitInJalaliRange(cur.jy, cur.jm, 1, cur.jd);
+  const priorProfit = _ccProfitInJalaliRange(prev.jy, prev.jm, 1, prevMax);
   const salesDeltaPct = priorSales ? ((mtdSales-priorSales)/priorSales)*100 : (mtdSales ? null : 0);
   const profitDeltaPct = priorProfit ? ((mtdProfit-priorProfit)/Math.abs(priorProfit))*100 : (mtdProfit ? null : 0);
 

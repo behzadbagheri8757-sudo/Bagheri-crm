@@ -81,7 +81,6 @@ function consumeLayersFIFO(productId, qty){
     });
     need -= take;
   }
-  if(need <= 1e-9) need = 0;
   return { ok: need<=0, allocations, shortfall: Math.max(0, need) };
 }
 
@@ -533,10 +532,10 @@ function validateSaleAvailability(items, creditStockByProduct, creditFifoByProdu
     if(stock < 0){
       return { ok:false, code:'NEGATIVE_STOCK', error:'موجودی کافی نیست یا موجودی FIFO با موجودی کالا ناسازگار است.\n\n«'+name+'»: موجودی کالا منفی است.' };
     }
-    if(need > stock + 1e-9){
+    if(need > stock){
       return { ok:false, code:'STOCK', error:'موجودی کافی نیست یا موجودی FIFO با موجودی کالا ناسازگار است.\n\n«'+name+'»: موجودی واقعی برای فروش کافی نیست.\nموجودی: '+stock+'\nدرخواستی: '+need };
     }
-    if(need > fifo + 1e-9){
+    if(need > fifo){
       return { ok:false, code:'FIFO_DESYNC', error:'موجودی کافی نیست یا موجودی FIFO با موجودی کالا ناسازگار است.\n\n«'+name+'»: موجودی FIFO با موجودی کالا ناسازگار است.\nموجودی کالا: '+stock+'\nموجودی لایه‌های قابل مصرف: '+fifo+'\nدرخواستی: '+need };
     }
   }
