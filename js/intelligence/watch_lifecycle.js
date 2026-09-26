@@ -218,9 +218,61 @@
     if (!_deferSave) _saveLS();
   }
 
+  // Historical retention (maintenance-only; runs once at bootstrap below,
+  // never from reconcileWatchLifecycle/getActiveWatchOccurrences or any
+  // other render/reconcile path). A resolved/dismissed occurrence has
+  // operational value as a review trail for a while, but not forever —
+  // active occurrences are never in scope (see the r.status === 'active'
+  // guard in _isRetentionExpired, mirroring the same 'active'-only
+  // handling _activeByIdentity/reconcileWatchLifecycle already use
+  // elsewhere in this file). 90 days is chosen to stay clearly outside any
+  // possible interaction with the Intelligence signal window (see
+  // PERSISTENCE_PARAMS.windowDays = 60 days in
+  // js/intelligence/persistence.js) plus a seller-review buffer, while
+  // still bounding unlimited growth of resolved/dismissed history.
+  var WATCH_HISTORY_RETENTION_DAYS = 90;
+
+  function _isRetentionExpired(rec, cutoffMs) {
+    if (!rec || rec.status === 'active') return false;
+    var resolvedAt = rec.resolution && rec.resolution.resolvedAt;
+    if (!resolvedAt) return false; // no resolution timestamp — do not guess, keep it
+    var t = Date.parse(resolvedAt);
+    if (!isFinite(t)) return false; // unparsable — keep it, do not guess
+    return t < cutoffMs;
+  }
+
+  function _sweepExpiredHistory() {
+    var cutoffMs = Date.now() - (WATCH_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    var ids = Object.keys(_mem);
+    var removedIds = [];
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      if (_isRetentionExpired(_mem[id], cutoffMs)) {
+        delete _mem[id];
+        delete _dirtyIds[id];
+        removedIds.push(id);
+      }
+    }
+    if (removedIds.length) {
+      _saveLS();
+      if (_idb) {
+        try {
+          var tx = _idb.transaction(WATCH_STORE, 'readwrite');
+          var store = tx.objectStore(WATCH_STORE);
+          for (var j = 0; j < removedIds.length; j++) store.delete(removedIds[j]);
+          tx.onerror = function () { console.error('Watch lifecycle history GC IDB delete failed', tx.error); };
+        } catch (e) {
+          console.error('Watch lifecycle history GC IDB delete threw', e);
+        }
+      }
+    }
+    return removedIds.length;
+  }
+
   _loadLS();
   _openIdb(function (db) {
-    if (db) _idbHydrate(function () {});
+    if (db) _idbHydrate(function () { _sweepExpiredHistory(); });
+    else _sweepExpiredHistory();
   });
 
   function _allOccurrences() {
