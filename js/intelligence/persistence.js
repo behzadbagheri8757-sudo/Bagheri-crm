@@ -153,6 +153,14 @@
     } catch (e) { /* ignore */ }
   }
 
+  function _idbDelete(key) {
+    if (!_idb) return;
+    try {
+      var tx = _idb.transaction(PERSISTENCE_PARAMS.idbStore, 'readwrite');
+      tx.objectStore(PERSISTENCE_PARAMS.idbStore).delete(key);
+    } catch (e) { /* ignore */ }
+  }
+
   function _idbHydrate(cb) {
     if (!_idb) {
       if (cb) cb();
@@ -182,10 +190,51 @@
     }
   }
 
-  // Bootstrap: localStorage first (sync), IDB async mirror
+  /**
+   * Cold-Key GC (maintenance-only; runs once at bootstrap, never from the
+   * render/reconcile hot path). A key is "cold" when _prune() reduces its
+   * dates to an empty array as-of today — i.e. every occurrence it holds
+   * has already aged out of PERSISTENCE_PARAMS.windowDays. Removing such a
+   * key changes nothing about future behavior: recordOccurrence() already
+   * treats a missing key exactly like a cold one (dates=[], fresh count
+   * starting at 1, status 'pending' via statusFromCount) — see the
+   * `_mem[key] ? _mem[key].slice() : []` fallback there and in
+   * getOccurrenceCount(). This function does not touch _prune, does not
+   * touch keys that still have at least one date inside the window, and
+   * does not alter recordOccurrence/status logic in any way.
+   * Removal is applied to all three storage layers together so a later
+   * _idbHydrate() (which merges IndexedDB rows back into _mem) cannot
+   * resurrect a key this sweep already removed.
+   */
+  function _sweepColdKeys() {
+    var today = _today();
+    var removedKeys = [];
+    var keys = Object.keys(_mem);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var pruned = _prune(_mem[k] || [], today);
+      if (pruned.length === 0) {
+        delete _mem[k];
+        removedKeys.push(k);
+      }
+    }
+    if (removedKeys.length) {
+      _saveLocalStorage();
+      for (var j = 0; j < removedKeys.length; j++) {
+        _idbDelete(removedKeys[j]);
+      }
+    }
+    return removedKeys.length;
+  }
+
+  // Bootstrap: localStorage first (sync), IDB async mirror, then a single
+  // maintenance GC pass over whatever is now in _mem (local-only keys and
+  // freshly hydrated IDB keys alike). Not called from applyPersistence,
+  // recordOccurrence, or getOccurrenceCount — bootstrap-only, once per load.
   _loadLocalStorage();
   _openIdb(function (db) {
-    if (db) _idbHydrate(function () { _saveLocalStorage(); });
+    if (db) _idbHydrate(function () { _saveLocalStorage(); _sweepColdKeys(); });
+    else _sweepColdKeys();
   });
 
   function recordOccurrence(customerId, category, productId, timestamp) {
@@ -295,5 +344,6 @@
   // internal test seam
   global._intelligencePersistenceSeed = _seedOccurrences;
   global._intelligencePersistenceMem = function () { return _mem; };
+  global._intelligenceColdKeySweep = _sweepColdKeys;
 
 })(typeof window !== 'undefined' ? window : this);
