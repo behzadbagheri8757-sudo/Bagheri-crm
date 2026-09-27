@@ -146,12 +146,225 @@ function computeDebtAllocationForAmount(cid, amount, excludeId){
 }
 
 /**
- * پوشش واقعی فاکتور: مبلغ روی خود فاکتور + مجموع تخصیص‌های ثبت‌شده (debtAllocations)
- * دریافت‌ها/چک‌های بدون‌مقصدِ همین مشتری که به این فاکتور اشاره می‌کنند.
- * برخلاف نسخهٔ قبلی، اینجا هیچ FIFOای «در لحظه» دوباره محاسبه نمی‌شود — فقط تخصیص‌های
- * از قبل ثبت‌شده (در لحظهٔ ثبت هر دریافت) جمع زده می‌شوند. همان دلیل که آن پول
- * دوباره‌شمرده نشود همچنان برقرار است: پرداخت‌های لینک‌شده به فاکتور (invoiceId دارند)
- * از این جمع کنار گذاشته می‌شوند، چون خودشان مستقیم در invoiceOnRecordPaid حساب شده‌اند.
+ * محاسبهٔ زندهٔ تخصیص بدهی یک مشتری، مستقیماً از داده‌های اصلی (فاکتورها، پرداخت‌ها،
+ * چک‌ها، مانده افتتاحیه) — بدون هیچ وابستگی به debtAllocations ذخیره‌شده روی رکوردها
+ * (آن فیلد فقط برای audit/نمایش نگه داشته می‌شود و دیگر منبع محاسبه نیست).
+ *
+ * قاعده: پرداخت متصل (invoiceId دارد) → فقط همان فاکتور (از طریق فیلدهای خودِ فاکتور،
+ * یعنی invoiceOnRecordPaid؛ اینجا دوباره شمرده نمی‌شود). پرداخت/چکِ بدون‌مقصد →
+ * ابتدا مانده افتتاحیه، سپس قدیمی‌ترین فاکتور باز، به ترتیب؛ باقیمانده = اعتبار مشتری.
+ *
+ * «برگشت از فروش»ِ بدون‌مقصد (method==='return', بدون invoiceId) در این FIFO شرکت
+ * نمی‌کند — دقیقاً هم‌سو با app.js که هرگز برای چنین رکوردی debtAllocations نمی‌سازد
+ * (فقط cash/card/transfer/discount واجد شرایط تخصیص بدهی شناخته می‌شوند). چنین
+ * برگشتی صرفاً اعتبار سطح‌مشتری است (از طریق customerTotals.payTotal، که تغییر
+ * نکرده) و به فاکتور خاصی نسبت داده نمی‌شود.
+ *
+ * Event sorting: date → id (نه number، چون number لزوماً شمارهٔ فاکتور نیست).
+ * Invoice sorting: date → number → id.
+ *
+ * خروجی: {invRemain: {invoiceId: مانده‌ی آن فاکتور بعد از FIFو (پیش از احتساب
+ * برگشتِ متصل)}, openingRemaining, credit}.
+ */
+function customerFifoAllocation(cid){
+  const invs = customerInvoices(cid)
+    .slice()
+    .sort((a,b)=> (a.date||'').localeCompare(b.date||'')
+      || String(a.number||'').localeCompare(String(b.number||''))
+      || String(a.id||'').localeCompare(String(b.id||'')));
+
+  const cust = data.customers.find(x=>x.id===cid);
+  const openingBalance = cust ? (Number(cust.openingBalance)||0) : 0;
+  let openingRemaining = Math.max(0, openingBalance);
+
+  // Contract change (intentional): previously linked payment/check records were
+  // represented only by invoiceOnRecordPaid(inv), so any amount above the target
+  // invoice never entered FIFO.  The new contract keeps invoiceOnRecordPaid as the
+  // hard recorded-payment cap, then sends genuine overflow from each linked event,
+  // at that event's own date, through the same FIFO used by unlinked receipts. This
+  // prevents the explainability bug where customer balance is settled but an older
+  // invoice remains open.
+  const invRemain = {};
+  const linkedState = {};
+  invs.forEach(function(inv){
+    const recordCap = Math.max(0, Number(invoiceOnRecordPaid(inv))||0);
+    invRemain[inv.id] = Math.max(0, (Number(inv.total)||0) - recordCap);
+    linkedState[inv.id] = { recordCap: recordCap, consumed: 0, eventTotal: 0 };
+  });
+
+  const events = [];
+  const pushEvent = function(ev){
+    const amount = Number(ev.amount)||0;
+    if(!(amount>1e-9)) return;
+    events.push(ev);
+  };
+
+  // Only the four ordinary payment methods enter FIFO. Return remains governed by
+  // linkedReturn and the existing return/profit/inventory logic.
+  (data.payments||[]).forEach(function(p){
+    if(p.customerId!==cid || !['cash','card','transfer','discount'].includes(p.method)) return;
+    pushEvent({
+      kind: 'payment',
+      date: p.date||'',
+      id: String(p.id||''),
+      amount: Number(p.amount)||0,
+      invoiceId: p.invoiceId || null,
+      method: p.method
+    });
+  });
+  (data.checks||[]).forEach(function(c){
+    if(c.customerId!==cid) return;
+    // Checks are ordered by dueDate only; check.date is intentionally ignored.
+    pushEvent({
+      kind: 'check',
+      date: c.dueDate||'',
+      id: String(c.id||''),
+      amount: Number(c.amount)||0,
+      invoiceId: c.invoiceId || null
+    });
+  });
+  events.sort((a,b)=> a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+
+  // Audit only: linked event amounts and invoiceOnRecordPaid are two views of the same payment stream.
+  // They are never two amounts to add together. Do not mutate data.
+  const linkedByInvoice = {};
+  events.forEach(function(ev){
+    if(!ev.invoiceId || !Object.prototype.hasOwnProperty.call(linkedState, ev.invoiceId)) return;
+    linkedByInvoice[ev.invoiceId] = (linkedByInvoice[ev.invoiceId]||0) + ev.amount;
+  });
+  const linkedMismatches = [];
+  const orphanLinkedEvents = [];
+  invs.forEach(function(inv){
+    const state = linkedState[inv.id];
+    const eventTotal = linkedByInvoice[inv.id]||0;
+    state.eventTotal = eventTotal;
+    if(Math.abs(eventTotal - state.recordCap) > 1e-9){
+      linkedMismatches.push({
+        invoiceId: inv.id,
+        invoiceNumber: inv.number,
+        invoiceOnRecordPaid: state.recordCap,
+        linkedEventTotal: eventTotal,
+        difference: eventTotal - state.recordCap
+      });
+    }
+  });
+
+  let credit = 0;
+  const allocations = [];
+  const auditTolerance = 1e-9;
+
+  const applyFifo = function(amount, eventDate, excludedInvoiceId){
+    let remaining = Number(amount)||0;
+    let openingAllocated = 0;
+    const invoiceAllocations = [];
+
+    if(remaining>auditTolerance && openingRemaining>auditTolerance){
+      const take = Math.min(openingRemaining, remaining);
+      openingRemaining -= take;
+      remaining -= take;
+      openingAllocated = take;
+    }
+
+    for(let idx=0; idx<invs.length && remaining>auditTolerance; idx++){
+      const inv = invs[idx];
+      if(inv.id===excludedInvoiceId) continue;
+      // A receipt at T may only cover an invoice dated <= T.
+      if((inv.date||'') > eventDate) continue;
+      const rem = invRemain[inv.id];
+      if(!(rem>auditTolerance)) continue;
+      const take = Math.min(rem, remaining);
+      invRemain[inv.id] = rem - take;
+      remaining -= take;
+      invoiceAllocations.push({invoiceId: inv.id, amount: take});
+    }
+
+    return {remaining: remaining, opening: openingAllocated, invoices: invoiceAllocations};
+  };
+
+  events.forEach(function(ev){
+    let eventRemaining = ev.amount;
+    let targetAllocated = 0;
+    let openingAllocated = 0;
+    let invoiceAllocations = [];
+    let discrepancy = false;
+
+    if(ev.invoiceId && !Object.prototype.hasOwnProperty.call(linkedState, ev.invoiceId)){
+      // A dangling invoiceId is not a valid unlinked receipt. Keep it visible in
+      // audit and do not invent a target, FIFO allocation, or customer credit.
+      orphanLinkedEvents.push({kind:ev.kind, id:ev.id, date:ev.date, invoiceId:ev.invoiceId, amount:ev.amount});
+      allocations.push({kind:ev.kind, id:ev.id, date:ev.date, invoiceId:ev.invoiceId, amount:ev.amount, targetInvoice:0, opening:0, invoices:[], credit:0, discrepancy:true});
+      return;
+    }
+
+    if(ev.invoiceId && Object.prototype.hasOwnProperty.call(linkedState, ev.invoiceId)){
+      const state = linkedState[ev.invoiceId];
+      const targetInv = invs.find(function(inv){ return inv.id===ev.invoiceId; });
+      const targetRemaining = targetInv
+        ? Math.max(0, (Number(targetInv.total)||0) - state.consumed)
+        : 0;
+      const capRemaining = Math.max(0, state.recordCap - state.consumed);
+      targetAllocated = Math.min(eventRemaining, targetRemaining, capRemaining);
+      state.consumed += targetAllocated;
+      eventRemaining -= targetAllocated;
+
+      // If this event exceeds the remaining recorded-payment cap, the excess is
+      // a source-data discrepancy, not a new payment. Do not invent FIFO/credit.
+      if(ev.amount > capRemaining + auditTolerance){
+        discrepancy = true;
+        eventRemaining = 0;
+      } else if(eventRemaining>auditTolerance){
+        const fifo = applyFifo(eventRemaining, ev.date, ev.invoiceId);
+        openingAllocated = fifo.opening;
+        invoiceAllocations = fifo.invoices;
+        eventRemaining = fifo.remaining;
+      }
+    } else {
+      const fifo = applyFifo(eventRemaining, ev.date, null);
+      openingAllocated = fifo.opening;
+      invoiceAllocations = fifo.invoices;
+      eventRemaining = fifo.remaining;
+    }
+
+    if(eventRemaining>auditTolerance) credit += eventRemaining;
+
+    allocations.push({
+      kind: ev.kind,
+      id: ev.id,
+      date: ev.date,
+      invoiceId: ev.invoiceId,
+      amount: ev.amount,
+      targetInvoice: targetAllocated,
+      opening: openingAllocated,
+      invoices: invoiceAllocations,
+      credit: eventRemaining>auditTolerance ? eventRemaining : 0,
+      discrepancy: discrepancy
+    });
+  });
+
+  return {
+    invRemain: invRemain,
+    openingRemaining: openingRemaining,
+    credit: credit,
+    audit: {
+      linkedMismatches: linkedMismatches,
+      orphanLinkedEvents: orphanLinkedEvents,
+      tolerance: auditTolerance
+    },
+    allocations: allocations
+  };
+}
+
+/**
+ * پوشش واقعی فاکتور: مبلغ روی خود فاکتور (invoiceOnRecordPaid؛ بدون تغییر) +
+ * سهمی که از FIFوی زندهٔ همین مشتری (customerFifoAllocation) واقعاً به این فاکتور
+ * رسیده + مجموع «برگشت از فروش»های متصل مستقیم به همین فاکتور.
+ * پرداخت/چکِ متصل (invoiceId دارد، method !== 'return') در محاسبه دوباره شمرده
+ * نمی‌شود، چون همان مبلغ از قبل در invoiceOnRecordPaid(inv) نمایش داده شده است.
+ * برگشتِ متصل استثناست: در invoiceOnRecordPaid نیست، پس اینجا مستقیم اضافه می‌شود.
+ * اگر برگشتِ متصل از مانده‌ی همین فاکتور بیشتر باشد، مازاد آن (طبق قرارداد) به
+ * فاکتور دیگری منتقل یا اینجا دوباره حساب نمی‌شود؛ صرفاً به‌عنوان اعتبار سطح‌مشتری
+ * در customerTotals.balance (که مبلغ خام هر پرداخت را بدون توجه به invoiceId جمع
+ * می‌زند) منعکس است.
  */
 function invoiceEffectivePaid(inv){
   if(!inv) return 0;
@@ -159,20 +372,21 @@ function invoiceEffectivePaid(inv){
   const cid = inv.customerId;
   if(!cid || typeof data === 'undefined' || !data) return onRec;
 
-  let allocated = 0;
-  const addFromAlloc = function(list){
-    (list||[]).forEach(function(x){
-      if(x.customerId !== cid || x.invoiceId) return;
-      if(!Array.isArray(x.debtAllocations)) return;
-      x.debtAllocations.forEach(function(a){
-        if(a.type === 'invoice' && a.invoiceId === inv.id) allocated += a.amount||0;
-      });
-    });
-  };
-  addFromAlloc(data.payments);
-  addFromAlloc(data.checks);
+  const alloc = customerFifoAllocation(cid);
+  const preFifoRemain = Math.max(0, (inv.total||0) - onRec);
+  const postFifoRemain = Object.prototype.hasOwnProperty.call(alloc.invRemain, inv.id)
+    ? alloc.invRemain[inv.id]
+    : preFifoRemain;
+  const fifoApplied = preFifoRemain - postFifoRemain;
 
-  return onRec + allocated;
+  let linkedReturn = 0;
+  (data.payments||[]).forEach(function(p){
+    if(p.customerId===cid && p.invoiceId===inv.id && p.method==='return'){
+      linkedReturn += Number(p.amount)||0;
+    }
+  });
+
+  return onRec + fifoApplied + linkedReturn;
 }
 
 /**
