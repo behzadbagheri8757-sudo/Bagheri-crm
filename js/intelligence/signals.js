@@ -96,7 +96,85 @@
       actionable: opts.actionable !== false,
       source: opts.source || 'customerBehavior',
       sourceLevel: opts.sourceLevel || _sourceLevelForCategory(category),
+      evidence: opts.evidence || null,
     };
+  }
+
+  /* ---------------------------------------------------------
+     Product Analysis Group (surgical addition — see models.js/db.js
+     data.analysisGroups + product.analysisGroupId).
+     Distinguishes "SKU واقعاً از دست رفته" from "SKU افت کرده ولی مشتری
+     SKU دیگری از همان گروه تحلیلی را خریده" — Intelligence-layer only,
+     no financial/inventory/FIFO/invoice behavior touched.
+     --------------------------------------------------------- */
+
+  /** Map productId -> product object, built once per extraction call. */
+  function _buildProductsByIdMap() {
+    var map = Object.create(null);
+    var list = (typeof data !== 'undefined' && Array.isArray(data.products)) ? data.products : [];
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
+      if (p && p.id) map[p.id] = p;
+    }
+    return map;
+  }
+
+  function _analysisGroupNameById(gid) {
+    if (!gid || typeof data === 'undefined' || !Array.isArray(data.analysisGroups)) return '';
+    var g = data.analysisGroups.find(function (x) { return x && x.id === gid; });
+    return g ? (g.name || '') : '';
+  }
+
+  /**
+   * Set of productIds purchased (qty > 0) in the "late half" of the customer's
+   * invoice history, using the EXACT same time split calc.js uses for
+   * decliningProducts (customerBehavior): sort by date, invoice number as
+   * tie-breaker, mid = Math.floor(count/2), late = second half.
+   * No new threshold invented — same split, no invoiceCount gate beyond what
+   * the split itself implies (an empty/short history naturally yields an
+   * empty or trivial late-set).
+   * Computed ONCE per extraction call (extractCustomerSignals /
+   * extractWatchObservations) and passed down — never re-scanned per signal.
+   */
+  function _getConfirmedLateProductIds(cid, ctx) {
+    var ids = Object.create(null);
+    if (typeof customerInvoices !== 'function') return ids;
+    var invs = customerInvoices(cid, ctx).slice().sort(function (a, b) {
+      return String(a.date || '').localeCompare(String(b.date || ''))
+        || String(a.number || '').localeCompare(String(b.number || ''));
+    });
+    var count = invs.length;
+    var mid = Math.floor(count / 2);
+    var late = invs.slice(mid);
+    for (var i = 0; i < late.length; i++) {
+      var items = late[i].items || [];
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        if (it && it.productId && it.qty > 0) ids[it.productId] = true;
+      }
+    }
+    return ids;
+  }
+
+  /**
+   * Group Retention rule (exact, no fuzzy matching):
+   * A declined + A.analysisGroupId exists + some B in lateProductIds shares
+   * that analysisGroupId + B !== A  =>  true. Any missing piece => false.
+   */
+  function _isGroupRetained(productIdA, productsById, lateProductIds) {
+    if (!productIdA || !productsById || !lateProductIds) return false;
+    var prodA = productsById[productIdA];
+    var groupId = prodA ? (prodA.analysisGroupId || null) : null;
+    if (!groupId) return false;
+    var lateIds = Object.keys(lateProductIds);
+    for (var i = 0; i < lateIds.length; i++) {
+      var pidB = lateIds[i];
+      if (pidB === productIdA) continue;
+      var prodB = productsById[pidB];
+      var groupB = prodB ? (prodB.analysisGroupId || null) : null;
+      if (groupB && groupB === groupId) return true;
+    }
+    return false;
   }
 
   /* ---------------------------------------------------------
@@ -178,14 +256,20 @@
   /* ---------------------------------------------------------
      6: BASKET_SHRINK
      --------------------------------------------------------- */
-  function _basketShrinkSignal(cid, b, out) {
+  function _basketShrinkSignal(cid, b, out, productsById, lateProductIds) {
     if (!(b.invoiceCount >= 4)) return;
     const declining = Array.isArray(b.decliningProducts) ? b.decliningProducts : [];
     if (!(declining.length >= 1)) return;
+    // Product Analysis Group: a decline that's actually a same-group SKU
+    // switch isn't a meaningful basket shrink — filter it out before counting.
+    const meaningful = declining.filter(function (p) {
+      return !(p && _isGroupRetained(p.productId, productsById, lateProductIds));
+    });
+    if (!(meaningful.length >= 1)) return;
     out.push(_mkSignal(cid, 'BASKET_SHRINK', {
       type: 'risk',
       severity: 'medium',
-      value: declining.length,
+      value: meaningful.length,
       unit: 'count',
       reason: 'تنوع سبد خرید کاهش یافته است',
       confidence: 0.75,
@@ -200,12 +284,23 @@
      decliningProducts with earlyQty > 0 (i.e. it was actually
      purchased in the earlier half of the customer's history).
      --------------------------------------------------------- */
-  function _keyProductLostSignal(cid, b, out) {
+  function _keyProductLostSignal(cid, b, out, productsById, lateProductIds) {
     const declining = Array.isArray(b.decliningProducts) ? b.decliningProducts : [];
     const lost = declining.filter(function (p) {
       return p && p.earlyQty >= 5 && p.lateQty === 0;
     });
     if (!lost.length) return;
+
+    // Product Analysis Group split: a "lost" SKU whose analysis group is
+    // retained via a substitute SKU is not the same signal as a genuinely
+    // abandoned product line — see spec §4.4. Existing earlyQty/lateQty
+    // threshold above is untouched.
+    const hardLost = [];
+    const retainedLost = [];
+    lost.forEach(function (p) {
+      if (_isGroupRetained(p.productId, productsById, lateProductIds)) retainedLost.push(p);
+      else hardLost.push(p);
+    });
 
     // decliningProducts (from calc.js) doesn't carry invoice-level
     // presence counts, only aggregated early/late qty — so the
@@ -213,19 +308,42 @@
     // the spec cannot be computed from the data actually available.
     // Per instructions ("اگر ساختار کافی نیست، حدس نزن")، این بخش
     // پیاده‌سازی نشد و confidence بر همان مبنای earlyQty/lateQty ثابت می‌ماند.
-    const names = lost.map(function (p) { return p.name; }).filter(Boolean);
-    const reason = names.length === 1
-      ? 'محصول کلیدی «' + names[0] + '» دیگر خریداری نمی‌شود'
-      : 'محصولات کلیدی (' + names.join('، ') + ') دیگر خریداری نمی‌شوند';
+    if (hardLost.length > 0) {
+      const names = hardLost.map(function (p) { return p.name; }).filter(Boolean);
+      const reason = names.length === 1
+        ? 'محصول کلیدی «' + names[0] + '» دیگر خریداری نمی‌شود'
+        : 'محصولات کلیدی (' + names.join('، ') + ') دیگر خریداری نمی‌شوند';
 
-    out.push(_mkSignal(cid, 'KEY_PRODUCT_LOST', {
-      type: 'risk',
-      severity: 'high',
-      value: lost.length,
-      unit: 'count',
-      reason: reason,
-      confidence: 0.8,
-    }));
+      out.push(_mkSignal(cid, 'KEY_PRODUCT_LOST', {
+        type: 'risk',
+        severity: 'high',
+        value: hardLost.length,
+        unit: 'count',
+        reason: reason,
+        confidence: 0.8,
+        evidence: { hardLost: hardLost, retainedLost: retainedLost },
+      }));
+      return;
+    }
+
+    if (retainedLost.length > 0) {
+      const retainedReason = retainedLost.map(function (p) {
+        const prod = productsById ? productsById[p.productId] : null;
+        const groupName = _analysisGroupNameById(prod ? prod.analysisGroupId : null);
+        return 'محصول «' + (p.name || '') + '» دیگر خریداری نمی‌شود، اما گروه تحلیلی «'
+          + (groupName || '') + '» با محصول جایگزین حفظ شده است';
+      }).join(' — ');
+
+      out.push(_mkSignal(cid, 'KEY_PRODUCT_LOST', {
+        type: 'risk',
+        severity: 'low',
+        value: retainedLost.length,
+        unit: 'count',
+        reason: retainedReason,
+        confidence: 0.7,
+        evidence: { hardLost: hardLost, retainedLost: retainedLost },
+      }));
+    }
   }
 
   /* ---------------------------------------------------------
@@ -391,14 +509,19 @@
     const b = customerBehavior(cid, ctx);
     if (!b) return out;
 
+    // Product Analysis Group: computed ONCE here and reused by both
+    // consumer functions below — never re-scans invoice history per signal.
+    const productsById = _buildProductsByIdMap();
+    const lateProductIds = _getConfirmedLateProductIds(cid, ctx);
+
     // Signals 1-3 require at least a comparable previous-30-day baseline;
     // customerBehavior() itself returns 0 (not null) when there's no data,
     // and the false-positive rule (#10) already guards on salesPrev30 > 0.
     _purchaseTrendSignals(cid, b, out);
     _behindPatternSignal(cid, b, out);
     _consecutiveNoOrderSignal(cid, b, out);
-    _basketShrinkSignal(cid, b, out);
-    _keyProductLostSignal(cid, b, out);
+    _basketShrinkSignal(cid, b, out, productsById, lateProductIds);
+    _keyProductLostSignal(cid, b, out, productsById, lateProductIds);
     _visitOverdueSignal(cid, b, out, ctx);
     _longNoVisitSignal(cid, b, out, ctx);
     _visitConversionLowSignal(cid, b, out);
@@ -707,16 +830,22 @@
      "Meaningful decline" per product: earlyQty >= 2 and lateQty <= earlyQty*0.5
      — chosen independently of calc.js's decliningProducts thresholds
      (which require invoiceCount>=4, earlyQty>=2, lateQty<earlyQty*0.6). */
-  function _basketShrinkWatch(cid, out, ctx) {
+  function _basketShrinkWatch(cid, out, ctx, productsById, lateProductIds) {
     var split = _watchRawInvoiceSplit(cid, ctx);
     if (!split) return;
     var earlyKeys = Object.keys(split.early);
     var decliningCount = 0;
     for (var i = 0; i < earlyKeys.length; i++) {
-      var e = split.early[earlyKeys[i]];
-      var l = split.late[earlyKeys[i]];
+      var pid = earlyKeys[i];
+      var e = split.early[pid];
+      var l = split.late[pid];
       var lateQty = l ? l.qty : 0;
-      if (e.qty >= 2 && lateQty <= e.qty * 0.5) decliningCount++;
+      if (e.qty >= 2 && lateQty <= e.qty * 0.5) {
+        // Product Analysis Group: a same-group substitute means this SKU's
+        // decline is not a "hard" decline — don't count it (spec §4.7).
+        if (_isGroupRetained(pid, productsById, lateProductIds)) continue;
+        decliningCount++;
+      }
     }
     if (decliningCount < 1) return;
     var level = decliningCount >= 2 ? 'medium' : 'low';
@@ -733,16 +862,22 @@
      given by spec: earlyQty >= 3, lateQty === 0.
      ASSUMPTION (spec gives no level bands for this rule — reported,
      not guessed silently): same medium/low convention as 6C above. */
-  function _keyProductLostWatch(cid, out, ctx) {
+  function _keyProductLostWatch(cid, out, ctx, productsById, lateProductIds) {
     var split = _watchRawInvoiceSplit(cid, ctx);
     if (!split) return;
     var earlyKeys = Object.keys(split.early);
     var lostCount = 0;
     for (var i = 0; i < earlyKeys.length; i++) {
-      var e = split.early[earlyKeys[i]];
-      var l = split.late[earlyKeys[i]];
+      var pid = earlyKeys[i];
+      var e = split.early[pid];
+      var l = split.late[pid];
       var lateQty = l ? l.qty : 0;
-      if (e.qty >= 3 && lateQty === 0) lostCount++;
+      if (e.qty >= 3 && lateQty === 0) {
+        // Product Analysis Group: retained-by-group SKU never becomes a
+        // hard-lost Watch item (spec §4.6). Watch lifecycle untouched otherwise.
+        if (_isGroupRetained(pid, productsById, lateProductIds)) continue;
+        lostCount++;
+      }
     }
     if (lostCount < 1) return;
     var level = lostCount >= 2 ? 'medium' : 'low';
@@ -793,10 +928,15 @@
     var b = customerBehavior(cid, ctx);
     if (!b) return out;
 
+    // Product Analysis Group: computed ONCE here and reused by both
+    // consumer Watch functions below — never re-scans invoice history per Watch.
+    var productsById = _buildProductsByIdMap();
+    var lateProductIds = _getConfirmedLateProductIds(cid, ctx);
+
     _purchaseDeclineWatch(cid, b, out);
     _behindPatternWatch(cid, b, out);
-    _basketShrinkWatch(cid, out, ctx);
-    _keyProductLostWatch(cid, out, ctx);
+    _basketShrinkWatch(cid, out, ctx, productsById, lateProductIds);
+    _keyProductLostWatch(cid, out, ctx, productsById, lateProductIds);
 
     if (typeof extractSkuWatchObservations === 'function') {
       try {
