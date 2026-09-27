@@ -395,6 +395,65 @@ async function exportInvoiceImage(invId){
 }
 
 // ---------- products / inventory ----------
+/* Product Analysis Group — read-only helpers for the product form's
+   group <select> (surgical addition; no new file, no schema/version bump). */
+function analysisGroupOptionsHtml(selectedId){
+  return (data.analysisGroups || []).slice()
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||'', 'fa'))
+    .map(g=>`<option value="${esc(g.id)}" ${g.id===selectedId?'selected':''}>${esc(g.name)}</option>`)
+    .join('');
+}
+
+/* Nested Micro-Layer for creating a new Analysis Group inline — same
+   append-a-floating-layer-on-#modalRoot pattern as appConfirm() in ui.js,
+   but with a text input instead of a yes/no choice. The sheet underneath
+   (openAddProduct's openSheet) is never destroyed or re-rendered, so its
+   other field values survive regardless of what happens in this layer.
+   Resolves with the trimmed name on confirm, or null on cancel/backdrop
+   click. Reuses existing .confirm-overlay/.confirm-card/.field/.btn/.btn-row
+   classes — no CSS file touched. */
+function promptNewAnalysisGroupName(){
+  return new Promise(function(resolve){
+    const root = document.getElementById('modalRoot');
+    if(!root){ resolve(null); return; }
+    const layer = document.createElement('div');
+    layer.className = 'confirm-overlay';
+    layer.setAttribute('role','dialog');
+    layer.setAttribute('aria-modal','true');
+    layer.innerHTML =
+      '<div class="confirm-card">'
+      + '<div class="confirm-message">نام گروه تحلیلی جدید</div>'
+      + '<div class="field"><input id="new-analysis-group-name" type="text"></div>'
+      + '<div class="btn-row">'
+      + '<button type="button" class="btn secondary" data-ag-cancel>انصراف</button>'
+      + '<button type="button" class="btn" data-ag-ok>تأیید</button>'
+      + '</div>'
+      + '</div>';
+    root.appendChild(layer);
+    let settled = false;
+    function finish(value){
+      if(settled) return;
+      settled = true;
+      layer.remove();
+      resolve(value);
+    }
+    const input = layer.querySelector('#new-analysis-group-name');
+    function tryConfirm(){
+      const name = (input.value||'').trim();
+      if(!name){ input.focus(); return; } // نام لازم است؛ لایه باز می‌ماند
+      finish(name);
+    }
+    layer.querySelector('[data-ag-cancel]').addEventListener('click', function(){ finish(null); });
+    layer.querySelector('[data-ag-ok]').addEventListener('click', tryConfirm);
+    layer.addEventListener('click', function(e){ if(e.target === layer) finish(null); });
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'Enter'){ e.preventDefault(); tryConfirm(); }
+      else if(e.key === 'Escape'){ e.preventDefault(); finish(null); }
+    });
+    requestAnimationFrame(function(){ input.focus(); });
+  });
+}
+
 function openAddProduct(editId){
   const p = editId ? data.products.find(x=>x.id===editId) : null;
   const productId = editId || null;
@@ -408,6 +467,14 @@ function openAddProduct(editId){
       <label>دسته‌بندی</label>
       <input id="f-cat" list="cat-list" value="${p?esc(p.category||''):''}">
       <datalist id="cat-list">${CATEGORY_SUGGESTIONS.map(c=>`<option value="${c}">`).join('')}</datalist>
+    </div>
+    <div class="field">
+      <label>گروه تحلیلی (اختیاری)</label>
+      <select id="f-analysis-group">
+        <option value="">بدون گروه</option>
+        ${analysisGroupOptionsHtml(p ? (p.analysisGroupId || '') : '')}
+        <option value="__new__">➕ افزودن گروه جدید…</option>
+      </select>
     </div>
     <div class="field"><label>وزن بسته (کیلوگرم یا گرم، اختیاری)</label><input id="f-pkgw" type="text" inputmode="decimal" value="${p&&p.packageWeight?p.packageWeight:''}"></div>
 
@@ -472,6 +539,8 @@ function openAddProduct(editId){
     const pdate = document.getElementById('f-pdate').value || todayISO();
     const stockQty = numVal(document.getElementById('f-stock'));
     const minStock = numVal(document.getElementById('f-minstock'));
+    const analysisGroupSelectVal = document.getElementById('f-analysis-group').value;
+    const analysisGroupId = (analysisGroupSelectVal && analysisGroupSelectVal !== '__new__') ? analysisGroupSelectVal : null;
     if(!name){ showToast('نام جنس رو وارد کن'); return null; }
     if(liveProduct){
       const p = liveProduct;
@@ -486,13 +555,14 @@ function openAddProduct(editId){
       p.name=name; p.category=category; p.packageWeight=packageWeight;
       p.buy=buy; p.wholesale=wholesale; p.retail=retail; p.sell=retail;
       p.minStock=minStock;
+      p.analysisGroupId = analysisGroupId;
       p.priceHistory = p.priceHistory||[];
       p.priceHistory.push({date:pdate, buy, wholesale, retail});
       await saveData();
       return p;
     } else {
       const np = {id:uid(), name, category, packageWeight, buy, wholesale, retail, sell:retail,
-        stockQty:0, minStock, priceHistory:[{date:pdate, buy, wholesale, retail}], stockLog: [], active:true};
+        stockQty:0, minStock, analysisGroupId, priceHistory:[{date:pdate, buy, wholesale, retail}], stockLog: [], active:true};
       data.products.push(np);
       if(stockQty>0){
         manualStockIn(np.id, stockQty, 'موجودی اولیه');
@@ -509,6 +579,41 @@ function openAddProduct(editId){
       closeModal(); render(); showToast('ذخیره شد');
     });
   });
+  {
+    const analysisGroupSelect = document.getElementById('f-analysis-group');
+    let lastAnalysisGroupValue = analysisGroupSelect.value;
+    analysisGroupSelect.addEventListener('change', async (e)=>{
+      if(e.target.value !== '__new__'){
+        lastAnalysisGroupValue = e.target.value;
+        return;
+      }
+      const chosenName = await promptNewAnalysisGroupName();
+      if(!chosenName){
+        // Cancel: هیچ گروهی ساخته نمی‌شود؛ select به مقدار قبلی برمی‌گردد؛
+        // بقیهٔ فرم (که اصلاً دست نخورده) همان‌طور باقی می‌ماند.
+        analysisGroupSelect.value = lastAnalysisGroupValue;
+        return;
+      }
+      data.analysisGroups = data.analysisGroups || [];
+      const newGroup = {id: uid(), name: chosenName, status: 'active'};
+      data.analysisGroups.push(newGroup);
+      try{
+        await saveData();
+      }catch(err){
+        data.analysisGroups = data.analysisGroups.filter(g=>g.id!==newGroup.id);
+        showToast('گروه ذخیره نشد');
+        analysisGroupSelect.value = lastAnalysisGroupValue;
+        return;
+      }
+      const opt = document.createElement('option');
+      opt.value = newGroup.id;
+      opt.textContent = newGroup.name;
+      const addNewOption = analysisGroupSelect.querySelector('option[value="__new__"]');
+      analysisGroupSelect.insertBefore(opt, addNewOption);
+      analysisGroupSelect.value = newGroup.id;
+      lastAnalysisGroupValue = newGroup.id;
+    });
+  }
   if(p){
     document.getElementById('toggle-product-active').addEventListener('click', async (e)=>{
       await withSubmitGuard(e.currentTarget, async ()=>{
@@ -868,6 +973,14 @@ function openAddTransaction(cid){
 
         const payment = {id:uid(), customerId:cid, date, amount, method, note, returnItems};
         if(returnInvoiceId) payment.invoiceId = returnInvoiceId;
+        // بدون مقصد مشخص (بدون invoiceId) و از انواع قابل‌تخصیص به بدهی؟ همین الان،
+        // در لحظهٔ ثبت، جایگاهش در بدهی مشتری مشخص و ذخیره می‌شود (نگاه کنید به
+        // calc.js computeDebtAllocationForAmount). بعداً با ثبت دریافت‌های جدید
+        // این تخصیص دوباره محاسبه یا جابه‌جا نمی‌شود.
+        if(!payment.invoiceId && typeof computeDebtAllocationForAmount === 'function'
+          && ['cash','card','transfer','discount'].includes(method)){
+          payment.debtAllocations = computeDebtAllocationForAmount(cid, amount);
+        }
         // اسنپ‌شات کامل قبل از هر mutation — همان الگوی ثبت/ویرایش فاکتور —
         // چون این مسیر هم برای «برگشت از فروش» موجودی/لایه‌های FIFO را تغییر می‌دهد.
         // یک try واحد: اگر applyReturnStockEffects یا saveData شکست بخورد،
@@ -933,6 +1046,13 @@ function openEditStandalonePayment(cid, paymentId){
         const livePayment = (data.payments||[]).find(x=>x.id===paymentId && x.customerId===cid);
         if(!livePayment) throw new Error('validation');
         livePayment.method=method; livePayment.date=dateStr||todayISO(); livePayment.amount=amount; livePayment.note=(noteStr||'').trim();
+        // مبلغ/نوع این دریافت عوض شده — فقط تخصیص خودِ همین رکورد دوباره محاسبه می‌شود
+        // (بدون دست‌زدن به debtAllocations بقیهٔ دریافت‌ها؛ excludeId یعنی تخصیص قبلیِ
+        // خودش در محاسبهٔ «مصرف‌شده» حساب نشود).
+        if(typeof computeDebtAllocationForAmount === 'function'
+          && ['cash','card','transfer','discount'].includes(livePayment.method)){
+          livePayment.debtAllocations = computeDebtAllocationForAmount(cid, livePayment.amount, livePayment.id);
+        }
         await saveData();
       }catch(err){ restoreDataInPlace(previousData); throw err; }
       closeModal();
@@ -974,7 +1094,13 @@ function openAddCheck(cid){
       const dueDate = document.getElementById('f-due').value || todayISO();
       const checkNumber = document.getElementById('f-num').value.trim();
       if(amount<=0){ showToast('مبلغ رو وارد کن'); throw new Error('validation'); }
-      data.checks.push({id:uid(), customerId:cid, amount, dueDate, checkNumber, status:'pending'});
+      const newCheck = {id:uid(), customerId:cid, amount, dueDate, checkNumber, status:'pending'};
+      // چک هم مثل دریافت، از نظر تخصیص به بدهی، همین لحظه جایگاهش مشخص و ذخیره می‌شود.
+      // وضعیت وصول چک (pending/cleared) کاملاً جدا می‌ماند و اینجا دخیل نیست.
+      if(typeof computeDebtAllocationForAmount === 'function'){
+        newCheck.debtAllocations = computeDebtAllocationForAmount(cid, amount);
+      }
+      data.checks.push(newCheck);
       await saveData(); closeModal(); openCustomerDetail(cid); render(); showToast('چک ثبت شد');
     });
   });

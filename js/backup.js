@@ -684,6 +684,16 @@ function validateBackupShape(parsed){
     if(!_isPlainObject(parsed.settings)) return false;
     if(parsed.settings.monthlySalesTarget != null && !_isFiniteNonNegative(parsed.settings.monthlySalesTarget)) return false;
   }
+  // Product Analysis Group — presence-triggered: absent on older backups (valid,
+  // normalizeData() defaults to []); when present, validated but never version-gated.
+  if(parsed.analysisGroups != null){
+    if(!Array.isArray(parsed.analysisGroups)) return false;
+    if(!_uniqueIds(parsed.analysisGroups)) return false;
+    for(const g of parsed.analysisGroups){
+      if(!_isPlainObject(g) || typeof g.name !== 'string') return false;
+      if(g.status != null && !['active','archived'].includes(String(g.status))) return false;
+    }
+  }
   if(!_uniqueIds(parsed.products) || !_uniqueIds(parsed.customers) || !_uniqueIds(parsed.invoices) || !_uniqueIds(parsed.payments) || !_uniqueIds(parsed.checks) || !_uniqueIds(parsed.suppliers)) return false;
   const productIds=new Set(parsed.products.map(x=>String(x.id)));
   const customerIds=new Set(parsed.customers.map(x=>String(x.id)));

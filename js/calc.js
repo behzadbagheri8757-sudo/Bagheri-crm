@@ -68,9 +68,90 @@ function invoiceOnRecordPaid(inv){
 }
 
 /**
- * پوشش نمایشی فاکتور: مبلغ روی فاکتور + تخصیص FIFO از دریافت‌های بدون invoiceId همان مشتری.
- * فقط برای نمایش وضعیت/مانده فاکتور؛ customerTotals و ذخیره را تغییر نمی‌دهد.
- * پرداخت‌های لینک‌شده به فاکتور (ساخته‌شده با pushInvoicePayments) در pool نیستند تا دوبار شمرده نشوند.
+ * تخصیص یک دریافت بدون مقصد (بدون invoiceId) به بدهی‌های باز یک مشتری:
+ * اول مانده اولیه، بعد قدیمی‌ترین فاکتورهای باز، به ترتیب.
+ * "مصرف‌شده" بر اساس debtAllocations ثبت‌شدهٔ *بقیهٔ* دریافت‌های بدون‌مقصد همان مشتری
+ * محاسبه می‌شود (رکورد excludeId از محاسبه کنار گذاشته می‌شود — برای ویرایش خودِ همان رکورد).
+ * ds پارامتری است (نه data سراسری) تا هم از calc.js/app.js (روی data زندهٔ اپ) و هم از
+ * db.js normalizeData (روی دیتاست در حال migrate، قبل از اینکه data سراسری ست شود) قابل فراخوانی باشد.
+ * خروجی: آرایه‌ای از {type:'opening'|'invoice'|'surplus', invoiceId?, amount}.
+ * این تابع فقط «محاسبه» می‌کند؛ ذخیره‌کردن نتیجه روی رکورد به عهدهٔ صدا‌زننده است.
+ */
+function buildDebtAllocationForAmount(ds, cid, amount, excludeId){
+  const customers = (ds && ds.customers) || [];
+  const invoices = (ds && ds.invoices) || [];
+  const payments = (ds && ds.payments) || [];
+  const checks = (ds && ds.checks) || [];
+
+  const invs = invoices
+    .filter(i => i.customerId === cid)
+    .slice()
+    .sort((a,b)=> (a.date||'').localeCompare(b.date||'')
+      || String(a.number||'').localeCompare(String(b.number||''))
+      || String(a.id||'').localeCompare(String(b.id||'')));
+
+  // مصرف‌شدهٔ هر بدهی طبق تخصیص‌های از قبل ثبت‌شدهٔ سایر دریافت‌های بدون‌مقصد.
+  let consumedOpening = 0;
+  const consumedByInvoice = {};
+  const tally = function(list){
+    (list||[]).forEach(function(x){
+      if(x.customerId !== cid) return;
+      if(x.invoiceId) return; // پرداخت/چک با مقصد مشخص، بیرون از این محاسبه است
+      if(excludeId && x.id === excludeId) return;
+      if(!Array.isArray(x.debtAllocations)) return;
+      x.debtAllocations.forEach(function(a){
+        if(a.type === 'opening') consumedOpening += a.amount||0;
+        else if(a.type === 'invoice' && a.invoiceId) consumedByInvoice[a.invoiceId] = (consumedByInvoice[a.invoiceId]||0) + (a.amount||0);
+      });
+    });
+  };
+  tally(payments);
+  tally(checks);
+
+  let remaining = Number(amount)||0;
+  const allocations = [];
+
+  const cust = customers.find(x=>x.id===cid);
+  const openingBalance = cust ? (Number(cust.openingBalance)||0) : 0;
+  const remOpening = Math.max(0, openingBalance - consumedOpening);
+  if(remOpening > 1e-9 && remaining > 1e-9){
+    const take = Math.min(remOpening, remaining);
+    allocations.push({type:'opening', amount: take});
+    remaining -= take;
+  }
+
+  for(let idx=0; idx<invs.length; idx++){
+    if(remaining <= 1e-9) break;
+    const inv = invs[idx];
+    const base = invoiceOnRecordPaid(inv);
+    const already = consumedByInvoice[inv.id]||0;
+    const invDebt = Math.max(0, (inv.total||0) - base - already);
+    if(invDebt <= 1e-9) continue;
+    const take = Math.min(invDebt, remaining);
+    allocations.push({type:'invoice', invoiceId: inv.id, amount: take});
+    remaining -= take;
+  }
+
+  // بدهی‌ای برای پوشش نمانده (پیش‌پرداخت/مازاد) — فقط برای شفافیت ذخیره می‌شود،
+  // در هیچ محاسبهٔ دیگری مصرف نمی‌شود.
+  if(remaining > 1e-9){
+    allocations.push({type:'surplus', amount: remaining});
+  }
+  return allocations;
+}
+
+/** نسخهٔ آماده‌به‌کار روی data زندهٔ اپ (نه دیتاست در حال migrate). */
+function computeDebtAllocationForAmount(cid, amount, excludeId){
+  return buildDebtAllocationForAmount(typeof data !== 'undefined' ? data : null, cid, amount, excludeId);
+}
+
+/**
+ * پوشش واقعی فاکتور: مبلغ روی خود فاکتور + مجموع تخصیص‌های ثبت‌شده (debtAllocations)
+ * دریافت‌ها/چک‌های بدون‌مقصدِ همین مشتری که به این فاکتور اشاره می‌کنند.
+ * برخلاف نسخهٔ قبلی، اینجا هیچ FIFOای «در لحظه» دوباره محاسبه نمی‌شود — فقط تخصیص‌های
+ * از قبل ثبت‌شده (در لحظهٔ ثبت هر دریافت) جمع زده می‌شوند. همان دلیل که آن پول
+ * دوباره‌شمرده نشود همچنان برقرار است: پرداخت‌های لینک‌شده به فاکتور (invoiceId دارند)
+ * از این جمع کنار گذاشته می‌شوند، چون خودشان مستقیم در invoiceOnRecordPaid حساب شده‌اند.
  */
 function invoiceEffectivePaid(inv){
   if(!inv) return 0;
@@ -78,50 +159,47 @@ function invoiceEffectivePaid(inv){
   const cid = inv.customerId;
   if(!cid || typeof data === 'undefined' || !data) return onRec;
 
-  const invs = (data.invoices||[])
-    .filter(i => i.customerId === cid)
-    .slice()
-    .sort((a,b)=> (a.date||'').localeCompare(b.date||'')
-      || String(a.number||'').localeCompare(String(b.number||''))
-      || String(a.id||'').localeCompare(String(b.id||'')));
+  let allocated = 0;
+  const addFromAlloc = function(list){
+    (list||[]).forEach(function(x){
+      if(x.customerId !== cid || x.invoiceId) return;
+      if(!Array.isArray(x.debtAllocations)) return;
+      x.debtAllocations.forEach(function(a){
+        if(a.type === 'invoice' && a.invoiceId === inv.id) allocated += a.amount||0;
+      });
+    });
+  };
+  addFromAlloc(data.payments);
+  addFromAlloc(data.checks);
 
-  let pool = 0;
-  (data.payments||[]).forEach(p=>{
-    if(p.customerId !== cid) return;
-    if(p.invoiceId) return;
-    if(['cash','card','transfer','discount'].includes(p.method)) pool += (p.amount||0);
-  });
-  (data.checks||[]).forEach(c=>{
-    if(c.customerId !== cid) return;
-    if(c.invoiceId) return;
-    pool += (c.amount||0);
-  });
+  return onRec + allocated;
+}
 
-  // FIX (audit Patch 3): openingBalance predates every invoice, so an unlinked
-  // payment must settle it first — same "oldest debt first" order customerTotals()
-  // already uses in its balance formula (openingBalance + invTotal − payTotal − checkTotal).
-  // Without this, a payment that actually covers pre-existing opening debt gets
-  // mis-attributed to the customer's newest/only invoice, showing it as Partial/Paid
-  // even though that invoice itself received nothing. Display-only: does not change
-  // customerTotals(), data.payments, data.checks, or any stored field.
-  const custForOpening = data.customers.find(x=>x.id===cid);
-  const openingBalance = custForOpening ? (custForOpening.openingBalance||0) : 0;
-  if(openingBalance > 0){
-    pool -= Math.min(openingBalance, pool);
-  }
-
-  let covered = onRec;
-  for(const i of invs){
-    const base = invoiceOnRecordPaid(i);
-    const need = Math.max(0, (i.total||0) - base);
-    const fromPool = Math.min(need, pool);
-    pool -= fromPool;
-    if(i.id === inv.id){
-      covered = base + fromPool;
-      break;
-    }
-  }
-  return covered;
+/**
+ * وقتی یک فاکتور واقعاً حذف می‌شود (نه ویرایش)، اگر پیش‌تر دریافت/چک بدون‌مقصدی بخشی
+ * از تخصیص خودش را به همین فاکتور داده بود، آن بخش را به‌جای اشارهٔ ناموجود به یک
+ * فاکتور حذف‌شده، «مازاد/بدون‌مقصد» علامت می‌زند. به فاکتور دیگری منتقلش نمی‌کند (تا
+ * تخصیص‌های ثبت‌شدهٔ بقیهٔ فاکتورها دست‌نخورده بماند) و به‌سادگی هم حذفش نمی‌کند (که
+ * جمع تخصیصِ آن دریافت را کمتر از مبلغ واقعی‌اش نشان می‌داد).
+ * فقط باید از مسیر واقعیِ حذف فاکتور صدا زده شود — هرگز از چرخهٔ ویرایش فاکتور
+ * (revertInvoicePayments+pushInvoicePayments) که همان invoiceId را دوباره استفاده می‌کند.
+ */
+function releaseDebtAllocationsForDeletedInvoice(invoiceId){
+  if(!invoiceId || typeof data === 'undefined' || !data) return;
+  const release = function(list){
+    (list||[]).forEach(function(x){
+      if(x.invoiceId) return; // خودِ پرداخت/چکِ لینک‌شده به فاکتور، جای دیگری مدیریت می‌شود
+      if(!Array.isArray(x.debtAllocations)) return;
+      x.debtAllocations.forEach(function(a){
+        if(a.type === 'invoice' && a.invoiceId === invoiceId){
+          a.type = 'surplus';
+          delete a.invoiceId;
+        }
+      });
+    });
+  };
+  release(data.payments);
+  release(data.checks);
 }
 
 function invoiceEffectiveRemain(inv){

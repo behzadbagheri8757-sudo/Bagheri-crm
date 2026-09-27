@@ -397,6 +397,42 @@ function reconcileMissingInventoryLayers(d){
   });
 }
 
+// ---------- Unlinked receipt allocation migration (idempotent, additive) ----------
+// دریافت‌ها/چک‌های بدون invoiceId که قبل از مدل تخصیص پایدار ثبت شده‌اند (یعنی هنوز
+// debtAllocations ندارند) فقط یک‌بار، به ترتیب تاریخ ثبت، تخصیص می‌گیرند — با همان
+// قاعدهٔ «اول مانده اولیه، بعد قدیمی‌ترین فاکتور باز» که calc.js برای دریافت‌های جدید
+// استفاده می‌کند (buildDebtAllocationForAmount). رکوردهایی که از قبل debtAllocations
+// دارند (چه از این migration در یک اجرای قبلی، چه از app.js در لحظهٔ ثبت) دست نمی‌خورند؛
+// این تابع فقط شکاف داده‌های قدیمی را پر می‌کند، هیچ‌چیز را دوباره محاسبه نمی‌کند.
+function migrateUnlinkedReceiptAllocations(d){
+  if(typeof buildDebtAllocationForAmount !== 'function') return; // calc.js هنوز لود نشده (دفاعی)
+  const eligiblePaymentMethods = {cash:true, card:true, transfer:true, discount:true};
+  const pendingByCustomer = {};
+  (d.payments||[]).forEach(function(p){
+    if(p.invoiceId) return;
+    if(!eligiblePaymentMethods[p.method]) return;
+    if(Array.isArray(p.debtAllocations)) return;
+    (pendingByCustomer[p.customerId] = pendingByCustomer[p.customerId] || []).push(p);
+  });
+  (d.checks||[]).forEach(function(c){
+    if(c.invoiceId) return;
+    if(Array.isArray(c.debtAllocations)) return;
+    (pendingByCustomer[c.customerId] = pendingByCustomer[c.customerId] || []).push(c);
+  });
+  Object.keys(pendingByCustomer).forEach(function(cid){
+    // ترتیب تاریخ (و id به‌عنوان تای‌برک) بهترین تقریب موجود از ترتیب واقعی ثبت است؛
+    // چون این فقط یک migration یک‌باره برای دادهٔ قدیمی است، مجموع تخصیص هر فاکتور با
+    // رفتار قبلی (که کل pool را بدون توجه به ترتیب مصرف می‌کرد) یکسان درمی‌آید.
+    const recs = pendingByCustomer[cid].slice().sort(function(a,b){
+      return String(a.date||'').localeCompare(String(b.date||''))
+        || String(a.id||'').localeCompare(String(b.id||''));
+    });
+    recs.forEach(function(rec){
+      rec.debtAllocations = buildDebtAllocationForAmount(d, cid, rec.amount);
+    });
+  });
+}
+
 function normalizeData(parsed){
   const d = emptyData();
   if(!parsed || typeof parsed !== 'object') return d;
@@ -434,6 +470,7 @@ function normalizeData(parsed){
     priceHistory: p.priceHistory||[],
     stockLog: p.stockLog||[],
     active: p.active!==false,
+    analysisGroupId: p.analysisGroupId || null,
   }));
   d.customers = (parsed.customers||[]).map(c=>({
     id: c.id||uid(),
@@ -468,10 +505,19 @@ function normalizeData(parsed){
     returnItems: Array.isArray(p.returnItems) ? p.returnItems.map(ri=>({
       productId: ri.productId, name: ri.name||'', qty:num(ri.qty), price:num(ri.price),
     })) : [],
+    // تخصیص ثبت‌شدهٔ این دریافت به بدهی‌های مشتری (در لحظهٔ ثبت محاسبه می‌شود —
+    // ببینید calc.js buildDebtAllocationForAmount). نبودش یعنی رکورد قدیمی است و
+    // migrateUnlinkedReceiptAllocations زیر یک‌بار برایش پر می‌کند.
+    debtAllocations: Array.isArray(p.debtAllocations) ? p.debtAllocations.map(a=>({
+      type: a.type, invoiceId: a.invoiceId, amount: num(a.amount),
+    })) : undefined,
   }));
   d.checks = (parsed.checks||[]).map(c=>({
     id:c.id||uid(), customerId:c.customerId, amount:num(c.amount), dueDate:c.dueDate,
     checkNumber:c.checkNumber||'', status:c.status||'pending', invoiceId:c.invoiceId,
+    debtAllocations: Array.isArray(c.debtAllocations) ? c.debtAllocations.map(a=>({
+      type: a.type, invoiceId: a.invoiceId, amount: num(a.amount),
+    })) : undefined,
   }));
   d.suppliers = (parsed.suppliers||[]).map(s=>({
     id:s.id||uid(), name:s.name||'', phone:s.phone||'',
@@ -496,6 +542,11 @@ function normalizeData(parsed){
   d.regions = (parsed.regions||[]).map(r=>({ id: r.id||uid(), name: r.name||'' }));
   d.routes = (parsed.routes||[]).map(r=>({ id: r.id||uid(), regionId: r.regionId||null, name: r.name||'' }));
   d.neighborhoods = (parsed.neighborhoods||[]).map(n=>({ id: n.id||uid(), routeId: n.routeId||null, name: n.name||'' }));
+  d.analysisGroups = (parsed.analysisGroups || []).map(g => ({
+    id: g.id || uid(),
+    name: g.name || '',
+    status: g.status || 'active'
+  }));
   if(inputSchemaVersion >= 3 && Array.isArray(parsed.inventoryLayers) && parsed.inventoryLayers.length){
     d.inventoryLayers = parsed.inventoryLayers.map(l=>({
       id: l.id||uid(), purchaseId: l.purchaseId||null, productId: l.productId, itemId: l.itemId||null,
@@ -522,6 +573,7 @@ function normalizeData(parsed){
     });
     return inv;
   });
+  migrateUnlinkedReceiptAllocations(d);
   d.schemaVersion = CURRENT_SCHEMA_VERSION;
   if(inputSchemaVersion !== CURRENT_SCHEMA_VERSION){
     console.log('normalizeData: migrated data from schemaVersion', inputSchemaVersion, 'to', CURRENT_SCHEMA_VERSION);

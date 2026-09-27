@@ -69,6 +69,6 @@ function emptyData(){
   // regions/routes/neighborhoods: shared Location System (see js/location.js).
   // Kept as plain arrays on the same data blob — new, additive, empty by
   // default, and automatically covered by the existing backup/restore.
-  return { products: [], customers: [], invoices: [], payments: [], checks: [], suppliers: [], inventoryLayers: [], invoiceSeq: 1000, schemaVersion: CURRENT_SCHEMA_VERSION, regions: [], routes: [], neighborhoods: [] };
+  return { products: [], customers: [], invoices: [], payments: [], checks: [], suppliers: [], inventoryLayers: [], invoiceSeq: 1000, schemaVersion: CURRENT_SCHEMA_VERSION, regions: [], routes: [], neighborhoods: [], analysisGroups: [] };
 }
 
