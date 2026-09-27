@@ -285,6 +285,10 @@
               if (typeof revertInvoiceStockEffects === 'function') revertInvoiceStockEffects(inv);
               if (typeof revertInvoicePayments === 'function') revertInvoicePayments(inv);
               data.invoices = data.invoices.filter(function (x) { return x.id !== inv.id; });
+              // این فاکتور دیگر وجود ندارد — اگر دریافت بدون‌مقصدی قبلاً بخشی از خودش را
+              // به همین فاکتور تخصیص داده بود، آن بخش را «بدون‌مقصد» علامت می‌زند تا به یک
+              // شناسهٔ حذف‌شده اشاره نکند (تخصیص‌های بقیهٔ فاکتورها دست‌نخورده می‌ماند).
+              if (typeof releaseDebtAllocationsForDeletedInvoice === 'function') releaseDebtAllocationsForDeletedInvoice(inv.id);
               try {
                 await saveData();
               } catch (saveErr) {
