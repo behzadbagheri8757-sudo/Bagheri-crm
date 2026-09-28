@@ -669,64 +669,40 @@
       }
 
       if (s.category === 'KEY_PRODUCT_LOST') {
-        // F4 respects the analysis-group split recorded by
-        // _keyProductLostSignal in s.evidence.hardLost / .retainedLost.
-        // Only hardLost items are deduped against SKU-level signals;
-        // retainedLost items are never converted to hard-loss and never
-        // cause the account signal to be removed merely because a SKU
-        // signal exists for them.
-        var evKL = s.evidence || {};
-        var hardLostArr = Array.isArray(evKL.hardLost) ? evKL.hardLost : null;
-        var retainedLostArr = Array.isArray(evKL.retainedLost) ? evKL.retainedLost : null;
-
-        // Defensive: current _keyProductLostSignal always records both
-        // arrays. If the split is missing entirely, leave the signal
-        // untouched rather than risk reclassifying retained products as
-        // hard-loss.
-        if (hardLostArr === null && retainedLostArr === null) {
-          continue;
-        }
-        hardLostArr = hardLostArr || [];
-        retainedLostArr = retainedLostArr || [];
-
-        // Dedupe ONLY hardLost against SKU-level signals.
-        var remainingHardKL = hardLostArr.filter(function (p) {
-          return !(p && p.productId && skuProductIds[p.productId]);
-        });
-
-        // Nothing remains at all → remove the signal.
-        if (remainingHardKL.length === 0 && retainedLostArr.length === 0) {
-          accountSignals.splice(j, 1);
-          continue;
-        }
-
-        // Refresh evidence so downstream readers see what actually remains.
-        s.evidence = s.evidence || {};
-        s.evidence.hardLost = remainingHardKL;
-        s.evidence.retainedLost = retainedLostArr;
-
-        if (remainingHardKL.length === 0) {
-          // Only retainedLost remains → Group-Retention form (severity 'low').
-          // Never allowed to become hard-loss merely because SKU signals exist.
-          var productsByIdKL = _buildProductsByIdMap();
-          s.severity = 'low';
-          s.value = retainedLostArr.length;
-          s.reason = retainedLostArr.map(function (p) {
-            var prodKL = productsByIdKL[p.productId];
-            var groupNameKL = _analysisGroupNameById(prodKL ? prodKL.analysisGroupId : null);
-            return 'محصول «' + (p.name || '') + '» دیگر خریداری نمی‌شود، اما گروه تحلیلی «'
-              + (groupNameKL || '') + '» با محصول جایگزین حفظ شده است';
-          }).join(' — ');
+        // Rebuild reason from remaining SKUs if we can parse product names;
+        // KEY_PRODUCT_LOST does not store productId list on the signal, only
+        // a Persian reason string built from decliningProducts at generation
+        // time. Re-derive from customerBehavior so F4 can remove matched SKUs.
+        var remainingNames = [];
+        var remainingCount = 0;
+        if (typeof customerBehavior === 'function') {
+          try {
+            var b = customerBehavior(s.customerId, ctx);
+            var declining = (b && Array.isArray(b.decliningProducts)) ? b.decliningProducts : [];
+            var lost = declining.filter(function (p) {
+              return p && p.earlyQty >= 5 && p.lateQty === 0;
+            });
+            for (var k = 0; k < lost.length; k++) {
+              var pid = lost[k].productId;
+              if (pid && skuProductIds[pid]) continue; // removed by SKU-level signal
+              remainingNames.push(lost[k].name || pid || '');
+              remainingCount++;
+            }
+          } catch (e) {
+            remainingCount = s.value || 0;
+            remainingNames = [];
+          }
         } else {
-          // Some hardLost remains → rebuild hard-loss reason from the
-          // surviving hardLost items. retainedLost info stays in evidence,
-          // untouched and never mixed into the hard-loss text.
-          var namesKL = remainingHardKL.map(function (p) { return p.name; }).filter(Boolean);
-          s.value = remainingHardKL.length;
-          s.reason = namesKL.length === 1
-            ? 'محصول کلیدی «' + namesKL[0] + '» دیگر خریداری نمی‌شود'
-            : 'محصولات کلیدی (' + namesKL.join('، ') + ') دیگر خریداری نمی‌شوند';
-          // severity intentionally left as-is (was 'high' from _keyProductLostSignal).
+          remainingCount = s.value || 0;
+        }
+
+        if (remainingCount <= 0) {
+          accountSignals.splice(j, 1);
+        } else if (remainingNames.length) {
+          s.value = remainingCount;
+          s.reason = remainingNames.length === 1
+            ? 'محصول کلیدی «' + remainingNames[0] + '» دیگر خریداری نمی‌شود'
+            : 'محصولات کلیدی (' + remainingNames.join('، ') + ') دیگر خریداری نمی‌شوند';
         }
       }
     }
