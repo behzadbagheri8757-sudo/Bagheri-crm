@@ -230,6 +230,8 @@
       }, 340);
     }
 
+    overlay.__closeFn = function(){ close(false); };
+
     overlay.addEventListener('click', function(e){
       if(e.target === overlay) close(false);
     });

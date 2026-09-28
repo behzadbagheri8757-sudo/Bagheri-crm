@@ -1005,7 +1005,7 @@ function openAddTransaction(cid){
           }
         }
         closeModal();
-        openCustomerDetail(cid); render(); showToast('ثبت شد');
+        openCustomerDetail(cid); showToast('ثبت شد');
       });
     });
   }

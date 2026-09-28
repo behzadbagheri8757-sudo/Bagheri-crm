@@ -736,12 +736,94 @@ function positionBnIndicator(bar, animate){
      destination, do not kill that animation when the router re-renders. */
   var active = bar.querySelector('.bottom-nav-item.active');
   if(!active){
+    if(ind._bnTransitionCleanup){
+      try{ ind._bnTransitionCleanup(); }catch(_e0){}
+      ind._bnTransitionCleanup = null;
+    }
+    ind._bnTransitionToken = (ind._bnTransitionToken || 0) + 1;
     ind.style.opacity = '0';
     return;
   }
   var activeKey = _bnTargetKey(active);
-  if(ind._bnAnim && ind._bnTargetKey === activeKey){
-    return;
+  var preserveCurrentAnimation = !!(ind._bnAnim && ind._bnTargetKey === activeKey);
+
+  if(ind._bnTransitionCleanup){
+    try{ ind._bnTransitionCleanup(); }catch(_e){}
+    ind._bnTransitionCleanup = null;
+  }
+  var activeStyle = null, barStyle = null;
+  try{ activeStyle = getComputedStyle(active); }catch(_e2){}
+  try{ barStyle = getComputedStyle(bar); }catch(_e3){}
+  if((activeStyle || barStyle) && !_bnReduceMotion()){
+    /* Geometry can settle through either the active item or its parent bar:
+       the item owns min-height/padding, while the bar owns min-height/padding
+       that also changes the item's final position/available width. Listen to
+       both official transition sources instead of assuming the child alone
+       owns the complete geometry transition. */
+    var geometryProps = {
+      'min-height': true,
+      'height': true,
+      'padding-top': true,
+      'padding-bottom': true,
+      'padding-block': true,
+      'padding-block-start': true,
+      'padding-block-end': true
+    };
+    var transitionNodes = [active, bar];
+    var listeners = [];
+    var transitionToken = (ind._bnTransitionToken || 0) + 1;
+    ind._bnTransitionToken = transitionToken;
+    var hasGeometryTransition = false;
+
+    function transitionHasGeometry(style){
+      if(!style) return false;
+      var props = String(style.transitionProperty || '').split(',');
+      var durations = String(style.transitionDuration || '').split(',');
+      for(var ti=0; ti<props.length; ti++){
+        var prop = String(props[ti] || '').trim();
+        var dur = parseFloat(durations[ti % Math.max(1, durations.length)] || '0');
+        if(dur > 0 && geometryProps[prop]) return true;
+      }
+      return false;
+    }
+
+    hasGeometryTransition = transitionHasGeometry(activeStyle) || transitionHasGeometry(barStyle);
+    if(hasGeometryTransition){
+      var onGeometryTransitionEnd = function(ev){
+        if(ind._bnTransitionToken !== transitionToken) return;
+        if(ev && !geometryProps[ev.propertyName]) return;
+        if(ind._bnTransitionCleanup){
+          try{ ind._bnTransitionCleanup(); }catch(_e4){}
+          ind._bnTransitionCleanup = null;
+        }
+        requestAnimationFrame(function(){
+          if(ind._bnTransitionToken !== transitionToken) return;
+          if(!bar.isConnected || !active.isConnected) return;
+          var currentActive = bar.querySelector('.bottom-nav-item.active');
+          if(currentActive !== active) return;
+          var br = bar.getBoundingClientRect();
+          var ar = active.getBoundingClientRect();
+          var rw = Math.round(ar.width);
+          var rh = Math.round(ar.height);
+          ind.style.left = (ar.left - br.left + (ar.width-rw)/2) + 'px';
+          ind.style.top = (ar.top - br.top + (ar.height-rh)/2) + 'px';
+          ind.style.width = rw + 'px';
+          ind.style.height = rh + 'px';
+        });
+      };
+      for(var tn=0; tn<transitionNodes.length; tn++){
+        var node = transitionNodes[tn];
+        if(!node) continue;
+        node.addEventListener('transitionend', onGeometryTransitionEnd);
+        listeners.push(node);
+      }
+      ind._bnTransitionCleanup = function(){
+        for(var li=0; li<listeners.length; li++){
+          try{ listeners[li].removeEventListener('transitionend', onGeometryTransitionEnd); }catch(_e5){}
+        }
+        listeners.length = 0;
+      };
+    }
   }
 
   var barRect = bar.getBoundingClientRect();
@@ -754,6 +836,13 @@ function positionBnIndicator(bar, animate){
   var left = itemRect.left - barRect.left + (itemRect.width - w)/2;
   var top = itemRect.top - barRect.top + (itemRect.height - h)/2;
   var reduceMotion = _bnReduceMotion();
+
+  if(preserveCurrentAnimation){
+    /* The travel is already targeting this same tab. Do not restart it, but
+       keep the geometry-transition observer above alive so a concurrent
+       scroll-linked resize/minimize can still remeasure the final item box. */
+    return;
+  }
 
   if(!animate || reduceMotion || typeof ind.animate !== 'function'){
     if(ind._bnAnim){
@@ -900,6 +989,7 @@ function openMoreSheet(activeId){
   const overlay = document.getElementById('more-overlay');
   const sheet = document.getElementById('more-sheet');
   if(!overlay || !sheet) return;
+  overlay.__closeFn = closeMoreSheet;
   // Cancel any pending hide-after-transition timer from a just-closed sheet —
   // otherwise a rapid close→reopen (tap close, immediately tap "بیشتر" again)
   // leaves that timer alive, and it later fires `hidden = true` on the sheet

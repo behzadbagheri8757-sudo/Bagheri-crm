@@ -165,6 +165,13 @@
       // success/error path owns the sheet lifecycle.
       if(!(global.__sheetSaveInFlight > 0)){
         try { if(typeof global.closeModal === 'function') global.closeModal(); } catch(_e) {}
+        try {
+          var externalSheetIds = ['more-overlay', 'shamsi-sheet-root'];
+          for(var esi=0; esi<externalSheetIds.length; esi++){
+            var externalSheet = document.getElementById(externalSheetIds[esi]);
+            if(externalSheet && typeof externalSheet.__closeFn === 'function') externalSheet.__closeFn();
+          }
+        } catch(_e2) {}
       }
 
       const main = document.getElementById('main');
@@ -298,6 +305,16 @@
   function start() {
     if (started) return;
     started = true;
+    try {
+      var initialState = history.state;
+      var initialNavSeq = (initialState && typeof initialState.navSeq === 'number') ? initialState.navSeq : 0;
+      var nextInitialState = (initialState && typeof initialState === 'object')
+        ? Object.assign({}, initialState, {navSeq: initialNavSeq})
+        : {navSeq: initialNavSeq};
+      history.replaceState(nextInitialState, '', location.href);
+      navSeq = initialNavSeq;
+      lastSeq = initialNavSeq;
+    } catch (_e) { /* direction detection falls back to 'none' if History API is unavailable */ }
     // FIX 2 (audit P2): when we set the default hash ourselves below, some
     // browsers fire a hashchange for it in addition to the synchronous
     // resolve() we call right after — causing the initial route (Dashboard)
