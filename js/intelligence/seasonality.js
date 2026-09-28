@@ -73,14 +73,25 @@
     return (by - ay) * 12 + (bm - am);
   }
 
-  function _invoiceAmount(inv, productId) {
+  // Family identity (runtime only): familyId = analysisGroupId || productId.
+  // Both productId and familyId are accepted as input (idempotent resolver);
+  // falls back to the raw id if the shared resolver is unavailable.
+  function _famResolver(ctx) {
+    if (typeof makeFamilyResolver === 'function') return makeFamilyResolver(ctx);
+    return function (pid) { return (pid == null || pid === '' || pid === 'multi') ? null : pid; };
+  }
+
+  // productId argument here is already a FAMILY key (or null for account-level).
+  // Amount = sum over ALL members of the Family in this invoice.
+  function _invoiceAmount(inv, productId, famOf) {
     if (!inv) return 0;
     var items = inv.items || [];
     if (productId != null && productId !== '' && productId !== 'multi') {
       var sum = 0;
       for (var i = 0; i < items.length; i++) {
         var it = items[i];
-        if (!it || it.productId !== productId) continue;
+        if (!it || !it.productId) continue;
+        if ((famOf ? famOf(it.productId) : it.productId) !== productId) continue;
         if (!(it.qty > 0)) continue;
         sum += (it.qty * (it.price || 0)) - (it.discount || 0);
       }
@@ -104,8 +115,11 @@
    * or null if insufficient.
    */
   function _buildMonthlySeries(customerId, productId, ctx, skipMemo) {
+    var famOf = _famResolver(ctx);
+    // Normalize to Family identity so memo key and aggregation are Family-level.
+    var famKey = (productId != null && productId !== '' && productId !== 'multi') ? famOf(productId) : null;
     if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
-      var _key = String(customerId) + '|' + String(productId == null ? '' : productId);
+      var _key = String(customerId) + '|' + String(famKey == null ? '' : famKey);
       return ctx.memo('monthlySeries', _key, function(){
         return _buildMonthlySeries(customerId, productId, ctx, true);
       });
@@ -120,7 +134,7 @@
       if (!inv || inv.customerId !== customerId) continue;
       var mk = _monthKey(inv.date);
       if (!mk) continue;
-      var amt = _invoiceAmount(inv, productId);
+      var amt = _invoiceAmount(inv, famKey, famOf);
       if (!byMonth[mk]) byMonth[mk] = 0;
       byMonth[mk] += amt;
       if (!minDate || mk < minDate) minDate = mk + '-01';
@@ -214,7 +228,9 @@
     }
 
     var cid = signal.customerId;
-    var pid = signal.productId != null ? signal.productId : null;
+    // Family identity (runtime): prefer signal.familyId; else productId
+    // (getSeasonalFactor resolves either to the same Family key).
+    var pid = signal.familyId != null ? signal.familyId : (signal.productId != null ? signal.productId : null);
     var when = signal.detectedAt || (typeof todayISO === 'function' ? todayISO() : new Date().toISOString());
 
     var factor = getSeasonalFactor(cid, pid, when, ctx);

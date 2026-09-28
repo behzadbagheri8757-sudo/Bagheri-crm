@@ -592,6 +592,21 @@
     }
 
     // ------------------------------------------------------------------
+    // Family identity (runtime only): every product-level signal carries
+    //   signal.familyId = analysisGroupId || productId
+    // productId is preserved for display/context. familyId is never
+    // persisted (it only feeds the persistence KEY string).
+    // ------------------------------------------------------------------
+    if (typeof resolveFamilyId === 'function') {
+      for (var fmi = 0; fmi < out.length; fmi++) {
+        var fs = out[fmi];
+        if (!fs || fs.familyId != null) continue;
+        if (fs.productId == null || fs.productId === '' || fs.productId === 'multi') continue;
+        try { fs.familyId = resolveFamilyId(fs.productId, ctx); } catch (eFam) { /* fail-open */ }
+      }
+    }
+
+    // ------------------------------------------------------------------
     // P-02 Persistence: record occurrence + set status pending|active.
     // Does not remove signals. Risk only scores status === 'active'.
     // ------------------------------------------------------------------
@@ -641,11 +656,27 @@
     if (!accountSignals || !skuSignals || !skuSignals.length) return;
 
     var skuProductIds = Object.create(null);
+    var famOfD = (typeof makeFamilyResolver === 'function')
+      ? makeFamilyResolver(ctx)
+      : function (pid) { return pid; };
+    var skuFamilyIds = Object.create(null);
     var hasLineDropSku = false;
     for (var i = 0; i < skuSignals.length; i++) {
       var ss = skuSignals[i];
       if (!ss) continue;
       if (ss.productId && ss.productId !== 'multi') skuProductIds[ss.productId] = true;
+      if (ss.familyId != null && ss.familyId !== '') skuFamilyIds[ss.familyId] = true;
+      // Family-level SKU signals cover EVERY member SKU of the Family.
+      if (ss.evidence && Array.isArray(ss.evidence.memberProductIds)) {
+        for (var mm = 0; mm < ss.evidence.memberProductIds.length; mm++) {
+          skuProductIds[ss.evidence.memberProductIds[mm]] = true;
+        }
+      }
+      if (ss.evidence && Array.isArray(ss.evidence.affectedFamilyIds)) {
+        for (var af = 0; af < ss.evidence.affectedFamilyIds.length; af++) {
+          skuFamilyIds[ss.evidence.affectedFamilyIds[af]] = true;
+        }
+      }
       if (ss.evidence && Array.isArray(ss.evidence.affectedProductIds)) {
         for (var a = 0; a < ss.evidence.affectedProductIds.length; a++) {
           skuProductIds[ss.evidence.affectedProductIds[a]] = true;
@@ -683,7 +714,7 @@
           var hardLost = s.evidence.hardLost;
           for (var hli = 0; hli < hardLost.length; hli++) {
             var hardPid = hardLost[hli] && hardLost[hli].productId;
-            if (hardPid && skuProductIds[hardPid]) continue; // removed by SKU-level signal
+            if (hardPid && (skuProductIds[hardPid] || skuFamilyIds[famOfD(hardPid)])) continue; // removed by SKU-level signal
             remainingNames.push((hardLost[hli] && hardLost[hli].name) || hardPid || '');
             remainingCount++;
           }
@@ -701,7 +732,7 @@
             });
             for (var k = 0; k < lost.length; k++) {
               var pid = lost[k].productId;
-              if (pid && skuProductIds[pid]) continue; // removed by SKU-level signal
+              if (pid && (skuProductIds[pid] || skuFamilyIds[famOfD(pid)])) continue; // removed by SKU-level signal
               remainingNames.push(lost[k].name || pid || '');
               remainingCount++;
             }
@@ -926,12 +957,19 @@
   function _isWatchSuppressedByConfirmed(watch, confirmedSignals) {
     var superseded = WATCH_SUPERSESSION_MAP[watch.category];
     if (!superseded || !superseded.length || !confirmedSignals || !confirmedSignals.length) return false;
-    var wantPid = (watch.productId != null && watch.productId !== '') ? watch.productId : null;
+    // Identity = customerId + FAMILY (analysisGroupId||productId, runtime).
+    // For products without a group this equals the legacy productId match.
+    function _wid(pid, fid) {
+      if (pid == null || pid === '' || pid === 'multi') return null;
+      if (fid != null && fid !== '') return fid;
+      return (typeof resolveFamilyId === 'function') ? resolveFamilyId(pid) : pid;
+    }
+    var wantPid = _wid(watch.productId, watch.familyId);
     for (var i = 0; i < confirmedSignals.length; i++) {
       var s = confirmedSignals[i];
       if (!s || s.status !== 'active') continue;
       if (superseded.indexOf(s.category) === -1) continue;
-      var sPid = (s.productId != null && s.productId !== '' && s.productId !== 'multi') ? s.productId : null;
+      var sPid = _wid(s.productId, s.familyId);
       if (sPid === wantPid) return true;
     }
     return false;

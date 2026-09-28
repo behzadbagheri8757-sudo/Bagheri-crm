@@ -76,8 +76,25 @@
     return String(productId);
   }
 
-  function _identityKey(customerId, watchCategory, productId) {
-    var pid = _normPid(productId);
+  // Watch identity is Family-aware and resolved at RUNTIME:
+  //   watch.productId -> current product -> analysisGroupId -> familyId
+  // (familyId = analysisGroupId || productId). Nothing about familyId is
+  // stored on the occurrence record; productId/productName remain on the
+  // record as "last SKU seen". For products without an analysisGroupId
+  // familyId === productId, so identity is unchanged for them.
+  function _familyOfPid(pid, ctx) {
+    if (pid == null) return null;
+    if (typeof resolveFamilyId === 'function') {
+      try {
+        var f = resolveFamilyId(pid, ctx);
+        if (f != null && f !== '') return String(f);
+      } catch (e) { /* fall back to productId */ }
+    }
+    return pid;
+  }
+
+  function _identityKey(customerId, watchCategory, productId, ctx) {
+    var pid = _familyOfPid(_normPid(productId), ctx);
     return String(customerId) + '|' + String(watchCategory) + '|' + (pid || '');
   }
 
@@ -284,14 +301,14 @@
     return out;
   }
 
-  function _activeByIdentity(customerId) {
+  function _activeByIdentity(customerId, ctx) {
     var map = Object.create(null);
     var rows = _allOccurrences();
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       if (!r || r.status !== 'active') continue;
       if (customerId && String(r.customerId) !== String(customerId)) continue;
-      var k = _identityKey(r.customerId, r.watchCategory, r.productId);
+      var k = _identityKey(r.customerId, r.watchCategory, r.productId, ctx);
       var current = map[k];
       var rTs = String(r.lastEvaluatedAt || r.firstDetectedAt || '');
       var cTs = current ? String(current.lastEvaluatedAt || current.firstDetectedAt || '') : '';
@@ -412,19 +429,23 @@
               }
             }
 
-            var activeMap = _activeByIdentity(cid);
+            var activeMap = _activeByIdentity(cid, ctx);
             var seenKeys = Object.create(null);
 
             for (var wi = 0; wi < watches.length; wi++) {
               var w = watches[wi];
               if (!w || !w.category) continue;
-              var key = _identityKey(cid, w.category, w.productId);
+              var key = _identityKey(cid, w.category, w.productId, ctx);
               seenKeys[key] = true;
               var existing = activeMap[key];
               if (existing) {
                 existing.level = w.level || existing.level;
                 existing.generatedReason = w.reason || existing.generatedReason;
                 existing.lastEvaluatedAt = now;
+                // Keep the LAST SKU seen (display metadata) on the same
+                // Family-level Watch; identity itself is unaffected.
+                var lastPid = _normPid(w.productId);
+                if (lastPid != null) existing.productId = lastPid;
                 if (w.productName != null) existing.productName = w.productName;
                 _persist(existing);
                 persistCount++;

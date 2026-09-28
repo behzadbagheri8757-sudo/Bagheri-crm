@@ -227,6 +227,17 @@
     return age <= _persistenceWindowDays();
   }
 
+  function _sameFamily(feedbackPid, signalPid, signal) {
+    if (typeof resolveFamilyId !== 'function') return false;
+    try {
+      var sf = (signal && signal.familyId != null && signal.familyId !== '')
+        ? signal.familyId
+        : resolveFamilyId(signalPid);
+      var ff = resolveFamilyId(feedbackPid);
+      return sf != null && ff != null && sf === ff;
+    } catch (e) { return false; }
+  }
+
   function getFeedbackForSignal(signal) {
     if (!signal || !signal.customerId || !signal.category) return null;
     var cid = signal.customerId;
@@ -240,7 +251,14 @@
       // productId: if signal has productId, require match; if signal has none, match null/empty feedback
       var fPid = f.productId != null ? f.productId : null;
       if (pid != null && pid !== '') {
-        if (fPid !== pid) continue;
+        // Exact SKU match (legacy behaviour) is always kept. In addition,
+        // Feedback and Signal that resolve — at runtime, from CURRENT
+        // product data — to the same Family (analysisGroupId||productId)
+        // match, because the Signal's episode identity (persistence) is
+        // Family-level. Nothing is written to the stored feedback record.
+        if (fPid !== pid) {
+          if (fPid == null || fPid === '' || !_sameFamily(fPid, pid, signal)) continue;
+        }
       } else {
         if (fPid != null && fPid !== '') continue;
       }

@@ -274,14 +274,26 @@
       return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
     }
 
-    function latestProductContext(productId) {
+    // Family-aware (runtime): an offered product counts if it resolves to the
+    // same Family (analysisGroupId||productId) as the signal. productId on
+    // the signal stays untouched for display/context.
+    const famOf = (typeof makeFamilyResolver === 'function')
+      ? makeFamilyResolver(ctx)
+      : function (pid) { return pid; };
+
+    function latestProductContext(signal) {
+      const productId = signal.productId;
+      const familyKey = (signal.familyId != null && signal.familyId !== '')
+        ? signal.familyId
+        : famOf(productId);
       let latest = null;
       for (let vi = 0; vi < visits.length; vi++) {
         const visit = visits[vi];
         if (!visit || !validISODate(visit.date) || !Array.isArray(visit.offeredProducts)) continue;
         for (let oi = 0; oi < visit.offeredProducts.length; oi++) {
           const op = visit.offeredProducts[oi];
-          if (!op || op.productId !== productId) continue;
+          if (!op || !op.productId) continue;
+          if (op.productId !== productId && famOf(op.productId) !== familyKey) continue;
           if (!latest || visit.date > latest.date || (visit.date === latest.date && vi > latest.visitIndex) ||
               (visit.date === latest.date && vi === latest.visitIndex && oi > latest.offerIndex)) {
             latest = {
@@ -329,7 +341,7 @@
       if (!signal || !signal.category) return true;
 
       if (skuCategories[signal.category] && signal.productId != null && signal.productId !== '' && signal.productId !== 'multi') {
-        const context = latestProductContext(signal.productId);
+        const context = latestProductContext(signal);
         if (context && context.reaction === 'rejected' &&
             (context.rejectionReason === 'still_stock' || context.rejectionReason === 'unavailable')) {
           return false;

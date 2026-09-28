@@ -18,7 +18,8 @@
      - IndexedDB bagheri_intelligence_db / store occurrences (async mirror)
      Never writes to CRM stores, customers, invoices, checks, etc.
 
-   Key: customerId|category|productId(or empty)
+   Key: customerId|category|familyId-or-productId(or empty)
+        (familyId = analysisGroupId || productId, runtime only)
    One occurrence per calendar day per key.
    ============================================================ */
 'use strict';
@@ -300,7 +301,14 @@
         if (s && s.status == null) s.status = 'pending';
         continue;
       }
-      var pid = s.productId != null ? s.productId : null;
+      // Occurrence identity is Family-aware: familyId (runtime property set by
+      // Family-level Intelligence) || productId. For products without an
+      // analysisGroupId familyId === productId, so the key is identical to
+      // the legacy key. familyId is only part of the in-memory/LS/IDB KEY
+      // string — it is never added as a field on the stored record.
+      var pid = (s.familyId != null && s.familyId !== '')
+        ? s.familyId
+        : (s.productId != null ? s.productId : null);
       var ts = s.detectedAt || today;
       var existingCount = getOccurrenceCount(s.customerId, s.category, pid, today);
       var count = (s.category === 'CONSECUTIVE_NO_ORDER' && existingCount >= PERSISTENCE_PARAMS.minOccurrences)

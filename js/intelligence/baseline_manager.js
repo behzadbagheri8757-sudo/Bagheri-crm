@@ -42,8 +42,28 @@
   // written via _store() since load so hydrate never clobbers them.
   var _dirty = Object.create(null);
 
+  // Baseline identity is Family-level: customerId|familyId, where
+  //   familyId = product.analysisGroupId || product.id   (runtime only).
+  // The 2nd argument may be a productId or an already-resolved familyId
+  // (resolveFamilyId is idempotent). For products without an
+  // analysisGroupId familyId === productId, so the key is byte-identical
+  // to the legacy customerId|productId key and existing cache records
+  // keep working. Legacy records of grouped members are left untouched
+  // (never deleted/rewritten); the Family baseline is simply re-established
+  // from the aggregated Family history.
+  function _identity(productId) {
+    if (productId == null || productId === '') return '';
+    if (typeof resolveFamilyId === 'function') {
+      try {
+        var f = resolveFamilyId(productId);
+        if (f != null && f !== '') return f;
+      } catch (e) { /* fall back to productId */ }
+    }
+    return productId;
+  }
+
   function _key(customerId, productId) {
-    return String(customerId) + '|' + String(productId || '');
+    return String(customerId) + '|' + String(_identity(productId) || '');
   }
 
   function _dateDiffDays(laterIso, earlierIso) {
@@ -175,6 +195,8 @@
     var rec = {
       key: k,
       customerId: customerId,
+      // productId kept for audit/display (last representative SKU when the
+      // caller supplies one); familyId is intentionally NOT stored.
       productId: productId,
       typicalCycle: stats.typicalCycle,
       typicalQuantity: stats.typicalQuantity,
@@ -212,8 +234,9 @@
    *        (sorted or unsorted; manager sorts internally)
    * @returns {object|null} current baseline record after evaluation
    */
-  function updateBaselineIfShifted(customerId, productId, recentPurchases) {
+  function updateBaselineIfShifted(customerId, productId, recentPurchases, displayProductId) {
     if (!customerId || productId == null || productId === '') return null;
+    var auditPid = (displayProductId != null && displayProductId !== '') ? displayProductId : productId;
     var purchases = Array.isArray(recentPurchases) ? recentPurchases : [];
     if (!purchases.length) return getBaseline(customerId, productId);
 
@@ -229,7 +252,7 @@
 
     // Establish initial baseline from full history when none exists
     if (!existing) {
-      return _store(customerId, productId, allStats, 'establish');
+      return _store(customerId, auditPid, allStats, 'establish');
     }
 
     // Recent window = last minPurchases events (persistent new pattern window)
@@ -268,7 +291,7 @@
     if (!shifted) return existing;
 
     // Persistent shift confirmed → update stored baseline to recent pattern
-    return _store(customerId, productId, {
+    return _store(customerId, auditPid, {
       purchaseCount: allStats.purchaseCount,
       typicalCycle: recentStats.typicalCycle != null ? recentStats.typicalCycle : existing.typicalCycle,
       typicalQuantity: recentStats.typicalQuantity != null ? recentStats.typicalQuantity : existing.typicalQuantity
