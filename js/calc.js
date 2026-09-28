@@ -354,6 +354,189 @@ function customerFifoAllocation(cid){
   };
 }
 
+
+/**
+ * ردیابی زندهٔ تخصیص مبالغ یک فاکتور — فقط read-only، بدون ذخیره یا mutation.
+ * خروجی مستقیماً از customerFifoAllocation و داده‌های فعلی ساخته می‌شود.
+ */
+function invoiceAllocationTrace(invId){
+  const inv = (data.invoices||[]).find(function(x){ return x.id===invId; });
+  if(!inv) return null;
+
+  const cid = inv.customerId;
+  const alloc = typeof customerFifoAllocation === 'function' ? customerFifoAllocation(cid) : null;
+  if(!alloc) return null;
+
+  const allocs = Array.isArray(alloc.allocations) ? alloc.allocations : [];
+  const incoming = [];
+  const outgoing = [];
+  const linkedEventObservedAmounts = [];
+  const eps = 1e-9;
+
+  allocs.forEach(function(a){
+    const eventAmount = Number(a.amount)||0;
+    const targetAmount = Number(a.targetInvoice)||0;
+
+    if(a.invoiceId===invId && eventAmount>eps){
+      linkedEventObservedAmounts.push(eventAmount);
+      if(targetAmount>eps){
+        incoming.push({
+          kind: a.kind,
+          eventId: a.id,
+          date: a.date,
+          amount: targetAmount,
+          path: 'linked',
+          fromInvoiceId: null,
+          fromInvoiceNumber: null,
+          fromInvoiceDate: null
+        });
+      }
+
+      const outgoingAmount = Math.max(0, eventAmount-targetAmount);
+      if(outgoingAmount>eps){
+        const destinations = [];
+        (a.invoices||[]).forEach(function(x){
+          const amount = Number(x.amount)||0;
+          if(!(amount>eps)) return;
+          destinations.push({
+            type: 'invoice',
+            invoiceId: x.invoiceId,
+            invoiceNumber: null,
+            invoiceDate: null,
+            amount: amount
+          });
+        });
+        const opening = Number(a.opening)||0;
+        if(opening>eps){
+          destinations.push({
+            type: 'opening',
+            invoiceId: null,
+            invoiceNumber: null,
+            invoiceDate: null,
+            amount: opening
+          });
+        }
+        const credit = Number(a.credit)||0;
+        if(credit>eps){
+          destinations.push({
+            type: 'credit',
+            invoiceId: null,
+            invoiceNumber: null,
+            invoiceDate: null,
+            amount: credit
+          });
+        }
+        outgoing.push({
+          kind: a.kind,
+          eventId: a.id,
+          date: a.date,
+          amount: outgoingAmount,
+          destinations: destinations
+        });
+      }
+    }
+
+    (a.invoices||[]).forEach(function(x){
+      const amount = Number(x.amount)||0;
+      if(x.invoiceId!==invId || !(amount>eps)) return;
+      incoming.push({
+        kind: a.kind,
+        eventId: a.id,
+        date: a.date,
+        amount: amount,
+        path: a.invoiceId ? 'overflow' : 'unlinked',
+        fromInvoiceId: a.invoiceId || null,
+        fromInvoiceNumber: null,
+        fromInvoiceDate: null
+      });
+    });
+  });
+
+  (data.payments||[]).forEach(function(p){
+    if(p.customerId!==cid || p.invoiceId!==invId || p.method!=='return') return;
+    const amount = Number(p.amount)||0;
+    if(!(amount>eps)) return;
+    incoming.push({
+      kind: 'return',
+      eventId: p.id,
+      date: p.date||'',
+      amount: amount,
+      path: 'linkedReturn',
+      fromInvoiceId: null,
+      fromInvoiceNumber: null,
+      fromInvoiceDate: null
+    });
+  });
+
+  incoming.forEach(function(x){
+    if(!x.fromInvoiceId) return;
+    const source = (data.invoices||[]).find(function(i){ return i.id===x.fromInvoiceId; });
+    if(source){
+      x.fromInvoiceNumber = source.number==null ? null : source.number;
+      x.fromInvoiceDate = source.date==null ? null : source.date;
+    }
+  });
+
+  outgoing.forEach(function(x){
+    x.destinations.forEach(function(d){
+      if(d.type!=='invoice') return;
+      const dest = (data.invoices||[]).find(function(i){ return i.id===d.invoiceId; });
+      if(dest){
+        d.invoiceNumber = dest.number==null ? null : dest.number;
+        d.invoiceDate = dest.date==null ? null : dest.date;
+      }
+    });
+  });
+
+  const sortRows = function(a,b){
+    return String(a.date||'').localeCompare(String(b.date||''))
+      || String(a.eventId||'').localeCompare(String(b.eventId||''))
+      || String(a.path||'').localeCompare(String(b.path||''));
+  };
+  incoming.sort(sortRows);
+  outgoing.sort(function(a,b){
+    return String(a.date||'').localeCompare(String(b.date||''))
+      || String(a.eventId||'').localeCompare(String(b.eventId||''));
+  });
+
+  const sum = function(list){
+    return list.reduce(function(s,x){ return s + (Number(x.amount)||0); }, 0);
+  };
+  const onRecord = Number(invoiceOnRecordPaid(inv))||0;
+  const linkedEventObservedTotal = linkedEventObservedAmounts.reduce(function(s,x){ return s+x; }, 0);
+  const legacyOnInvoice = Math.max(0, onRecord-linkedEventObservedTotal);
+  const incomingTotal = sum(incoming);
+  const incomingLinkedTotal = sum(incoming.filter(function(x){ return x.path==='linked'; }));
+  const incomingLinkedReturnTotal = sum(incoming.filter(function(x){ return x.path==='linkedReturn'; }));
+  const outgoingTotal = sum(outgoing);
+  const effectivePaid = Number(invoiceEffectivePaid(inv))||0;
+  const remain = Number(invoiceEffectiveRemain(inv))||0;
+
+  return {
+    invoiceId: inv.id,
+    invoiceNumber: inv.number,
+    invoiceDate: inv.date,
+    total: inv.total,
+    onRecord: onRecord,
+    linkedEventObservedTotal: linkedEventObservedTotal,
+    legacyOnInvoice: legacyOnInvoice,
+    incoming: incoming,
+    incomingTotal: incomingTotal,
+    incomingLinkedTotal: incomingLinkedTotal,
+    incomingLinkedReturnTotal: incomingLinkedReturnTotal,
+    outgoing: outgoing,
+    outgoingTotal: outgoingTotal,
+    effectivePaid: effectivePaid,
+    remain: remain,
+    auditOnly: {
+      allocAudit: alloc.audit || null,
+      onRecordVsLinkedEventsDifference: onRecord-linkedEventObservedTotal,
+      incomingVsEffectivePaidDifference: effectivePaid-incomingTotal
+    },
+    live: true
+  };
+}
+
 /**
  * پوشش واقعی فاکتور: مبلغ روی خود فاکتور (invoiceOnRecordPaid؛ بدون تغییر) +
  * سهمی که از FIFوی زندهٔ همین مشتری (customerFifoAllocation) واقعاً به این فاکتور
