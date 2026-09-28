@@ -177,6 +177,70 @@
         </div>
       </details>
 
+      ${(() => {
+        let tr = null;
+        try {
+          tr = typeof invoiceAllocationTrace === 'function' ? invoiceAllocationTrace(inv.id) : null;
+        } catch (e) {
+          tr = null;
+        }
+        if (!tr) return '';
+
+        const fmtDate = function(d){ return typeof faDate === 'function' ? faDate(d) : (d || '—'); };
+        const escText = function(x){ return esc(x == null ? '' : String(x)); };
+        const incomingRows = tr.incoming.map(function(x){
+          let label = '';
+          if(x.path === 'linked') label = 'پرداخت ثبت‌شده برای همین فاکتور';
+          else if(x.path === 'overflow') label = 'مازاد پرداخت فاکتور #' + escText(x.fromInvoiceNumber);
+          else if(x.path === 'unlinked') label = 'پرداخت بدون مقصد مشتری';
+          else if(x.path === 'linkedReturn') label = 'برگشت از فروش لینک‌شده';
+          const badge = x.path === 'linkedReturn' ? '<span class="sub accent-amber" style="margin-right:6px;">نه دریافت نقدی</span>' : '';
+          return '<div class="ledger-row ' + (x.path === 'linkedReturn' ? 'accent-amber' : 'accent-olive') + '" style="cursor:default;">' +
+            '<span class="name">' + label + '<span class="sub">' + escText(fmtDate(x.date)) + ' · ' + escText(x.kind) + ' · ' + escText(x.eventId) + '</span></span>' +
+            '<span class="filler"></span>' + badge + '<span class="amount">' + toman(x.amount) + ' ت</span></div>';
+        }).join('');
+        const outgoingRows = tr.outgoing.map(function(x){
+          const labels = x.destinations.map(function(d){
+            if(d.type === 'invoice') return 'به فاکتور #' + escText(d.invoiceNumber);
+            if(d.type === 'opening') return 'به مانده افتتاحیه';
+            return 'به اعتبار مشتری';
+          }).join(', ');
+          return '<div class="ledger-row accent-amber" style="cursor:default;">' +
+            '<span class="name">' + escText(fmtDate(x.date)) + '<span class="sub">' + labels + '</span></span>' +
+            '<span class="filler"></span><span class="amount">' + toman(x.amount) + ' ت</span></div>';
+        }).join('');
+        const legacyText = tr.legacyOnInvoice > 0 ?
+          '<div class="ledger-row accent-rust" style="display:block;cursor:default;">' +
+          '<span class="name">مبلغ ثبت‌شده بدون ریزتراکنش: ' + toman(tr.legacyOnInvoice) + ' ت</span>' +
+          '<span class="sub" style="display:block;margin-top:4px;">— بخشی از مبلغ روی فاکتور ثبت شده است، اما ریزتراکنش قابل‌نمایش آن در داده‌های فعلی موجود نیست.</span>' +
+          '</div>' : '';
+        const finalRows = '<div class="ledger-row" style="cursor:default;"><span class="label">مبلغ تسویه‌شده فاکتور</span><span class="filler"></span><span class="amount">' + toman(tr.effectivePaid) + ' ت</span></div>' +
+          '<div class="ledger-row" style="cursor:default;"><span class="label">مانده فاکتور</span><span class="filler"></span><span class="amount">' + toman(tr.remain) + ' ت</span></div>';
+
+        let body = '';
+        if(tr.onRecord === 0 && tr.incomingTotal === 0 && tr.legacyOnInvoice === 0){
+          body = '<div class="empty" style="padding:8px 0;">هنوز پرداختی به این فاکتور تخصیص نیافته است.</div>';
+        } else if(tr.incomingTotal === 0 && tr.legacyOnInvoice > 0){
+          body = '<div class="ledger-row" style="cursor:default;"><span class="label">پرداخت ثبت‌شده روی فاکتور</span><span class="filler"></span><span class="amount">' + toman(tr.onRecord) + ' ت</span></div>' + finalRows + legacyText;
+        } else if(tr.outgoingTotal > 0){
+          body = '<div class="ledger-row" style="cursor:default;"><span class="label">پرداخت ثبت‌شده روی فاکتور</span><span class="filler"></span><span class="amount">' + toman(tr.onRecord) + ' ت</span></div>' +
+            '<div class="ledger-row accent-olive" style="cursor:default;"><span class="label">تخصیص‌یافته برای همین فاکتور</span><span class="filler"></span><span class="amount">' + toman(tr.incomingLinkedTotal) + ' ت</span></div>' +
+            '<div class="ledger-row accent-amber" style="cursor:default;"><span class="label">مبالغ منتقل‌شده به بدهی‌های دیگر</span><span class="filler"></span><span class="amount">' + toman(tr.outgoingTotal) + ' ت</span></div>' +
+            '<div class="sub" style="display:block;margin:8px 0 4px;">جزئیات مبالغ منتقل‌شده:</div>' + outgoingRows +
+            (tr.incomingLinkedReturnTotal > 0 ? '<div class="ledger-row accent-amber" style="cursor:default;"><span class="label">برگشت از فروش لینک‌شده <span class="sub">نه دریافت نقدی</span></span><span class="filler"></span><span class="amount">' + toman(tr.incomingLinkedReturnTotal) + ' ت</span></div>' : '') +
+            finalRows + legacyText;
+        } else {
+          body = '<div class="sub-title" style="margin:8px 0;">مبالغ مؤثر در تسویه</div>' + incomingRows +
+            (tr.incomingTotal === tr.effectivePaid ? finalRows : '<div class="ledger-row" style="cursor:default;"><span class="label">جمع مبالغ مؤثر در تسویه</span><span class="filler"></span><span class="amount">' + toman(tr.incomingTotal) + ' ت</span></div>' + finalRows) + legacyText;
+        }
+
+        return '<details class="tx-details">' +
+          '<summary>ریز تسویه فاکتور</summary>' +
+          '<div style="margin-top:10px;margin-bottom:8px;">' + body + '</div>' +
+          '<div class="sub" style="display:block;line-height:1.7;margin-top:10px;">این مسیر بر اساس داده‌ها و قواعد تخصیص فعلی محاسبه شده است.<br>با ویرایش یا حذف اسناد و تراکنش‌های گذشته، یا ثبت سندی با تاریخ گذشته،<br>ممکن است تغییر کند؛ ثبت فاکتور جدید با تاریخ آینده آن را تغییر نمی‌دهد.</div>' +
+          '</details>';
+      })()}
+
       <!-- SECONDARY: visit link -->
       <details class="tx-details">
         <summary>ارتباط با ویزیت (اختیاری)</summary>
