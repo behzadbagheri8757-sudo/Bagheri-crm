@@ -271,7 +271,7 @@
       severity: 'medium',
       value: meaningful.length,
       unit: 'count',
-      reason: 'تنوع سبد خرید کاهش یافته است',
+      reason: 'تعدادی از کالاهای سبد خرید کاهش یافته‌اند',
       confidence: 0.75,
     }));
   }
@@ -675,12 +675,29 @@
         // time. Re-derive from customerBehavior so F4 can remove matched SKUs.
         var remainingNames = [];
         var remainingCount = 0;
-        if (typeof customerBehavior === 'function') {
+        var retainedRemaining = [];
+        if (s.evidence && Array.isArray(s.evidence.retainedLost)) {
+          retainedRemaining = s.evidence.retainedLost.slice();
+        }
+        if (s.evidence && Array.isArray(s.evidence.hardLost)) {
+          var hardLost = s.evidence.hardLost;
+          for (var hli = 0; hli < hardLost.length; hli++) {
+            var hardPid = hardLost[hli] && hardLost[hli].productId;
+            if (hardPid && skuProductIds[hardPid]) continue; // removed by SKU-level signal
+            remainingNames.push((hardLost[hli] && hardLost[hli].name) || hardPid || '');
+            remainingCount++;
+          }
+        } else if (typeof customerBehavior === 'function') {
           try {
             var b = customerBehavior(s.customerId, ctx);
             var declining = (b && Array.isArray(b.decliningProducts)) ? b.decliningProducts : [];
+            var retainedIds = Object.create(null);
+            for(var rli=0; rli<retainedRemaining.length; rli++){
+              var retainedPid = retainedRemaining[rli] && retainedRemaining[rli].productId;
+              if(retainedPid) retainedIds[retainedPid] = true;
+            }
             var lost = declining.filter(function (p) {
-              return p && p.earlyQty >= 5 && p.lateQty === 0;
+              return p && p.earlyQty >= 5 && p.lateQty === 0 && !retainedIds[p.productId];
             });
             for (var k = 0; k < lost.length; k++) {
               var pid = lost[k].productId;
@@ -696,13 +713,27 @@
           remainingCount = s.value || 0;
         }
 
-        if (remainingCount <= 0) {
-          accountSignals.splice(j, 1);
-        } else if (remainingNames.length) {
+        if (remainingCount > 0) {
           s.value = remainingCount;
-          s.reason = remainingNames.length === 1
-            ? 'محصول کلیدی «' + remainingNames[0] + '» دیگر خریداری نمی‌شود'
-            : 'محصولات کلیدی (' + remainingNames.join('، ') + ') دیگر خریداری نمی‌شوند';
+          s.severity = 'high';
+          if (remainingNames.length) {
+            s.reason = remainingNames.length === 1
+              ? 'محصول کلیدی «' + remainingNames[0] + '» دیگر خریداری نمی‌شود'
+              : 'محصولات کلیدی (' + remainingNames.join('، ') + ') دیگر خریداری نمی‌شوند';
+          }
+        } else if (retainedRemaining.length > 0) {
+          var retainedNames = retainedRemaining.map(function (p) {
+            var prod = (typeof data !== 'undefined' && Array.isArray(data.products))
+              ? data.products.find(function(x){ return x && x.id === p.productId; }) : null;
+            var groupName = _analysisGroupNameById(prod ? prod.analysisGroupId : null);
+            return 'محصول «' + ((p && p.name) || '') + '» دیگر خریداری نمی‌شود، اما گروه تحلیلی «'
+              + (groupName || '') + '» با محصول جایگزین حفظ شده است';
+          }).filter(Boolean);
+          s.value = retainedRemaining.length;
+          s.severity = 'low';
+          s.reason = retainedNames.join(' — ');
+        } else {
+          accountSignals.splice(j, 1);
         }
       }
     }

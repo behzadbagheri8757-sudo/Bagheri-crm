@@ -302,7 +302,10 @@
       }
       var pid = s.productId != null ? s.productId : null;
       var ts = s.detectedAt || today;
-      var count = recordOccurrence(s.customerId, s.category, pid, ts);
+      var existingCount = getOccurrenceCount(s.customerId, s.category, pid, today);
+      var count = (s.category === 'CONSECUTIVE_NO_ORDER' && existingCount >= PERSISTENCE_PARAMS.minOccurrences)
+        ? existingCount
+        : recordOccurrence(s.customerId, s.category, pid, ts);
       if (_isImmediateCategory(s.category)) {
         s.status = 'active';
         s.occurrenceCount = count;
