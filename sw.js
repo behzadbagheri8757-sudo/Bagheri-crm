@@ -39,7 +39,7 @@
    configured, so it is boot-critical, not merely a nice-to-have precache
    entry. It was already in PRECACHE_URLS; no asset list, route, or business
    logic otherwise changed.) */
-const CACHE_NAME = 'baqeri-shell-v65';
+const CACHE_NAME = 'baqeri-shell-v66';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
