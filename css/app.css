@@ -4040,8 +4040,11 @@ button.inv-header-save.btn{
 main.route-push-enter,
 main.route-pop-enter{
   will-change:transform;
-  transition:transform var(--ios-route) var(--ios-route-ease);
   background-color:var(--vg-color-bg);
+}
+main.route-push-enter.route-anim-run,
+main.route-pop-enter.route-anim-run{
+  transition:transform var(--ios-route) var(--ios-route-ease);
 }
 
 html.vg-canvas-white main.route-push-enter,
