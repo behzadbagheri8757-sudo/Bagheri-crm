@@ -4060,11 +4060,15 @@ main.route-pop-enter.route-anim-run{ transform:translateX(0); }
   position:fixed;
   overflow:hidden;
   pointer-events:none;
+  /* Explicit outgoing canvas: html's canvas class already switched to the
+     incoming route, so an unpainted ghost would show it through. */
+  background-color:var(--vg-color-bg);
   will-change:transform;
   transform:translateX(0);
   transition:transform var(--ios-route) var(--ios-route-ease);
 }
 /* PUSH: outgoing page shifts subtly right in RTL. */
+.route-ghost-canvas-white{ background-color:var(--vg-color-bg-system); }
 .route-ghost-under{ z-index:0; }
 .route-ghost-under.route-anim-run{ transform:translateX(27%); }
 
@@ -4713,4 +4717,6 @@ button#save-tx{
 .input-clear-btn[hidden]{display:none}
 .input-clear-btn svg{width:18px;height:18px;display:block;pointer-events:none}
 input.has-input-clear{padding-inline-end:34px !important}
+/* narrow fields (e.g. invoice quantity, ~46-48px): smaller hit area + reserve */
+input.has-input-clear.has-input-clear-sm{padding-inline-end:22px !important}
 @media print{.input-clear-btn{display:none !important}}
