@@ -279,6 +279,11 @@
     if (!occs.length && custIsActive && typeof extractWatchObservations === 'function') {
       try {
         var raw = extractWatchObservations(cid, confirmed, ctx) || [];
+        // id:null fallback must honor seller decisions (dismiss / still stock /
+        // not wanted / follow-up) exactly like the lifecycle does.
+        if (typeof filterSuppressedWatchObservations === 'function') {
+          try { raw = filterSuppressedWatchObservations(cid, raw, ctx) || []; } catch (eF) { /* fail-open */ }
+        }
         occs = raw.map(function (w, idx) {
           return {
             id: null,
@@ -346,7 +351,7 @@
       }).join('');
       watchHtml = '<div class="card wide watch-lifecycle-card" id="watch-lifecycle-card">' +
         '<div class="label">هشدارهای زودهنگام</div>' +
-        '<div class="report-note watch-note">برای ثبت علت، روی مورد بزنید. ثبت علت، هشدار را حذف نمی‌کند.</div>' +
+        '<div class="report-note watch-note">برای ثبت پاسخ، روی مورد بزنید. «هنوز موجودی دارد»، «این محصول را نمی‌خواهد» و «بعداً پیگیری می‌کنم» هشدار را می‌بندند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
         '<div class="watch-occ-list">' + wrows + '</div></div>';
     }
 
@@ -355,10 +360,12 @@
 
   function openWatchReasonSheet(occurrenceId, onDone) {
     if (!occurrenceId || typeof recordWatchReason !== 'function') return;
-    var options = (typeof WATCH_REASON_OPTIONS !== 'undefined' && Array.isArray(WATCH_REASON_OPTIONS))
+    var options = (typeof getWatchResponseOptions === 'function')
+      ? getWatchResponseOptions(occurrenceId)
+      : (typeof WATCH_REASON_OPTIONS !== 'undefined' && Array.isArray(WATCH_REASON_OPTIONS))
       ? WATCH_REASON_OPTIONS
       : [
-          { code: 'still_stock', label: 'موجودی مشتری هنوز کافی است' },
+          { code: 'still_stock', label: 'هنوز موجودی دارد' },
           { code: 'price', label: 'قیمت' },
           { code: 'competitor', label: 'خرید از رقیب' },
           { code: 'no_need', label: 'فعلاً نیاز ندارد' },
@@ -372,7 +379,7 @@
     if (typeof openSheet !== 'function') return;
     openSheet(
       '<div class="sheet-title">ثبت علت هشدار</div>' +
-      '<div class="report-note" style="margin-bottom:10px;">علت فقط مشاهده است و هشدار را حل‌شده نمی‌کند.</div>' +
+      '<div class="report-note" style="margin-bottom:10px;">سه پاسخ اول هشدار را می‌بندند و همان مورد را فوراً برنمی‌گردانند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
       '<div id="watch-reason-list">' + optsHtml + '</div>' +
       '<div class="field" style="margin-top:10px;"><label>یادداشت (اختیاری)</label>' +
       '<input type="text" id="watch-reason-note" autocomplete="off" placeholder="توضیح کوتاه..."></div>' +

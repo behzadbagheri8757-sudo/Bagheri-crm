@@ -79,14 +79,15 @@
 
   function watchReasonSheet(occurrenceId, onDone) {
     if (!occurrenceId || typeof recordWatchReason !== 'function' || typeof openSheet !== 'function') return;
-    var options = (typeof WATCH_REASON_OPTIONS !== 'undefined' && Array.isArray(WATCH_REASON_OPTIONS))
-      ? WATCH_REASON_OPTIONS : [];
+    var options = (typeof getWatchResponseOptions === 'function')
+      ? getWatchResponseOptions(occurrenceId)
+      : ((typeof WATCH_REASON_OPTIONS !== 'undefined' && Array.isArray(WATCH_REASON_OPTIONS)) ? WATCH_REASON_OPTIONS : []);
     var optsHtml = options.map(function (o) {
       return '<button type="button" class="btn secondary small watch-reason-option" data-watch-reason="' + esc(o.code) + '">' + esc(o.label) + '</button>';
     }).join('');
     openSheet(
       '<div class="sheet-title">ثبت علت هشدار</div>' +
-      '<div class="report-note watch-sheet-note">علت را ثبت کنید؛ این کار هشدار را حذف نمی‌کند.</div>' +
+      '<div class="report-note watch-sheet-note">سه پاسخ اول هشدار را می‌بندند و همان مورد را فوراً برنمی‌گردانند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
       '<div class="watch-reason-options">' + optsHtml + '</div>' +
       '<div class="field watch-sheet-note-field"><label>یادداشت (اختیاری)</label><input type="text" id="watch-detail-reason-note" autocomplete="off" placeholder="توضیح کوتاه..."></div>' +
       '<div class="btn-row watch-sheet-actions"><button type="button" class="btn secondary" id="watch-detail-dismiss">بستن هشدار</button><button type="button" class="btn secondary" id="watch-detail-cancel">انصراف</button></div>'
@@ -287,7 +288,7 @@
         '<button type="button" class="btn primary" data-watch-reason-open="' + esc(occ.id) + '">' + (occ.reason ? 'ویرایش علت' : 'ثبت علت') + '</button>' +
         '<button type="button" class="btn secondary" data-watch-dismiss="' + esc(occ.id) + '">بستن هشدار</button>' +
       '</div>' +
-      '<div class="watch-detail-footnote">ثبت علت، هشدار را حذف نمی‌کند؛ فقط کمک می‌کند وضعیت مشتری را بهتر ثبت کنید.</div>';
+      '<div class="watch-detail-footnote">علت‌های «قیمت»، «رقیب» و مانند آن فقط ثبت می‌شوند؛ «هنوز موجودی دارد»، «این محصول را نمی‌خواهد» و «بعداً پیگیری می‌کنم» هشدار را می‌بندند.</div>';
   }
 
   function watchDetailMount(root, params) {
@@ -325,7 +326,10 @@
       var back = e.target.closest('[data-watch-back]');
       if (back) { e.preventDefault(); navigateToWatches(); return; }
       var reasonBtn = e.target.closest('[data-watch-reason-open]');
-      if (reasonBtn) { e.preventDefault(); watchReasonSheet(reasonBtn.getAttribute('data-watch-reason-open'), refresh); return; }
+      if (reasonBtn) { e.preventDefault(); watchReasonSheet(reasonBtn.getAttribute('data-watch-reason-open'), function () {
+        // A closing decision leaves nothing active to show here -> back to the list.
+        if (findActiveOccurrence(detailOccId)) refresh(); else navigateToWatches();
+      }); return; }
       var dismissBtn = e.target.closest('[data-watch-dismiss]');
       if (dismissBtn) {
         e.preventDefault();
