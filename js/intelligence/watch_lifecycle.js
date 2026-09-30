@@ -18,6 +18,10 @@
      getActiveWatchOccurrences([customerId]) -> Occurrence[]
      getWatchLifecycleSummary() -> { active, unreviewed }
      recordWatchReason(occurrenceId, reasonCode, comment) -> Occurrence|null
+     dismissWatchOccurrence(occurrenceId, note) -> Occurrence|null
+     filterSuppressedWatchObservations(customerId, watches, ctx) -> watches
+     reverseWatchDecision(occurrenceId) -> Occurrence|null
+     getWatchResponseOptions(occurrenceId) -> option[]
      exportWatchLifecycleBundle() -> Promise<object|null>
      restoreWatchLifecycleBundle(bundle) -> Promise<boolean>
      WATCH_REASON_OPTIONS
@@ -33,7 +37,12 @@
 
   /** V1 reason codes — data capture only; never resolves or scores. */
   var WATCH_REASON_OPTIONS = [
-    { code: 'still_stock', label: 'موجودی مشتری هنوز کافی است' },
+    // Decision codes (kind:'decision') CLOSE the current occurrence and leave a
+    // suppression marker on it (see "Seller decisions" below). productOnly =
+    // only meaningful for a Watch that has a product subject.
+    { code: 'still_stock', label: 'هنوز موجودی دارد', kind: 'decision' },
+    { code: 'not_wanted', label: 'این محصول را نمی‌خواهد', kind: 'decision', productOnly: true },
+    { code: 'follow_up_later', label: 'بعداً پیگیری می‌کنم', kind: 'decision' },
     { code: 'price', label: 'قیمت' },
     { code: 'competitor', label: 'خرید از رقیب' },
     { code: 'no_need', label: 'فعلاً نیاز ندارد' },
@@ -251,6 +260,9 @@
 
   function _isRetentionExpired(rec, cutoffMs) {
     if (!rec || rec.status === 'active') return false;
+    // An UNRELEASED seller-decision marker is live state, not history: expiring
+    // it would silently re-open a suppressed Watch after an arbitrary delay.
+    if (rec.suppression && !rec.suppression.releasedAt) return false;
     var resolvedAt = rec.resolution && rec.resolution.resolvedAt;
     if (!resolvedAt) return false; // no resolution timestamp — do not guess, keep it
     var t = Date.parse(resolvedAt);
@@ -301,12 +313,127 @@
     return out;
   }
 
-  function _activeByIdentity(customerId, ctx) {
+  // ------------------------------------------------------------------
+  // Seller decisions (suppression markers)
+  // A decision closes the occurrence it was made on and stores
+  //   rec.suppression = { type, decidedAt, atInvoiceSeq, atDate,
+  //                       levelAtDecision, releasedAt, releasedBy }
+  // ON THAT SAME RECORD (no new store, no schema change). While unreleased
+  // it blocks re-creation of the same Watch subject:
+  //   dismiss / still_stock / follow_up_later -> exact identity key
+  //     (customer|category|family)
+  //   not_wanted -> customer + product family, any product-scoped category
+  // Nothing here is time-based.
+  // ------------------------------------------------------------------
+  var LEVEL_RANK = { low: 1, medium: 2, high: 3 };
+
+  function _subjectKey(customerId, productId, ctx) {
+    var pid = _familyOfPid(_normPid(productId), ctx);
+    return pid ? (String(customerId) + '|' + pid) : null;
+  }
+
+  function _newTombs() {
+    return { byKey: Object.create(null), byFamily: Object.create(null) };
+  }
+
+  function _releaseSuppression(rec, by) {
+    if (!rec || !rec.suppression || rec.suppression.releasedAt) return;
+    rec.suppression.releasedAt = _nowISO();
+    rec.suppression.releasedBy = by;
+    _persist(rec);
+  }
+
+  // mutate=false -> read-only (render-time filtering never writes).
+  function _addTomb(tombs, r, ctx, mutate) {
+    var s = r.suppression;
+    if (!s || s.releasedAt || r.status === 'active') return;
+    var isNW = s.type === 'not_wanted';
+    var kk = isNW ? _subjectKey(r.customerId, r.productId, ctx)
+                  : _identityKey(r.customerId, r.watchCategory, r.productId, ctx);
+    if (!kk) return;
+    var slot = isNW ? tombs.byFamily : tombs.byKey;
+    var cur = slot[kk];
+    if (!cur) { slot[kk] = r; return; }
+    var rTs = String(s.decidedAt || '');
+    var cTs = String(cur.suppression.decidedAt || '');
+    var loser = rTs > cTs ? cur : r;
+    if (rTs > cTs) slot[kk] = r;
+    if (mutate) _releaseSuppression(loser, 'superseded_duplicate');
+  }
+
+  function _tombList(tombs) {
+    var out = [];
+    var k1 = Object.keys(tombs.byKey);
+    for (var i = 0; i < k1.length; i++) out.push(tombs.byKey[k1[i]]);
+    var k2 = Object.keys(tombs.byFamily);
+    for (var j = 0; j < k2.length; j++) out.push(tombs.byFamily[k2[j]]);
+    return out;
+  }
+
+  function _findTombs(tombs, customerId, category, productId, ctx) {
+    var out = [];
+    var t1 = tombs.byKey[_identityKey(customerId, category, productId, ctx)];
+    if (t1) out.push(t1);
+    var sk = _subjectKey(customerId, productId, ctx);
+    if (sk && tombs.byFamily[sk]) out.push(tombs.byFamily[sk]);
+    return out;
+  }
+
+  // Data-derived (never time-derived) contradictory event: a sale registered
+  // AFTER the decision for the same subject. Invoice numbers come from the
+  // global monotonic data.invoiceSeq counter, so "after" is exact even though
+  // invoices only carry a date (no time). Date compare is a strict fallback.
+  function _purchaseSince(tomb, ctx) {
+    var s = tomb.suppression;
+    var invs;
+    try {
+      if (typeof customerInvoices === 'function') invs = customerInvoices(tomb.customerId, ctx) || [];
+      else if (typeof data !== 'undefined' && Array.isArray(data.invoices)) {
+        invs = data.invoices.filter(function (i) { return i && i.customerId === tomb.customerId; });
+      } else invs = [];
+    } catch (e) { return false; }
+    var fam = _familyOfPid(_normPid(tomb.productId), ctx); // null => account-level
+    for (var i = 0; i < invs.length; i++) {
+      var inv = invs[i];
+      if (!inv) continue;
+      var after = false;
+      var n = Number(inv.number);
+      if (s.atInvoiceSeq != null && isFinite(n)) after = n > s.atInvoiceSeq;
+      else if (s.atDate) after = String(inv.date || '') > s.atDate;
+      if (!after) continue;
+      var items = inv.items || [];
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        if (!it || !it.productId || !(it.qty > 0)) continue;
+        if (fam == null || _familyOfPid(_normPid(it.productId), ctx) === fam) return true;
+      }
+    }
+    return false;
+  }
+
+  // Returns a release reason string, or null if the decision still holds.
+  function _releaseReasonFor(tomb, watch, ctx) {
+    var s = tomb.suppression;
+    if (_purchaseSince(tomb, ctx)) return 'purchase';
+    if (s.type === 'not_wanted') return null; // only purchase/explicit reversal
+    var was = LEVEL_RANK[s.levelAtDecision] || 0;
+    var now = LEVEL_RANK[watch && watch.level] || 0;
+    if (was > 0 && now > was) return 'escalated';
+    return null;
+  }
+
+  function _activeByIdentity(customerId, ctx, tombOut) {
     var map = Object.create(null);
     var rows = _allOccurrences();
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
-      if (!r || r.status !== 'active') continue;
+      if (!r) continue;
+      if (r.status !== 'active') {
+        if (tombOut && r.suppression && (!customerId || String(r.customerId) === String(customerId))) {
+          _addTomb(tombOut, r, ctx, true);
+        }
+        continue;
+      }
       if (customerId && String(r.customerId) !== String(customerId)) continue;
       var k = _identityKey(r.customerId, r.watchCategory, r.productId, ctx);
       var current = map[k];
@@ -421,15 +548,19 @@
           for (var ci = 0; ci < customerIds.length; ci++) {
             var cid = customerIds[ci];
             var watches = [];
-            if (_isCustomerActive(cid, ctx) && typeof extractWatchObservations === 'function') {
+            var custActive = _isCustomerActive(cid, ctx);
+            var extractOk = false;
+            if (custActive && typeof extractWatchObservations === 'function') {
               try {
                 watches = extractWatchObservations(cid, undefined, ctx) || [];
+                extractOk = true;
               } catch (eW) {
                 watches = [];
               }
             }
 
-            var activeMap = _activeByIdentity(cid, ctx);
+            var tombs = _newTombs();
+            var activeMap = _activeByIdentity(cid, ctx, tombs);
             var seenKeys = Object.create(null);
 
             for (var wi = 0; wi < watches.length; wi++) {
@@ -438,6 +569,18 @@
               var key = _identityKey(cid, w.category, w.productId, ctx);
               seenKeys[key] = true;
               var existing = activeMap[key];
+              if (!existing) {
+                // A live seller decision on this subject blocks a new cycle
+                // until it is released by a contradictory/changed state.
+                var held = false;
+                var ts = _findTombs(tombs, cid, w.category, w.productId, ctx);
+                for (var ti = 0; ti < ts.length; ti++) {
+                  var rel = _releaseReasonFor(ts[ti], w, ctx);
+                  if (rel) { _releaseSuppression(ts[ti], rel); persistCount++; }
+                  else held = true;
+                }
+                if (held) continue;
+              }
               if (existing) {
                 existing.level = w.level || existing.level;
                 existing.generatedReason = w.reason || existing.generatedReason;
@@ -456,6 +599,21 @@
                 _persist(created);
                 persistCount++;
                 touched.push(created);
+              }
+            }
+
+            // Condition gone (successful evaluation only) -> the cycle a
+            // dismiss / still_stock / follow_up_later decision belonged to has
+            // ended; a later recurrence is a genuinely new cycle.
+            // not_wanted is NOT released by this: only purchase / reversal.
+            if (custActive && extractOk) {
+              var tl = _tombList(tombs);
+              for (var tk = 0; tk < tl.length; tk++) {
+                var tr = tl[tk];
+                if (!tr.suppression || tr.suppression.releasedAt || tr.suppression.type === 'not_wanted') continue;
+                if (seenKeys[_identityKey(tr.customerId, tr.watchCategory, tr.productId, ctx)]) continue;
+                _releaseSuppression(tr, 'condition_cleared');
+                persistCount++;
               }
             }
 
@@ -533,6 +691,30 @@
    * Record seller reason + optional note. Does NOT resolve the Watch.
    * Status stays 'active'; badge becomes «بررسی شده».
    */
+  function _decisionSnapshot(rec, type) {
+    var seq = (typeof data !== 'undefined' && data) ? Number(data.invoiceSeq) : NaN;
+    var d = new Date();
+    return {
+      type: type,
+      decidedAt: _nowISO(),
+      atInvoiceSeq: isFinite(seq) ? seq : null,
+      atDate: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
+      levelAtDecision: rec.level || null,
+      releasedAt: null,
+      releasedBy: null
+    };
+  }
+
+  /**
+   * Record seller reason + optional note.
+   * - Plain reasons (price, competitor, ...): data capture only; status stays
+   *   'active' (unchanged V1 behavior).
+   * - Decision reasons (still_stock, not_wanted, follow_up_later): the
+   *   structured code is authoritative; the note is stored beside it in
+   *   reason.comment. The occurrence is closed and carries a suppression
+   *   marker so the same subject does not regenerate (see "Seller decisions").
+   * Both entry points (Customer page, Watch page) call this same function.
+   */
   function recordWatchReason(occurrenceId, reasonCode, comment) {
     if (!occurrenceId) return null;
     var rec = _mem[occurrenceId];
@@ -542,6 +724,21 @@
     if (code && !VALID_REASON_CODES[code]) {
       // Allow unknown codes only as 'other' for safety
       code = 'other';
+    }
+    if (code === 'still_stock' || code === 'not_wanted' || code === 'follow_up_later') {
+      // not_wanted needs a product subject; never guess one for an
+      // account-level Watch.
+      if (code === 'not_wanted' && _normPid(rec.productId) == null) return null;
+      var prev = rec.reason && rec.reason.comment ? rec.reason.comment : '';
+      var text = comment ? String(comment).slice(0, 500) : prev; // never drop an existing note
+      var nowD = _nowISO();
+      rec.reason = { code: code, comment: text, recordedAt: nowD };
+      rec.status = 'dismissed';
+      rec.lastEvaluatedAt = nowD;
+      rec.resolution = { type: 'seller_' + code, resolvedAt: nowD, note: null };
+      rec.suppression = _decisionSnapshot(rec, code);
+      _persist(rec);
+      return rec;
     }
     rec.reason = {
       code: code,
@@ -574,8 +771,62 @@
       resolvedAt: now,
       note: note ? String(note).slice(0, 500) : null
     };
+    // Closes ONLY this cycle: the marker stops the same evidence from
+    // re-opening it immediately, but is released as soon as the state
+    // changes (purchase / condition cleared / level escalated).
+    rec.suppression = _decisionSnapshot(rec, 'dismiss');
     // Reason/comment history (if any was recorded earlier) is untouched.
     _persist(rec);
+    return rec;
+  }
+
+  /**
+   * Render-time guard for the raw (id:null) fallback in the Customer page:
+   * drops observations still covered by a live seller decision. Read-only,
+   * one pass over in-memory occurrences; never writes.
+   */
+  function filterSuppressedWatchObservations(customerId, watches, ctx) {
+    if (!Array.isArray(watches) || !watches.length) return watches || [];
+    var tombs = _newTombs();
+    var rows = _allOccurrences();
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r && r.suppression && r.status !== 'active' && String(r.customerId) === String(customerId)) {
+        _addTomb(tombs, r, ctx, false);
+      }
+    }
+    var out = [];
+    for (var j = 0; j < watches.length; j++) {
+      var w = watches[j];
+      if (!w) continue;
+      var ts = _findTombs(tombs, customerId, w.category, w.productId, ctx);
+      var held = false;
+      for (var k = 0; k < ts.length; k++) {
+        if (!_releaseReasonFor(ts[k], w, ctx)) { held = true; break; }
+      }
+      if (!held) out.push(w);
+    }
+    return out;
+  }
+
+  /** Response options valid for this occurrence (single source for both UIs). */
+  function getWatchResponseOptions(occurrenceId) {
+    var rec = occurrenceId ? _mem[occurrenceId] : null;
+    var hasProduct = !!(rec && _normPid(rec.productId) != null);
+    var out = [];
+    for (var i = 0; i < WATCH_REASON_OPTIONS.length; i++) {
+      var o = WATCH_REASON_OPTIONS[i];
+      if (o.productOnly && !hasProduct) continue;
+      out.push(o);
+    }
+    return out;
+  }
+
+  /** Explicit seller reversal of a decision (by occurrence id). */
+  function reverseWatchDecision(occurrenceId) {
+    var rec = _mem[occurrenceId];
+    if (!rec || !rec.suppression || rec.suppression.releasedAt) return null;
+    _releaseSuppression(rec, 'seller_reversal');
     return rec;
   }
 
@@ -657,6 +908,9 @@
   global.getWatchLifecycleSummary = getWatchLifecycleSummary;
   global.recordWatchReason = recordWatchReason;
   global.dismissWatchOccurrence = dismissWatchOccurrence;
+  global.filterSuppressedWatchObservations = filterSuppressedWatchObservations;
+  global.reverseWatchDecision = reverseWatchDecision;
+  global.getWatchResponseOptions = getWatchResponseOptions;
   global.exportWatchLifecycleBundle = exportWatchLifecycleBundle;
   global.restoreWatchLifecycleBundle = restoreWatchLifecycleBundle;
   global.clearWatchLifecycle = clearWatchLifecycle;
