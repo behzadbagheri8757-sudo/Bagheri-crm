@@ -155,11 +155,21 @@ function isLiveAmountInput(el){
 (function bindInputClearButton(){
   if(typeof document === 'undefined') return;
   var OK_TYPES = ['text','tel','number','email','url'];
-  var SIZE = 30, SIZE_SM = 22, NARROW = 72, MIN_W = 40;
+  // Fields narrower than NARROW get the compact 22px button + 26px end
+  // padding (has-input-clear-sm). Covers the invoice qty field (74-76px) and
+  // the price field at <=360px (88px); the price field at 96px keeps 30px/34px.
+  var SIZE = 30, SIZE_SM = 22, NARROW = 90, MIN_W = 40;
   // Follow loop: runs only while the button may still be moving, and stops
-  // once the geometry has been identical for STABLE_FRAMES consecutive frames.
-  var STABLE_FRAMES = 10;
+  // once the geometry has been identical for `need` consecutive frames.
+  // Viewport-driven changes (iOS keyboard show/hide, focus) use the longer
+  // window because the keyboard animation outlasts the short one and can
+  // move things without emitting further events; both are bounded.
+  var STABLE_FRAMES = 10, STABLE_FRAMES_VIEWPORT = 40;
+  var need = STABLE_FRAMES;
   var btn = null, cur = null, mo = null, loop = 0, stable = 0, lastKey = '';
+  // Measured difference between where position:fixed actually renders the
+  // button and where we asked for it (iOS visual-viewport quirks); see place().
+  var corrX = 0, corrY = 0;
 
   function eligible(el){
     if(!el || el.tagName !== 'INPUT') return false;
@@ -192,7 +202,7 @@ function isLiveAmountInput(el){
   // Hard hide: input lost focus / eligibility / value, or was removed.
   function hide(){
     if(loop){ cancelAnimationFrame(loop); loop = 0; }
-    stable = 0; lastKey = '';
+    stable = 0; lastKey = ''; need = STABLE_FRAMES; corrX = corrY = 0;
     if(cur){ cur.classList.remove('has-input-clear'); cur.classList.remove('has-input-clear-sm'); }
     if(btn) btn.hidden = true;
     if(mo) mo.disconnect();
@@ -202,6 +212,14 @@ function isLiveAmountInput(el){
     // true when the input is scrolled out of view inside any clipping ancestor
     var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     var top = 0, left = 0, bottom = window.innerHeight, right = window.innerWidth;
+    // Visible area may extend past the layout viewport while the visual
+    // viewport is panned/offset (iOS keyboard). Only ever widen the bounds:
+    // a transient viewport change must not soft-hide a valid input.
+    var vv = window.visualViewport;
+    if(vv){
+      bottom = Math.max(bottom, vv.offsetTop + vv.height);
+      right = Math.max(right, vv.offsetLeft + vv.width);
+    }
     for(var p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement){
       var cs = getComputedStyle(p);
       if(cs.overflowY === 'visible' && cs.overflowX === 'visible') continue;
@@ -238,7 +256,10 @@ function isLiveAmountInput(el){
     var b = ensureBtn();
     if(!mo && typeof MutationObserver !== 'undefined') mo = new MutationObserver(follow);
     if(mo) mo.observe(document.body, {childList:true, subtree:true}); // idempotent
-    var key = Math.round(r.top * 2) + '|' + Math.round(r.left * 2) + '|' + Math.round(r.width * 2) + '|' + Math.round(r.height * 2);
+    var vk = '';
+    var vv = window.visualViewport;
+    if(vv) vk = '|' + Math.round(vv.offsetTop) + '|' + Math.round(vv.offsetLeft) + '|' + Math.round(vv.height) + '|' + Math.round(vv.width) + '|' + Math.round(vv.scale * 100);
+    var key = Math.round(r.top * 2) + '|' + Math.round(r.left * 2) + '|' + Math.round(r.width * 2) + '|' + Math.round(r.height * 2) + vk;
     if(r.width < MIN_W || r.height < 20 || clipped(el, r)){
       b.hidden = true;
       return 'h|' + key;
@@ -246,10 +267,28 @@ function isLiveAmountInput(el){
     var size = narrow ? SIZE_SM : SIZE;
     var rtl = getComputedStyle(el).direction === 'rtl';
     b.style.width = b.style.height = size + 'px';
-    b.style.top = (r.top + (r.height - size) / 2) + 'px';
-    b.style.left = (rtl ? r.left + 2 : r.right - size - 2) + 'px';
     b.hidden = false;
-    return 's|' + key;
+    place(b, rtl ? r.left + 2 : r.right - size - 2, r.top + (r.height - size) / 2);
+    return 's|' + Math.round(corrX * 2) + '|' + Math.round(corrY * 2) + '|' + key;
+  }
+
+  // Put the button's rect at (x, y) in getBoundingClientRect() space, the
+  // same space the input was measured in. position:fixed and that space can
+  // disagree while the visual viewport is offset/animating (iOS keyboard), so
+  // instead of trusting the CSS coordinates we read back where the button
+  // really landed and fold the difference into a correction. The first write
+  // reuses the last known correction, so a steady state costs one write + one
+  // read; a residual (< 0.5px is ignored) triggers a single re-write.
+  function place(b, x, y){
+    b.style.left = (x + corrX) + 'px';
+    b.style.top = (y + corrY) + 'px';
+    var br = b.getBoundingClientRect();
+    var ex = br.left - x, ey = br.top - y;
+    if(Math.abs(ex) > 0.5 || Math.abs(ey) > 0.5){
+      corrX -= ex; corrY -= ey;
+      b.style.left = (x + corrX) + 'px';
+      b.style.top = (y + corrY) + 'px';
+    }
   }
 
   function tick(){
@@ -257,13 +296,18 @@ function isLiveAmountInput(el){
     var key = update();
     if(key === null) return;                 // hard hide: loop ends
     if(key === lastKey) stable++; else { stable = 0; lastKey = key; }
-    if(stable < STABLE_FRAMES) loop = requestAnimationFrame(tick);
+    if(stable < need) loop = requestAnimationFrame(tick);
+    else need = STABLE_FRAMES;               // settled: loop ends, window resets
   }
 
   // (Re)start following. Never creates a second loop: an already-running
-  // loop just has its stability counter reset.
-  function follow(){
+  // loop just has its stability counter reset. Pass exactly `true` for
+  // viewport-driven triggers (keyboard) to use the longer settle window —
+  // strict compare because this is also used directly as an event/observer
+  // callback, which passes an Event/record list as the first argument.
+  function follow(long){
     stable = 0;
+    if(long === true) need = STABLE_FRAMES_VIEWPORT;
     if(!loop) loop = requestAnimationFrame(tick);
   }
 
@@ -291,9 +335,9 @@ function isLiveAmountInput(el){
       lastKey = '';
     }
     if(cur) update();   // position immediately from the current rect
-    follow();           // ...then keep following until geometry settles
+    follow(true);       // ...then keep following (through the iOS keyboard animation)
   }, true);
-  document.addEventListener('focusout', follow, true);
+  document.addEventListener('focusout', function(){ follow(true); }, true);
   document.addEventListener('input', function(e){ if(e.target === cur) follow(); }, true);
   document.addEventListener('scroll', function(){ if(cur) follow(); }, {capture:true, passive:true});
   ['transitionrun','transitionstart','transitionend'].forEach(function(n){
@@ -301,8 +345,8 @@ function isLiveAmountInput(el){
   });
   window.addEventListener('resize', function(){ if(cur) follow(); });
   if(window.visualViewport){
-    window.visualViewport.addEventListener('resize', function(){ if(cur) follow(); });
-    window.visualViewport.addEventListener('scroll', function(){ if(cur) follow(); });
+    window.visualViewport.addEventListener('resize', function(){ if(cur) follow(true); });
+    window.visualViewport.addEventListener('scroll', function(){ if(cur) follow(true); });
   }
 })();
 
