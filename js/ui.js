@@ -146,6 +146,130 @@ function isLiveAmountInput(el){
     }
   }
 })();
+/* iOS-style clear (×) button for editable text/numeric inputs (UI-only).
+   One shared floating button, positioned over the focused input, so it works
+   for dynamically (re)rendered forms without touching any form markup.
+   Clearing sets value='' and fires a normal bubbling 'input' event, exactly
+   like the user deleting the text, so existing live formatting / invoice
+   calculations / dirty-tracking run unchanged. Opt out with data-no-clear. */
+(function bindInputClearButton(){
+  if(typeof document === 'undefined') return;
+  var OK_TYPES = ['text','tel','number','email','url'];
+  var SIZE = 30;
+  var btn = null, cur = null, mo = null, raf = 0;
+
+  function eligible(el){
+    if(!el || el.tagName !== 'INPUT') return false;
+    var t = (el.getAttribute('type') || 'text').toLowerCase();
+    if(OK_TYPES.indexOf(t) === -1) return false;
+    if(el.readOnly || el.disabled) return false;
+    if(el.getAttribute('inputmode') === 'none') return false;
+    if(el.hasAttribute('data-no-clear') || el.hasAttribute('data-shamsi-field') || el.classList.contains('pin-input-real')) return false;
+    return true;
+  }
+
+  function ensureBtn(){
+    if(btn) return btn;
+    btn = document.createElement('span');
+    btn.className = 'input-clear-btn';
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('aria-label', 'پاک کردن');
+    btn.hidden = true;
+    btn.innerHTML = '<svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="9" fill="#8E8E93"/><path d="M6.2 6.2l5.6 5.6M11.8 6.2l-5.6 5.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
+    // Keep focus/keyboard on the input: block focus-stealing default actions.
+    function keep(e){ e.preventDefault(); }
+    btn.addEventListener('mousedown', keep);
+    btn.addEventListener('touchstart', keep, {passive:false});
+    btn.addEventListener('pointerdown', function(e){ e.preventDefault(); clearCurrent(); });
+    btn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); });
+    document.body.appendChild(btn);
+    return btn;
+  }
+
+  function hide(){
+    if(cur) cur.classList.remove('has-input-clear');
+    if(btn) btn.hidden = true;
+    if(mo){ mo.disconnect(); }
+  }
+
+  function clipped(el, r){
+    // hide when the input is scrolled out of view inside any clipping ancestor
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    var top = 0, left = 0, bottom = window.innerHeight, right = window.innerWidth;
+    for(var p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement){
+      var cs = getComputedStyle(p);
+      if(cs.overflowY === 'visible' && cs.overflowX === 'visible') continue;
+      var pr = p.getBoundingClientRect();
+      if(pr.top > top) top = pr.top;
+      if(pr.left > left) left = pr.left;
+      if(pr.bottom < bottom) bottom = pr.bottom;
+      if(pr.right < right) right = pr.right;
+    }
+    return cy < top || cy > bottom || cx < left || cx > right;
+  }
+
+  function update(){
+    raf = 0;
+    var el = cur;
+    if(!el || !el.isConnected || document.activeElement !== el){
+      var a = document.activeElement;
+      if(a && a !== el && eligible(a)){
+        if(el) el.classList.remove('has-input-clear');
+        el = cur = a;
+      } else { hide(); return; }
+    }
+    if(el.value === ''){ hide(); return; }
+    // Apply the end-padding class BEFORE measuring: for auto-width inputs it
+    // changes the box, and the button must be placed against the final rect.
+    el.classList.add('has-input-clear');
+    var r = el.getBoundingClientRect();
+    if(r.width < 72 || r.height < 20 || clipped(el, r)){ hide(); return; }
+    var b = ensureBtn();
+    var rtl = getComputedStyle(el).direction === 'rtl';
+    b.style.top = (r.top + (r.height - SIZE) / 2) + 'px';
+    b.style.left = (rtl ? r.left + 2 : r.right - SIZE - 2) + 'px';
+    if(b.hidden){
+      b.hidden = false;
+      if(!mo && typeof MutationObserver !== 'undefined') mo = new MutationObserver(schedule);
+      if(mo) mo.observe(document.body, {childList:true, subtree:true});
+    }
+  }
+
+  function schedule(){
+    if(raf) return;
+    raf = requestAnimationFrame(update);
+  }
+
+  function clearCurrent(){
+    var el = cur;
+    if(!el || !el.isConnected) { schedule(); return; }
+    if(el.value !== ''){
+      el.value = '';
+      el.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+    // A handler may have re-rendered the field; update() re-adopts the focused one.
+    try{ if(el.isConnected && document.activeElement !== el) el.focus({preventScroll:true}); }catch(_e){}
+    update();
+  }
+
+  document.addEventListener('focusin', function(e){
+    var t = e.target;
+    if(eligible(t)){
+      if(cur && cur !== t) cur.classList.remove('has-input-clear');
+      cur = t;
+    }
+    schedule();
+  }, true);
+  document.addEventListener('focusout', schedule, true);
+  document.addEventListener('input', function(e){ if(e.target === cur) schedule(); }, true);
+  document.addEventListener('scroll', function(){ if(cur) schedule(); }, {capture:true, passive:true});
+  document.addEventListener('transitionend', function(){ if(cur) schedule(); }, true);
+  window.addEventListener('resize', function(){ if(cur) schedule(); });
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', function(){ if(cur) schedule(); });
+    window.visualViewport.addEventListener('scroll', function(){ if(cur) schedule(); });
+  }
+})();
 function esc(s){
   return String(s===undefined||s===null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
