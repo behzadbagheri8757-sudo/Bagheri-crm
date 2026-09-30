@@ -155,8 +155,11 @@ function isLiveAmountInput(el){
 (function bindInputClearButton(){
   if(typeof document === 'undefined') return;
   var OK_TYPES = ['text','tel','number','email','url'];
-  var SIZE = 30;
-  var btn = null, cur = null, mo = null, raf = 0;
+  var SIZE = 30, SIZE_SM = 22, NARROW = 72, MIN_W = 40;
+  // Follow loop: runs only while the button may still be moving, and stops
+  // once the geometry has been identical for STABLE_FRAMES consecutive frames.
+  var STABLE_FRAMES = 10;
+  var btn = null, cur = null, mo = null, loop = 0, stable = 0, lastKey = '';
 
   function eligible(el){
     if(!el || el.tagName !== 'INPUT') return false;
@@ -186,14 +189,17 @@ function isLiveAmountInput(el){
     return btn;
   }
 
+  // Hard hide: input lost focus / eligibility / value, or was removed.
   function hide(){
-    if(cur) cur.classList.remove('has-input-clear');
+    if(loop){ cancelAnimationFrame(loop); loop = 0; }
+    stable = 0; lastKey = '';
+    if(cur){ cur.classList.remove('has-input-clear'); cur.classList.remove('has-input-clear-sm'); }
     if(btn) btn.hidden = true;
-    if(mo){ mo.disconnect(); }
+    if(mo) mo.disconnect();
   }
 
   function clipped(el, r){
-    // hide when the input is scrolled out of view inside any clipping ancestor
+    // true when the input is scrolled out of view inside any clipping ancestor
     var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     var top = 0, left = 0, bottom = window.innerHeight, right = window.innerWidth;
     for(var p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement){
@@ -208,41 +214,62 @@ function isLiveAmountInput(el){
     return cy < top || cy > bottom || cx < left || cx > right;
   }
 
+  // Positions the button from the input's CURRENT rect. Returns a geometry
+  // key (used to detect when movement has settled) or null after a hard hide.
+  // A transiently clipped / off-screen / collapsed input only hides the
+  // button softly: state, observer and follow loop stay alive so it comes
+  // back on its own when the input reappears (sheet/row animations).
   function update(){
-    raf = 0;
     var el = cur;
     if(!el || !el.isConnected || document.activeElement !== el){
       var a = document.activeElement;
       if(a && a !== el && eligible(a)){
-        if(el) el.classList.remove('has-input-clear');
+        if(el){ el.classList.remove('has-input-clear'); el.classList.remove('has-input-clear-sm'); }
         el = cur = a;
-      } else { hide(); return; }
+      } else { hide(); return null; }
     }
-    if(el.value === ''){ hide(); return; }
+    if(el.value === ''){ hide(); return null; }
     // Apply the end-padding class BEFORE measuring: for auto-width inputs it
     // changes the box, and the button must be placed against the final rect.
     el.classList.add('has-input-clear');
     var r = el.getBoundingClientRect();
-    if(r.width < 72 || r.height < 20 || clipped(el, r)){ hide(); return; }
+    var narrow = r.width < NARROW;
+    el.classList.toggle('has-input-clear-sm', narrow);
     var b = ensureBtn();
-    var rtl = getComputedStyle(el).direction === 'rtl';
-    b.style.top = (r.top + (r.height - SIZE) / 2) + 'px';
-    b.style.left = (rtl ? r.left + 2 : r.right - SIZE - 2) + 'px';
-    if(b.hidden){
-      b.hidden = false;
-      if(!mo && typeof MutationObserver !== 'undefined') mo = new MutationObserver(schedule);
-      if(mo) mo.observe(document.body, {childList:true, subtree:true});
+    if(!mo && typeof MutationObserver !== 'undefined') mo = new MutationObserver(follow);
+    if(mo) mo.observe(document.body, {childList:true, subtree:true}); // idempotent
+    var key = Math.round(r.top * 2) + '|' + Math.round(r.left * 2) + '|' + Math.round(r.width * 2) + '|' + Math.round(r.height * 2);
+    if(r.width < MIN_W || r.height < 20 || clipped(el, r)){
+      b.hidden = true;
+      return 'h|' + key;
     }
+    var size = narrow ? SIZE_SM : SIZE;
+    var rtl = getComputedStyle(el).direction === 'rtl';
+    b.style.width = b.style.height = size + 'px';
+    b.style.top = (r.top + (r.height - size) / 2) + 'px';
+    b.style.left = (rtl ? r.left + 2 : r.right - size - 2) + 'px';
+    b.hidden = false;
+    return 's|' + key;
   }
 
-  function schedule(){
-    if(raf) return;
-    raf = requestAnimationFrame(update);
+  function tick(){
+    loop = 0;
+    var key = update();
+    if(key === null) return;                 // hard hide: loop ends
+    if(key === lastKey) stable++; else { stable = 0; lastKey = key; }
+    if(stable < STABLE_FRAMES) loop = requestAnimationFrame(tick);
+  }
+
+  // (Re)start following. Never creates a second loop: an already-running
+  // loop just has its stability counter reset.
+  function follow(){
+    stable = 0;
+    if(!loop) loop = requestAnimationFrame(tick);
   }
 
   function clearCurrent(){
     var el = cur;
-    if(!el || !el.isConnected) { schedule(); return; }
+    if(!el || !el.isConnected) { follow(); return; }
     if(el.value !== ''){
       el.value = '';
       el.dispatchEvent(new Event('input', {bubbles:true}));
@@ -250,26 +277,35 @@ function isLiveAmountInput(el){
     // A handler may have re-rendered the field; update() re-adopts the focused one.
     try{ if(el.isConnected && document.activeElement !== el) el.focus({preventScroll:true}); }catch(_e){}
     update();
+    follow();
   }
 
   document.addEventListener('focusin', function(e){
     var t = e.target;
-    if(eligible(t)){
-      if(cur && cur !== t) cur.classList.remove('has-input-clear');
+    if(eligible(t) && cur !== t){
+      // New input: drop the previous input's state and never show the button
+      // at the previous input's coordinates, even for one frame.
+      if(cur){ cur.classList.remove('has-input-clear'); cur.classList.remove('has-input-clear-sm'); }
+      if(btn) btn.hidden = true;
       cur = t;
+      lastKey = '';
     }
-    schedule();
+    if(cur) update();   // position immediately from the current rect
+    follow();           // ...then keep following until geometry settles
   }, true);
-  document.addEventListener('focusout', schedule, true);
-  document.addEventListener('input', function(e){ if(e.target === cur) schedule(); }, true);
-  document.addEventListener('scroll', function(){ if(cur) schedule(); }, {capture:true, passive:true});
-  document.addEventListener('transitionend', function(){ if(cur) schedule(); }, true);
-  window.addEventListener('resize', function(){ if(cur) schedule(); });
+  document.addEventListener('focusout', follow, true);
+  document.addEventListener('input', function(e){ if(e.target === cur) follow(); }, true);
+  document.addEventListener('scroll', function(){ if(cur) follow(); }, {capture:true, passive:true});
+  ['transitionrun','transitionstart','transitionend'].forEach(function(n){
+    document.addEventListener(n, function(){ if(cur) follow(); }, true);
+  });
+  window.addEventListener('resize', function(){ if(cur) follow(); });
   if(window.visualViewport){
-    window.visualViewport.addEventListener('resize', function(){ if(cur) schedule(); });
-    window.visualViewport.addEventListener('scroll', function(){ if(cur) schedule(); });
+    window.visualViewport.addEventListener('resize', function(){ if(cur) follow(); });
+    window.visualViewport.addEventListener('scroll', function(){ if(cur) follow(); });
   }
 })();
+
 function esc(s){
   return String(s===undefined||s===null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -802,6 +838,7 @@ function bindSheetDragToDismiss(sheetEl, handleEl, dismissFn){
     startY = lastY = e.touches[0].clientY;
     startT = lastT = e.timeStamp;
     velocity = 0;
+    deltaY = 0; // a previous cancelled gesture must not leak into this one
     sheetEl.style.transition = 'none';
   }, {passive:true});
   handleEl.addEventListener('touchmove', function(e){
@@ -829,6 +866,15 @@ function bindSheetDragToDismiss(sheetEl, handleEl, dismissFn){
     if(shouldDismiss) dismissFn();
     deltaY = 0; velocity = 0;
   });
+  // OS-interrupted gesture: touchend never fires. Same cleanup as the
+  // non-dismiss path of touchend; never dismisses.
+  handleEl.addEventListener('touchcancel', function(){
+    if(!dragging) return;
+    dragging = false;
+    sheetEl.style.transition = '';
+    sheetEl.style.transform = '';
+    deltaY = 0; velocity = 0;
+  }, {passive:true});
 }
 
 let _modalHideTimer = null;

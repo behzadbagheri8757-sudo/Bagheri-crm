@@ -91,12 +91,13 @@
      it can keep appearing to slide away while the router destroys/replaces
      the real #main underneath for the incoming route. Purely decorative:
      aria-hidden + inert + pointer-events:none, cleaned up automatically. */
-  function createRouteGhost(main, direction) {
+  function createRouteGhost(main, direction, prevCanvasWhite) {
     try {
       const rect = main.getBoundingClientRect();
       if (!rect.width || !rect.height) return null;
       const ghost = document.createElement('div');
-      ghost.className = 'route-ghost ' + (direction === 'forward' ? 'route-ghost-under' : 'route-ghost-over');
+      ghost.className = 'route-ghost ' + (direction === 'forward' ? 'route-ghost-under' : 'route-ghost-over') +
+        (prevCanvasWhite ? ' route-ghost-canvas-white' : '');
       ghost.setAttribute('aria-hidden', 'true');
       try { ghost.inert = true; } catch (e) {}
       ghost.style.top = rect.top + 'px';
@@ -137,6 +138,10 @@
     try {
       const hash = location.hash || '#/';
       const { path, params } = parseHash();
+      // Snapshot the OUTGOING canvas before applyCanvasClass() swaps it, so
+      // the ghost can keep painting the background it was captured on.
+      let prevCanvasWhite = false;
+      try { prevCanvasWhite = document.documentElement.classList.contains('vg-canvas-white'); } catch (e) {}
       applyCanvasClass(path);
       const handler = routes.get(path);
 
@@ -174,6 +179,9 @@
         } catch(_e2) {}
       }
 
+      // Target scroll for this route (same value the rAF restore below uses).
+      const saved = scrollPositions.get(hash);
+
       const main = document.getElementById('main');
       const shouldAnimate = !!(handler && main && main.firstChild && direction !== 'none' && !reducedMotion);
 
@@ -190,7 +198,7 @@
       // to #main right afterward.
       let ghost = null;
       if (shouldAnimate) {
-        ghost = createRouteGhost(main, direction);
+        ghost = createRouteGhost(main, direction, prevCanvasWhite);
       }
 
       unmountCurrent();
@@ -251,7 +259,18 @@
             try { ghost.remove(); } catch (e) {}
           }
         }
-        const saved = scrollPositions.get(hash);
+        // The scroll position is restored one frame later (below), but the
+        // handler's setHeaderTitle() just sampled the OUTGOING page's scrollY.
+        // Write the header progress for the TARGET scroll now (same task,
+        // before first paint) so header and restored scroll agree at once.
+        try {
+          const hdr = document.querySelector('header');
+          if (hdr) {
+            const range = (typeof global.HEADER_COLLAPSE_RANGE === 'number' && global.HEADER_COLLAPSE_RANGE > 0) ? global.HEADER_COLLAPSE_RANGE : 48;
+            const p0 = Math.max(0, Math.min(1, (saved != null ? saved : 0) / range));
+            hdr.style.setProperty('--header-progress', String(p0));
+          }
+        } catch (e) { /* ignore */ }
         requestAnimationFrame(function () {
           try { window.scrollTo(0, saved != null ? saved : 0); } catch (e) {}
         });
