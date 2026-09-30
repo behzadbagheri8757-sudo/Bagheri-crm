@@ -4689,3 +4689,28 @@ button#save-tx{
   color:var(--vg-color-text);
   margin-bottom:14px;
 }
+
+/* --------------------------------------------------------------------------
+   Input clear (×) button — iOS-style, shared floating control (see ui.js)
+   -------------------------------------------------------------------------- */
+.input-clear-btn{
+  position:fixed;
+  z-index:100000;
+  width:30px;
+  height:30px;
+  margin:0;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  direction:ltr;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+  -webkit-user-select:none;
+  user-select:none;
+}
+.input-clear-btn[hidden]{display:none}
+.input-clear-btn svg{width:18px;height:18px;display:block;pointer-events:none}
+input.has-input-clear{padding-inline-end:34px !important}
+@media print{.input-clear-btn{display:none !important}}
