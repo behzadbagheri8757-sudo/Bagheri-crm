@@ -1983,8 +1983,8 @@ button.inv-header-save.btn{
 }
 .inv-mini-input{
   direction:ltr;
-  width:48px;
-  min-width:48px;
+  width:76px;
+  min-width:76px;
   height:40px;
   box-sizing:border-box;
   border:1px solid rgba(15,23,42,.12);
@@ -2144,7 +2144,7 @@ button.inv-header-save.btn{
   .inv-line-collapsed{padding-inline:12px;gap:10px;}
   .inv-line-main,.inv-line-sub,.inv-line-avg-cost{padding-inline:12px;}
   .inv-line-market-details{margin-inline:12px;}
-  .inv-mini-input{width:46px;min-width:46px;}
+  .inv-mini-input{width:74px;min-width:74px;}
   .inv-mini-input-price{width:88px;min-width:88px;}
   .inv-line-del{left:12px;}
   .inv-discount-block{grid-template-columns:1fr;gap:7px;}
@@ -4717,6 +4717,7 @@ button#save-tx{
 .input-clear-btn[hidden]{display:none}
 .input-clear-btn svg{width:18px;height:18px;display:block;pointer-events:none}
 input.has-input-clear{padding-inline-end:34px !important}
-/* narrow fields (e.g. invoice quantity, ~46-48px): smaller hit area + reserve */
-input.has-input-clear.has-input-clear-sm{padding-inline-end:22px !important}
+/* narrow fields (invoice quantity, 74-76px): 22px button + 3px gap. Content
+   box stays >= 41px (74px at <=360) so a 5-digit quantity (~40px) never touches the button. */
+input.has-input-clear.has-input-clear-sm{padding-inline-end:26px !important}
 @media print{.input-clear-btn{display:none !important}}
