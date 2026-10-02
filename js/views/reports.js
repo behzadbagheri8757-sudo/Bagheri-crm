@@ -266,8 +266,8 @@
           '</div>'
         : '<div class="empty" style="padding:8px 0;">فروشی ثبت نشده</div>') +
       '</div>' +
-      '<div class="report-section report-top-products">' +
-      '<h3>پرفروش‌ترین کالاها بر اساس ارزش فروش</h3>' +
+      '<details class="report-section report-top-products">' +
+      '<summary class="sub-title" style="cursor:pointer;padding:6px 0;">مرتب‌سازی بر اساس ارزش فروش</summary>' +
       (topByValue.length
         ? '<div class="rtp-list">' +
           topByValue
@@ -289,7 +289,7 @@
           '</div>' +
           '<div class="report-note">بر اساس مجموع مبلغ واقعی فروش هر کالا (qty × قیمت − تخفیف ردیف)؛ فقط ترتیب نمایش متفاوت است، منطق مبلغ همان منطق فعلی سیستم است.</div>'
         : '<div class="empty" style="padding:8px 0;">فروشی ثبت نشده</div>') +
-      '</div>' +
+      '</details>' +
       reportAccordionSection(
         'customers',
         'مشتریان',

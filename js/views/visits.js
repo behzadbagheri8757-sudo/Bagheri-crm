@@ -72,7 +72,7 @@
     const orderedN = rows.filter(r => r.visit.result === VISIT_RESULTS[0] || r.visit.ordered).length;
     const hideDuplicateTotal = visitFilter === 'all' && rows.length === totalAll;
     sumEl.innerHTML = `
-      <div class="card"><div class="label">تعداد (فیلتر)</div><div class="value">${enToFaDigits(String(rows.length))}</div></div>
+      <div class="card"><div class="label">تعداد ویزیت (فیلتر)</div><div class="value">${enToFaDigits(String(rows.length))}</div></div>
       ${hideDuplicateTotal ? '' : `<div class="card"><div class="label">کل ویزیت‌ها</div><div class="value">${enToFaDigits(String(totalAll))}</div></div>`}
       <div class="card wide"><div class="label">سفارش‌گرفته در فیلتر فعلی</div><div class="value accent-olive">${enToFaDigits(String(orderedN))}</div></div>
     `;

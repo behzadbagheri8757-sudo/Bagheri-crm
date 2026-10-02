@@ -110,7 +110,7 @@
         dashSectionHead(dashboardIcon('actions',20), 'کارهای پیشنهادی امروز', '', '') +
         '<div class="dash-activity">' +
           '<div class="empty" style="padding:18px 8px;text-align:center;">' +
-            '<div style="font-weight:600;color:#1F2937;margin-bottom:4px;">امروز کار ضروری نداری</div>' +
+            '<div style="font-weight:600;color:var(--vg-color-text);margin-bottom:4px;">امروز کار ضروری نداری</div>' +
             '<div class="sub" style="opacity:.85;">وضعیت مشتری‌ها و پتانسیل‌ها تحت کنترل است.</div>' +
           '</div>' +
         '</div></div>';

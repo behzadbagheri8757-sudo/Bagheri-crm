@@ -86,7 +86,7 @@
           const isOff = p.active === false;
           // Visual-only: dim row + compact OFF badge. No behavior change.
           const inactiveBadge = isOff
-            ? ' <span class="badge pending" style="display:inline-block;vertical-align:middle;font-size:.72em;padding:1px 7px;margin-right:4px;opacity:1;">غیرفعال</span>'
+            ? ' <span class="badge tone-muted" style="display:inline-block;vertical-align:middle;font-size:.72em;padding:1px 7px;margin-right:4px;opacity:1;">غیرفعال</span>'
             : '';
           const offStyle = isOff
             ? 'cursor:pointer;opacity:.42;filter:grayscale(.35);'

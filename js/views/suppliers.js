@@ -57,7 +57,7 @@
         const meta = metaBits.length ? `<span class="sub">${esc(metaBits.join(' · '))}</span>` : '';
         return `<a class="ledger-row tx-row" data-open-supplier="${esc(s.id)}">
           <span class="name">
-            <span class="tx-row-title">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}</span>
+            <span class="tx-row-title">${esc(s.name)}${s.active === false ? ' <span class="badge tone-muted">غیرفعال</span>' : ''}</span>
             ${meta}
           </span>
           <span class="filler"></span>

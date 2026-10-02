@@ -18,6 +18,7 @@
   let pinClearHandler = null;
   let pinLockNowHandler = null;
   let techInfoHandler = null;
+  let themeChangeHandler = null;
   let autoBackupHandlers = [];
   function countCustomerVisits() {
     return (data.customers || []).reduce(function (s, c) {
@@ -68,6 +69,21 @@
 
     root.innerHTML = `
       <p class="tx-hint">مدیریت داده‌ها، پشتیبان‌گیری و امنیت برنامه.</p>
+
+      <div class="mgmt-section">
+        <h3 class="mgmt-section-title">ظاهر برنامه</h3>
+        <div class="settings-section">
+          <div class="field">
+            <label for="theme-select">حالت نمایش</label>
+            <select id="theme-select">
+              <option value="system">سیستمی</option>
+              <option value="light">روشن</option>
+              <option value="dark">تیره</option>
+            </select>
+          </div>
+          <div class="sub settings-description">در حالت سیستمی، ظاهر برنامه با حالت روشن/تیره دستگاه هماهنگ می‌شود.</div>
+        </div>
+      </div>
 
       <div class="mgmt-section">
         <h3 class="mgmt-section-title">داده و پشتیبان‌گیری</h3>
@@ -277,6 +293,41 @@
     };
     techRow.onclick = techInfoHandler;
 
+    // Theme setting — presentation only; stored preference is system/light/dark.
+    (function bindThemeSettings() {
+      const select = document.getElementById('theme-select');
+      if (!select) return;
+
+      function readPreference() {
+        try {
+          if (window.BaqeriTheme && typeof window.BaqeriTheme.getPreference === 'function') {
+            return window.BaqeriTheme.getPreference();
+          }
+          const v = localStorage.getItem('baqeri_theme_v1');
+          return (v === 'light' || v === 'dark' || v === 'system') ? v : 'system';
+        } catch (e) {
+          return 'system';
+        }
+      }
+
+      select.value = readPreference();
+      themeChangeHandler = function () {
+        const value = select.value === 'light' || select.value === 'dark' ? select.value : 'system';
+        if (window.BaqeriTheme && typeof window.BaqeriTheme.setPreference === 'function') {
+          window.BaqeriTheme.setPreference(value);
+        } else {
+          try { localStorage.setItem('baqeri_theme_v1', value); } catch (e) {}
+          document.documentElement.setAttribute(
+            'data-theme',
+            value === 'dark' ? 'dark' :
+            value === 'light' ? 'light' :
+            (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          );
+        }
+      };
+      select.onchange = themeChangeHandler;
+    })();
+
     // PIN settings — app-owned sheet UI (no browser dialog).
     (function bindPinSettings() {
       const setBtn = document.getElementById('pin-set-btn');
@@ -377,7 +428,7 @@
 
       // Remove button handlers
       const btnIds = ['export-json', 'export-excel', 'do-import', 'undo-import', 'open-tech-info',
-        'pin-set-btn', 'pin-change-btn', 'pin-clear-btn', 'pin-lock-now-btn'];
+        'pin-set-btn', 'pin-change-btn', 'pin-clear-btn', 'pin-lock-now-btn', 'theme-select'];
       btnIds.forEach(function (id) {
         const el = document.getElementById(id);
         if (el) el.onclick = null;
@@ -385,6 +436,8 @@
 
       const importFile = document.getElementById('import-file');
       if (importFile) importFile.onchange = null;
+      const themeSelect = document.getElementById('theme-select');
+      if (themeSelect) themeSelect.onchange = null;
 
       exportJsonHandler = null;
       exportExcelHandler = null;
@@ -396,6 +449,7 @@
       pinClearHandler = null;
       pinLockNowHandler = null;
       techInfoHandler = null;
+      themeChangeHandler = null;
       root.innerHTML = '';
     };
   }

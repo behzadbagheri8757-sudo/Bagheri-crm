@@ -296,7 +296,7 @@
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="#/prospects">← لیست</a>
       </div>
-      <h2 class="section-title">ارزیابی مشتری بالقوه</h2>
+      <h2 class="section-title">ارزیابی مغازه</h2>
       ${stepBodyHtml()}
     `;
 

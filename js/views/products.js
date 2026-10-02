@@ -109,7 +109,7 @@
           const isOff = p.active === false;
           // Visual-only: dim row + compact OFF badge. No behavior change.
           const inactiveBadge = isOff
-            ? ' <span class="badge pending" style="display:inline-block;vertical-align:middle;font-size:.72em;padding:1px 7px;margin-right:4px;opacity:1;">غیرفعال</span>'
+            ? ' <span class="badge tone-muted" style="display:inline-block;vertical-align:middle;font-size:.72em;padding:1px 7px;margin-right:4px;opacity:1;">غیرفعال</span>'
             : '';
           const offStyle = isOff
             ? 'cursor:pointer;opacity:.42;filter:grayscale(.35);'
@@ -166,7 +166,7 @@
     };
     root.innerHTML =
       '<div class="btn-row" style="margin-bottom:10px;">' +
-      '<a class="btn secondary small" href="' +
+      '<a class="btn secondary small has-chevron" href="' +
       invHref +
       '">مشاهده انبار</a></div>' +
       '<div class="field"><input id="product-search" placeholder="جستجوی نام یا دسته‌بندی..." value="' +

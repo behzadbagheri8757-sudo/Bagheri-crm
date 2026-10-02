@@ -653,7 +653,7 @@
 
       <!-- IDENTITY -->
       <div class="tx-identity card">
-        <div class="tx-identity-title">${esc(s.name)}${s.active === false ? ' <span class="badge pending">غیرفعال</span>' : ''}</div>
+        <div class="tx-identity-title">${esc(s.name)}${s.active === false ? ' <span class="badge tone-muted">غیرفعال</span>' : ''}</div>
         <div class="tx-identity-meta">
           ${s.phone ? '<span>تلفن: ' + esc(s.phone) + '</span>' : '<span class="sub">بدون تلفن</span>'}
         </div>

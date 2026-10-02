@@ -77,7 +77,7 @@
     const totalAll = rows.reduce((s,r) => s + (r.ch.amount || 0), 0);
     const pendingSum = rows.filter(r => r.st.key === 'pending').reduce((s,r) => s + (r.ch.amount || 0), 0);
     sumEl.innerHTML = `
-      <div class="card"><div class="label">تعداد (فیلتر)</div><div class="value">${rows.length}</div></div>
+      <div class="card"><div class="label">تعداد چک (فیلتر)</div><div class="value">${rows.length}</div></div>
       <div class="card"><div class="label">جمع مبالغ</div><div class="value">${toman(totalAll)} ت</div></div>
       <div class="card wide"><div class="label">جمع در جریان (در فیلتر فعلی)</div><div class="value accent-amber">${toman(pendingSum)} ت</div></div>
     `;

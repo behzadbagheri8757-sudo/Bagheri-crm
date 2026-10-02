@@ -76,7 +76,6 @@
           <span class="name invoice-row-main">
             <span class="tx-row-title">#${esc(String(inv.number||''))} · ${esc(custName)}</span>
             <span class="sub">${faDate(inv.date)} — <span class="${st.cls}">${st.label}</span></span>
-            ${remain > 0.5 || paid > 0 ? `<span class="sub">پرداخت‌شده ${toman(paid)} ت</span>` : ''}
           </span>
           <span class="filler"></span>
           <span class="amount tx-row-amount invoice-row-summary">

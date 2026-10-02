@@ -135,7 +135,7 @@
     else if (pSort === 'newest') rows.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     else rows.sort((a,b) => b.latestScore - a.latestScore);
 
-    sum.innerHTML = `<div class="card"><div class="label">تعداد</div><div class="value">${rows.length}</div></div>
+    sum.innerHTML = `<div class="card"><div class="label">تعداد مغازه (فیلتر)</div><div class="value">${rows.length}</div></div>
       <div class="card"><div class="label">کل مغازه‌ها</div><div class="value">${prospectState.shops.length}</div></div>`;
 
     if (!rows.length) {

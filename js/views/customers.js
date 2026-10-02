@@ -118,16 +118,15 @@
           : 0;
         const status = (typeof customerStatus === 'function') ? customerStatus(c.id, custCtx) : null;
 
-        let badgeLabel = 'فعال';
+        let badgeLabel = '';
         let badgeTone = 'neutral';
-        if (c.active === false) { badgeLabel = 'غیرفعال'; badgeTone = 'muted'; }
+        if (c.active === false) { badgeLabel = 'غیرفعال شده'; badgeTone = 'muted'; }
         else if (riskLevel === 'critical') { badgeLabel = 'فوری'; badgeTone = 'danger'; }
         else if (riskLevel === 'high') { badgeLabel = 'پیگیری'; badgeTone = 'warning'; }
         else if (behavior.behindPattern === true) { badgeLabel = 'عقب‌افتاده'; badgeTone = 'warning'; }
         else if (status === 'lost') { badgeLabel = 'از دست رفته'; badgeTone = 'muted'; }
-        else if (status === 'inactive') { badgeLabel = 'غیرفعال'; badgeTone = 'muted'; }
+        else if (status === 'inactive') { badgeLabel = 'سرد شده'; badgeTone = 'muted'; }
         else if (status === 'new') { badgeLabel = 'جدید'; badgeTone = 'neutral'; }
-        else if (status === 'active') { badgeLabel = 'فعال'; badgeTone = 'success'; }
 
         const days = (typeof customerStats === 'function')
         ? (function(){ try { return customerStats(c.id, custCtx).daysSinceLast; } catch(e){ return Infinity; } })()
@@ -149,7 +148,9 @@
           '<span class="customer-row-name tx-row-title">' + esc(c.name) + '</span>' +
           '</span>' +
           '<span class="customer-row-meta-line">' +
-          '<span class="customer-row-status badge tone-' + badgeTone + '">' + esc(badgeLabel) + '</span>' +
+          (badgeLabel
+            ? '<span class="customer-row-status badge tone-' + badgeTone + '">' + esc(badgeLabel) + '</span>'
+            : '') +
           '<span class="customer-row-meta">' + esc(daysText) + '</span>' +
           (watchCount > 0
             ? '<span class="customer-row-watch" aria-label="هشدار فعال" title="' + esc(watchTitle) + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></span>'
