@@ -193,7 +193,22 @@
       '#pin-lock-overlay .pin-powered{font-size:.7rem;color:#A0A8B5;margin:18px 0 0;letter-spacing:.02em;font-weight:400;}' +
       '#pin-lock-overlay .pin-box.shake{animation:pinShake .4s ease;}' +
       '@keyframes pinShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}' +
-      '#pin-lock-overlay .pin-cover-only{color:#fff;font-size:1rem;font-weight:600;text-align:center;opacity:.9;}';
+      '#pin-lock-overlay .pin-cover-only{color:#fff;font-size:1rem;font-weight:600;text-align:center;opacity:.9;}' +
+      'html[data-theme="dark"] #pin-lock-overlay{background:#0B0D10;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-box{background:#181A1F;box-shadow:0 20px 56px rgba(0,0,0,.48);}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-lock-icon{background:rgba(90,169,240,.14);color:#5AA9F0;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-title{color:#F2F2F7;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-sub{color:#9699A3;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-cell{border-color:rgba(255,255,255,.12);background:#202329;color:#F2F2F7;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-cell.filled{border-color:rgba(243,184,91,.42);background:rgba(245,161,49,.12);}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-cell.active{border-color:#F3B85B;background:#181A1F;box-shadow:0 0 0 4px rgba(245,161,49,.16);}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-cell .dot{background:#F2F2F7;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-err{color:#FF6973;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-btn{color:#F3B85B;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-btn:disabled{color:#9699A3;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-btn:not(:disabled){background:#F3B85B;color:#17191D;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-powered{color:#9699A3;}' +
+      'html[data-theme="dark"] #pin-lock-overlay .pin-cover-only{color:#F2F2F7;}';
   }
 
   function showCoverOnly() {

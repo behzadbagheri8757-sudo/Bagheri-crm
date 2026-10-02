@@ -974,7 +974,7 @@ function closeModal(){
     _modalHideTimer = null;
     root.innerHTML = '';
     if(window.scrollX) window.scrollTo(0, window.scrollY);
-  }, 240);
+  }, 300);
 }
 
 function openSheet(html, opts){

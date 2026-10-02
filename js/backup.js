@@ -360,7 +360,7 @@ async function restoreWatchLifecycleBundleForBackup(bundle){
 
 function _validateWatchLifecycleBundle(bundle){
   if(!_isPlainObject(bundle)) return false;
-  if(bundle.version != null && Number(bundle.version) !== 1) return false;
+  if(bundle.version != null && ![1,2].includes(Number(bundle.version))) return false;
   if(!Array.isArray(bundle.occurrences)) return false;
   for(const row of bundle.occurrences){
     if(!_isPlainObject(row) || row.id == null || row.customerId == null || !row.watchCategory) return false;

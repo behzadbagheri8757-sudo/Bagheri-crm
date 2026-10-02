@@ -1018,7 +1018,7 @@ function closeMoreSheet(){
     _moreSheetHideTimer = null;
     if(overlay) overlay.hidden = true;
     if(sheet) sheet.hidden = true;
-  }, 200);
+  }, 280);
 }
 
 function isBackRoute(path){
@@ -1248,6 +1248,7 @@ function bindPullToRefresh(){
     if(y > 0 || isBlocked(e.target)){ pulling = false; return; }
     pulling = true;
     dragging = false;
+    el.style.transition = 'none';
     startY = e.touches[0].clientY;
   }, {passive:true});
 
@@ -1271,6 +1272,7 @@ function bindPullToRefresh(){
     if(!dragging) return;
     dragging = false;
     const ready = el.classList.contains('ptr-ready');
+    el.style.transition = 'transform 160ms ease, opacity 160ms ease';
     if(ready){
       el.style.transform = 'translateY(0)';
       doRefresh();
