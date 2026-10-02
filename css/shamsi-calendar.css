@@ -313,3 +313,80 @@
   .shamsi-calendar-nav,
   .shamsi-calendar-day{ transition:none; }
 }
+
+/* Explicit application theme wins over the legacy system fallback above.
+   The fallback remains intact for startup/error cases where no theme
+   attribute is present. */
+html[data-theme="dark"] .shamsi-sheet-overlay{background:rgba(0,0,0,.58);}
+html[data-theme="dark"] .shamsi-sheet{
+  background:var(--vg-color-surface);
+  color:var(--vg-color-text);
+  box-shadow:0 -10px 34px rgba(0,0,0,.38);
+}
+html[data-theme="dark"] .shamsi-sheet-title,
+html[data-theme="dark"] .shamsi-wheel-item[data-selected="1"],
+html[data-theme="dark"] .shamsi-calendar-title,
+html[data-theme="dark"] .shamsi-calendar-day{color:var(--vg-color-text);}
+html[data-theme="dark"] .shamsi-wheel-item{color:var(--vg-color-text-muted);}
+html[data-theme="dark"] .shamsi-calendar-day.is-outside{color:#5E626B;}
+html[data-theme="dark"] .shamsi-calendar-nav{
+  background:rgba(255,255,255,.07);
+  color:var(--vg-color-primary);
+}
+html[data-theme="dark"] .shamsi-calendar-nav:active{background:rgba(90,169,240,.20);}
+html[data-theme="dark"] .shamsi-sheet-btn{color:var(--vg-color-primary);}
+html[data-theme="dark"] .shamsi-wheels-highlight{
+  background:rgba(90,169,240,.10);
+  border-color:rgba(90,169,240,.20);
+}
+html[data-theme="dark"] .shamsi-sheet-handle{background:rgba(255,255,255,.18);}
+html[data-theme="dark"] .shamsi-calendar-weekdays{color:var(--vg-color-text-muted);}
+html[data-theme="dark"] .shamsi-calendar-day.is-today{
+  color:var(--vg-color-primary);
+  box-shadow:inset 0 0 0 1.5px rgba(90,169,240,.34);
+}
+html[data-theme="dark"] .shamsi-calendar-day.is-selected{
+  background:var(--vg-color-primary);
+  color:#FFFFFF;
+}
+html[data-theme="dark"] .shamsi-calendar-day.is-selected.is-today{
+  box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.60);
+}
+
+/* If Light is explicitly selected while the device is dark, restore the
+   original Light Mode calendar values after the legacy @media fallback. */
+html[data-theme="light"] .shamsi-sheet-overlay{background:rgba(11,31,58,.42);}
+html[data-theme="light"] .shamsi-sheet{
+  background:#FFFFFF;
+  color:#1F2937;
+  box-shadow:0 -10px 34px rgba(31,41,55,.14);
+}
+html[data-theme="light"] .shamsi-sheet-title,
+html[data-theme="light"] .shamsi-wheel-item[data-selected="1"],
+html[data-theme="light"] .shamsi-calendar-title,
+html[data-theme="light"] .shamsi-calendar-day{color:#1F2937;}
+html[data-theme="light"] .shamsi-wheel-item{color:#667085;}
+html[data-theme="light"] .shamsi-calendar-day.is-outside{color:#C4CAD3;}
+html[data-theme="light"] .shamsi-calendar-nav{
+  background:rgba(31,41,55,.04);
+  color:#0070D2;
+}
+html[data-theme="light"] .shamsi-calendar-nav:active{background:rgba(0,112,210,.12);}
+html[data-theme="light"] .shamsi-sheet-btn{color:#0070D2;}
+html[data-theme="light"] .shamsi-wheels-highlight{
+  background:rgba(0,112,210,.06);
+  border-color:rgba(0,112,210,.12);
+}
+html[data-theme="light"] .shamsi-sheet-handle{background:rgba(31,41,55,.14);}
+html[data-theme="light"] .shamsi-calendar-weekdays{color:#667085;}
+html[data-theme="light"] .shamsi-calendar-day.is-today{
+  color:#0070D2;
+  box-shadow:inset 0 0 0 1.5px rgba(0,112,210,.32);
+}
+html[data-theme="light"] .shamsi-calendar-day.is-selected{
+  background:#0070D2;
+  color:#FFFFFF;
+}
+html[data-theme="light"] .shamsi-calendar-day.is-selected.is-today{
+  box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.60);
+}

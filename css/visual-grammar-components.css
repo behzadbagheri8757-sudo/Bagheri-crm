@@ -74,8 +74,6 @@ input[placeholder*="جستجو"]{
   align-items:stretch;
   justify-content:space-around;
 
-.bottom-nav[hidden]{ display:none !important; }
-
   /* Short floating capsule: 60px at rest → 46px minimized. border-radius
      is set far larger than any of these heights on purpose — the browser
      clamps border-radius to half the box's own height/width, so the two
@@ -106,6 +104,8 @@ input[placeholder*="جستجو"]{
              min-height var(--bn-minimize-duration) cubic-bezier(.22,1,.36,1),
              padding-block var(--bn-minimize-duration) cubic-bezier(.22,1,.36,1);
 }
+
+.bottom-nav[hidden]{ display:none !important; }
 
 .bottom-nav-item{
   position:relative;
@@ -150,7 +150,7 @@ input[placeholder*="جستجو"]{
 
 /* AppIcons are monochrome by default across all views. Only the active Bottom Nav item is brand-blue. */
 .app-icon{
-  color:#1C1C1E;
+  color:var(--vg-color-icon,#1C1C1E);
 }
 
 .bottom-nav-item .bn-ico{
@@ -408,6 +408,12 @@ input[placeholder*="جستجو"]{
 .field textarea{
   min-height:72px;
   border-radius:var(--vg-radius-soft);
+}
+html[data-theme="dark"] .field input:focus,
+html[data-theme="dark"] .field select:focus,
+html[data-theme="dark"] .field textarea:focus{
+  border-color:rgba(74,163,255,.45);
+  box-shadow:0 0 0 3px rgba(74,163,255,.14);
 }
 
 
@@ -869,4 +875,32 @@ border: 1px solid rgba(15, 23, 42, 0.04);
     0 1px 4px rgba(15,23,42,.08),
     inset 0 1px 0 rgba(255,255,255,.58),
     inset 0 -1px 0 rgba(15,23,42,.04);
+}
+
+
+/* Dark theme component-material corrections. Geometry and interaction are unchanged. */
+html[data-theme="dark"] .bottom-nav{
+  background:rgba(24,26,31,.84);
+  border-color:var(--vg-color-border);
+  box-shadow:0 8px 24px rgba(0,0,0,.30),0 2px 6px rgba(0,0,0,.22);
+}
+html[data-theme="dark"] .bn-indicator{
+  background:rgba(255,255,255,.075);
+  border-color:rgba(255,255,255,.12);
+  box-shadow:0 1px 3px rgba(0,0,0,.20),0 5px 12px rgba(0,0,0,.18),
+             inset 0 1px 0 rgba(255,255,255,.10),inset 0 -1px 0 rgba(0,0,0,.12);
+}
+html[data-theme="dark"] input[type="search"],
+html[data-theme="dark"] input[placeholder*="جستجو"]{
+  background-color:var(--vg-color-surface-soft);
+  border-color:var(--ios-glass-border);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 1px 3px rgba(0,0,0,.18);
+  /* The source SVG is a neutral gray rather than a brand asset; keep it
+     unfiltered and raise its literal stroke only for dark contrast. */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7' fill='none' stroke='%23969AA3' stroke-width='2'/%3E%3Cline x1='16.65' y1='16.65' x2='21' y2='21' stroke='%23969AA3' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+html[data-theme="dark"] .field select,
+html[data-theme="dark"] .tx-toolbar-select,
+html[data-theme="dark"] .inv-discount-block select{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239699A3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }

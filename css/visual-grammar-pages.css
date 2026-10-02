@@ -759,3 +759,7 @@ main .empty{margin:14px 0;}
   -webkit-mask-repeat:no-repeat;
   mask-repeat:no-repeat;
 }
+
+html[data-theme="dark"] #main.customer-detail-view .watch-level-high{
+  color:#F3A56B;
+}
