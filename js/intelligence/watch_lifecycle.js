@@ -24,6 +24,7 @@
      getWatchResponseOptions(occurrenceId) -> option[]
      exportWatchLifecycleBundle() -> Promise<object|null>
      restoreWatchLifecycleBundle(bundle) -> Promise<boolean>
+     getPendingWatchFollowUps([customerId]) -> Occurrence[]
      WATCH_REASON_OPTIONS
    ============================================================ */
 'use strict';
@@ -51,6 +52,11 @@
   ];
 
   var VALID_REASON_CODES = Object.create(null);
+  // Internal completion state for an explicitly reviewed follow-up. This is
+  // deliberately distinct from 'other' and from 'not_wanted'. It means the
+  // seller has reviewed the pending question and does not want to pursue it
+  // now; it does not suppress future cycles forever.
+  VALID_REASON_CODES.dismiss = true;
   for (var ri = 0; ri < WATCH_REASON_OPTIONS.length; ri++) {
     VALID_REASON_CODES[WATCH_REASON_OPTIONS[ri].code] = true;
   }
@@ -102,9 +108,18 @@
     return pid;
   }
 
+  // SKU/family Watches are one subject per customer + product family. The
+  // generator may move that subject between these categories as evidence
+  // changes (e.g. SKU_DELAY -> COMBINED_SKU); identity must not depend on it.
+  var _SKU_IDENTITY_CATS = {
+    SKU_DELAY_WATCH: 1, SKU_QUANTITY_DROP_WATCH: 1, SKU_FREQUENCY_DROP_WATCH: 1,
+    LINE_DROP_WATCH: 1, COMBINED_SKU_WATCH: 1
+  };
+
   function _identityKey(customerId, watchCategory, productId, ctx) {
     var pid = _familyOfPid(_normPid(productId), ctx);
-    return String(customerId) + '|' + String(watchCategory) + '|' + (pid || '');
+    var cat = (pid && _SKU_IDENTITY_CATS[String(watchCategory)]) ? 'SKU' : String(watchCategory);
+    return String(customerId) + '|' + cat + '|' + (pid || '');
   }
 
   function _loadLS() {
@@ -270,6 +285,28 @@
     return t < cutoffMs;
   }
 
+  function _migrateLegacyDismissedRows() {
+    var changed = false;
+    var ids = Object.keys(_mem);
+    var decisionTypes = { still_stock: true, not_wanted: true, follow_up_later: true };
+    for (var i = 0; i < ids.length; i++) {
+      var r = _mem[ids[i]];
+      if (!r || r.status !== 'dismissed' || r.suppression) continue;
+      var rt = r.resolution && r.resolution.type ? String(r.resolution.type) : '';
+      var rc = r.reason && r.reason.code ? String(r.reason.code) : '';
+      var inferred = decisionTypes[rc] ? rc : (rt === 'manual_dismiss' ? 'dismiss' : null);
+      if (!inferred) continue;
+      var decidedAt = (r.resolution && r.resolution.resolvedAt) || (r.reason && r.reason.recordedAt) || r.lastEvaluatedAt || r.firstDetectedAt || _nowISO();
+      r.suppression = { type: inferred, decidedAt: decidedAt, atInvoiceSeq: null, atDate: String(decidedAt).slice(0, 10), levelAtDecision: r.level || null, releasedAt: null, releasedBy: null, migratedFrom: 'watch_lifecycle_v1' };
+      _mem[r.id] = r;
+      _dirtyIds[r.id] = true;
+      _idbPut(r);
+      changed = true;
+    }
+    if (changed) _saveLS();
+    return changed;
+  }
+
   function _sweepExpiredHistory() {
     var cutoffMs = Date.now() - (WATCH_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     var ids = Object.keys(_mem);
@@ -300,8 +337,8 @@
 
   _loadLS();
   _openIdb(function (db) {
-    if (db) _idbHydrate(function () { _sweepExpiredHistory(); });
-    else _sweepExpiredHistory();
+    if (db) _idbHydrate(function () { _migrateLegacyDismissedRows(); _sweepExpiredHistory(); });
+    else { _migrateLegacyDismissedRows(); _sweepExpiredHistory(); }
   });
 
   function _allOccurrences() {
@@ -333,7 +370,7 @@
   }
 
   function _newTombs() {
-    return { byKey: Object.create(null), byFamily: Object.create(null) };
+    return { byKey: Object.create(null), byFamily: Object.create(null), extra: [] };
   }
 
   function _releaseSuppression(rec, by) {
@@ -358,6 +395,12 @@
     var cTs = String(cur.suppression.decidedAt || '');
     var loser = rTs > cTs ? cur : r;
     if (rTs > cTs) slot[kk] = r;
+    // A pending follow_up_later is never discarded by a collision (old rows
+    // with different categories now share one SKU identity); keep it held.
+    if (loser.suppression && loser.suppression.type === 'follow_up_later') {
+      tombs.extra.push(loser);
+      return;
+    }
     if (mutate) _releaseSuppression(loser, 'superseded_duplicate');
   }
 
@@ -367,58 +410,39 @@
     for (var i = 0; i < k1.length; i++) out.push(tombs.byKey[k1[i]]);
     var k2 = Object.keys(tombs.byFamily);
     for (var j = 0; j < k2.length; j++) out.push(tombs.byFamily[k2[j]]);
+    for (var e = 0; e < tombs.extra.length; e++) out.push(tombs.extra[e]);
     return out;
   }
 
   function _findTombs(tombs, customerId, category, productId, ctx) {
     var out = [];
-    var t1 = tombs.byKey[_identityKey(customerId, category, productId, ctx)];
+    var idKey = _identityKey(customerId, category, productId, ctx);
+    var t1 = tombs.byKey[idKey];
     if (t1) out.push(t1);
+    for (var xe = 0; xe < tombs.extra.length; xe++) {
+      var xt = tombs.extra[xe];
+      if (_identityKey(xt.customerId, xt.watchCategory, xt.productId, ctx) === idKey) out.push(xt);
+    }
     var sk = _subjectKey(customerId, productId, ctx);
     if (sk && tombs.byFamily[sk]) out.push(tombs.byFamily[sk]);
     return out;
   }
 
-  // Data-derived (never time-derived) contradictory event: a sale registered
-  // AFTER the decision for the same subject. Invoice numbers come from the
-  // global monotonic data.invoiceSeq counter, so "after" is exact even though
-  // invoices only carry a date (no time). Date compare is a strict fallback.
-  function _purchaseSince(tomb, ctx) {
-    var s = tomb.suppression;
-    var invs;
-    try {
-      if (typeof customerInvoices === 'function') invs = customerInvoices(tomb.customerId, ctx) || [];
-      else if (typeof data !== 'undefined' && Array.isArray(data.invoices)) {
-        invs = data.invoices.filter(function (i) { return i && i.customerId === tomb.customerId; });
-      } else invs = [];
-    } catch (e) { return false; }
-    var fam = _familyOfPid(_normPid(tomb.productId), ctx); // null => account-level
-    for (var i = 0; i < invs.length; i++) {
-      var inv = invs[i];
-      if (!inv) continue;
-      var after = false;
-      var n = Number(inv.number);
-      if (s.atInvoiceSeq != null && isFinite(n)) after = n > s.atInvoiceSeq;
-      else if (s.atDate) after = String(inv.date || '') > s.atDate;
-      if (!after) continue;
-      var items = inv.items || [];
-      for (var j = 0; j < items.length; j++) {
-        var it = items[j];
-        if (!it || !it.productId || !(it.qty > 0)) continue;
-        if (fam == null || _familyOfPid(_normPid(it.productId), ctx) === fam) return true;
-      }
-    }
-    return false;
-  }
-
-  // Returns a release reason string, or null if the decision still holds.
+  // Seller decisions are not released by purchase alone. A purchase may be
+  // small, unrelated to the observed dimension, or simply replenish stock.
+  // Only a real disappearance of the raw Watch condition ends the current
+  // cycle (handled explicitly by reconcileWatchLifecycle). A manual dismiss is
+  // the one decision for which a genuine severity escalation may reopen the
+  // current subject: the seller dismissed the present case, not all future
+  // important warnings. still_stock/follow_up_later/not_wanted remain held.
   function _releaseReasonFor(tomb, watch, ctx) {
-    var s = tomb.suppression;
-    if (_purchaseSince(tomb, ctx)) return 'purchase';
-    if (s.type === 'not_wanted') return null; // only purchase/explicit reversal
-    var was = LEVEL_RANK[s.levelAtDecision] || 0;
-    var now = LEVEL_RANK[watch && watch.level] || 0;
-    if (was > 0 && now > was) return 'escalated';
+    var s = tomb && tomb.suppression;
+    if (!s || s.releasedAt) return null;
+    if (s.type === 'dismiss') {
+      var was = LEVEL_RANK[s.levelAtDecision] || 0;
+      var now = LEVEL_RANK[watch && watch.level] || 0;
+      if (was > 0 && now > was) return 'escalated';
+    }
     return null;
   }
 
@@ -468,7 +492,10 @@
       lastEvaluatedAt: now,
       snoozeUntil: null,
       reason: null,
-      resolution: null
+      resolution: null,
+      evidence: watch.evidence ? watch.evidence : null,
+      source: watch.source || null,
+      watchComponents: watch.watchComponents || null
     };
   }
 
@@ -497,6 +524,31 @@
     var c2 = data.customers.find(function (x) { return x && x.id === cid; });
     if (!c2) return false;
     return c2.active !== false;
+  }
+
+  function _findLatestAlertSuperseded(key, ctx) {
+    var rows = _allOccurrences();
+    var best = null;
+    var bestTs = '';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r || r.status === 'active') continue;
+      if (!r.resolution || r.resolution.type !== 'alert_superseded') continue;
+      var k = _identityKey(r.customerId, r.watchCategory, r.productId, ctx);
+      if (k !== key) continue;
+      var ts = String(r.lastEvaluatedAt || r.firstDetectedAt || '');
+      if (!best || ts > bestTs) { best = r; bestTs = ts; }
+    }
+    return best;
+  }
+
+  function _markAlertSuperseded(rec, now) {
+    if (!rec || rec.status !== 'active') return false;
+    rec.status = 'resolved';
+    rec.lastEvaluatedAt = now;
+    rec.resolution = { type: 'alert_superseded', resolvedAt: now, note: null };
+    _persist(rec);
+    return true;
   }
 
   function reconcileWatchLifecycle(customerId, ctx) {
@@ -547,46 +599,117 @@
         try {
           for (var ci = 0; ci < customerIds.length; ci++) {
             var cid = customerIds[ci];
-            var watches = [];
             var custActive = _isCustomerActive(cid, ctx);
-            var extractOk = false;
-            if (custActive && typeof extractWatchObservations === 'function') {
-              try {
-                watches = extractWatchObservations(cid, undefined, ctx) || [];
-                extractOk = true;
-              } catch (eW) {
-                watches = [];
-              }
-            }
 
             var tombs = _newTombs();
             var activeMap = _activeByIdentity(cid, ctx, tombs);
-            var seenKeys = Object.create(null);
+            var rawWatches = [];
+            var visibleWatches = [];
+            var extractOk = false;
+            var confirmedOk = false;
 
-            for (var wi = 0; wi < watches.length; wi++) {
-              var w = watches[wi];
-              if (!w || !w.category) continue;
-              var key = _identityKey(cid, w.category, w.productId, ctx);
-              seenKeys[key] = true;
-              var existing = activeMap[key];
+            if (custActive && typeof extractWatchObservations === 'function') {
+              try {
+                // First get the raw Watch generation with no confirmed override.
+                // This is intentionally the same generator/rules; passing [] only
+                // exposes whether a Watch was generated before Alert supersession.
+                rawWatches = extractWatchObservations(cid, [], ctx) || [];
+                extractOk = true;
+              } catch (eRawW) { rawWatches = []; }
+
+              if (extractOk) {
+                try {
+                  var confirmedForLifecycle = [];
+                  if (typeof extractCustomerSignals === 'function') {
+                    confirmedForLifecycle = extractCustomerSignals(cid, ctx) || [];
+                    confirmedOk = true;
+                  }
+                  // If confirmed-signal extraction is unavailable/fails, fail open:
+                  // do not claim an Alert conversion we cannot prove.
+                  visibleWatches = confirmedOk
+                    ? (extractWatchObservations(cid, confirmedForLifecycle, ctx) || [])
+                    : rawWatches.slice();
+                } catch (eVisibleW) {
+                  visibleWatches = rawWatches.slice();
+                  confirmedOk = false;
+                }
+              }
+            }
+
+            var rawByKey = Object.create(null);
+            var visibleByKey = Object.create(null);
+            for (var rwi = 0; rwi < rawWatches.length; rwi++) {
+              var rw = rawWatches[rwi];
+              if (rw && rw.category) rawByKey[_identityKey(cid, rw.category, rw.productId, ctx)] = rw;
+            }
+            for (var vwi = 0; vwi < visibleWatches.length; vwi++) {
+              var vw = visibleWatches[vwi];
+              if (vw && vw.category) visibleByKey[_identityKey(cid, vw.category, vw.productId, ctx)] = vw;
+            }
+
+            var seenRawKeys = Object.create(null);
+            var seenVisibleKeys = Object.create(null);
+            var visibleKeys = Object.keys(visibleByKey);
+
+            // Update/create visible Watches. A previously Alert-superseded cycle
+            // is reactivated if the same raw Watch remains after the Alert filter
+            // disappears; that is continuation of the same issue, not a new cycle.
+            for (var vki = 0; vki < visibleKeys.length; vki++) {
+              var vk = visibleKeys[vki];
+              var w = visibleByKey[vk];
+              seenVisibleKeys[vk] = true;
+              seenRawKeys[vk] = true;
+              var existing = activeMap[vk];
               if (!existing) {
-                // A live seller decision on this subject blocks a new cycle
-                // until it is released by a contradictory/changed state.
+                var alertAnchor = _findLatestAlertSuperseded(vk, ctx);
+                if (alertAnchor) {
+                  alertAnchor.status = 'active';
+                  if (w.category) alertAnchor.watchCategory = w.category;
+                  alertAnchor.level = w.level || alertAnchor.level;
+                  alertAnchor.generatedReason = w.reason || alertAnchor.generatedReason;
+                  alertAnchor.lastEvaluatedAt = now;
+                  alertAnchor.resolution = null;
+                  alertAnchor.evidence = w.evidence ? w.evidence : (alertAnchor.evidence || null);
+                  alertAnchor.source = w.source || alertAnchor.source || null;
+                  alertAnchor.watchComponents = w.watchComponents || alertAnchor.watchComponents || null;
+                  var anchorPid = _normPid(w.productId);
+                  if (anchorPid != null) alertAnchor.productId = anchorPid;
+                  if (w.productName != null) alertAnchor.productName = w.productName;
+                  _persist(alertAnchor);
+                  persistCount++;
+                  activeMap[vk] = alertAnchor;
+                  existing = alertAnchor;
+                }
+              }
+              if (!existing) {
+                // A live seller decision blocks a new cycle. Escalation can release
+                // only an ordinary manual dismiss (see _releaseReasonFor).
                 var held = false;
                 var ts = _findTombs(tombs, cid, w.category, w.productId, ctx);
                 for (var ti = 0; ti < ts.length; ti++) {
                   var rel = _releaseReasonFor(ts[ti], w, ctx);
-                  if (rel) { _releaseSuppression(ts[ti], rel); persistCount++; }
-                  else held = true;
+                  if (rel) {
+                    _releaseSuppression(ts[ti], rel);
+                    persistCount++;
+                    // Genuine escalation reopens the SAME occurrence; it is not
+                    // a new Watch cycle and must not create a duplicate ID.
+                    if (!existing && ts[ti].status !== 'active' && ts[ti].suppression.releasedAt) {
+                      existing = ts[ti];
+                      existing.status = 'active';
+                      existing.resolution = null;
+                    }
+                  } else held = true;
                 }
-                if (held) continue;
+                if (held && !existing) continue;
               }
               if (existing) {
+                if (w.category) existing.watchCategory = w.category;
                 existing.level = w.level || existing.level;
                 existing.generatedReason = w.reason || existing.generatedReason;
                 existing.lastEvaluatedAt = now;
-                // Keep the LAST SKU seen (display metadata) on the same
-                // Family-level Watch; identity itself is unaffected.
+                existing.evidence = w.evidence ? w.evidence : (existing.evidence || null);
+                existing.source = w.source || existing.source || null;
+                existing.watchComponents = w.watchComponents || existing.watchComponents || null;
                 var lastPid = _normPid(w.productId);
                 if (lastPid != null) existing.productId = lastPid;
                 if (w.productName != null) existing.productName = w.productName;
@@ -602,38 +725,58 @@
               }
             }
 
-            // Condition gone (successful evaluation only) -> the cycle a
-            // dismiss / still_stock / follow_up_later decision belonged to has
-            // ended; a later recurrence is a genuinely new cycle.
-            // not_wanted is NOT released by this: only purchase / reversal.
+            // Raw Watch exists but is filtered because an active Confirmed Signal
+            // supersedes it. This is a conversion to Alert, NOT condition_cleared.
+            // Do not create a new cycle while the raw Watch condition remains.
+            if (custActive && extractOk && confirmedOk) {
+              var rawKeys = Object.keys(rawByKey);
+              for (var rki = 0; rki < rawKeys.length; rki++) {
+                var rk = rawKeys[rki];
+                seenRawKeys[rk] = true;
+                if (visibleByKey[rk]) continue;
+                var alertActive = activeMap[rk];
+                if (alertActive && alertActive.status === 'active') {
+                  if (_markAlertSuperseded(alertActive, now)) persistCount++;
+                }
+              }
+            }
+
+            // A true condition clear is provable only when the RAW Watch generator
+            // successfully ran and the raw Watch is absent. A Watch missing only
+            // because an Alert filter hid it is therefore never auto-resolved here.
             if (custActive && extractOk) {
               var tl = _tombList(tombs);
               for (var tk = 0; tk < tl.length; tk++) {
                 var tr = tl[tk];
-                if (!tr.suppression || tr.suppression.releasedAt || tr.suppression.type === 'not_wanted') continue;
-                if (seenKeys[_identityKey(tr.customerId, tr.watchCategory, tr.productId, ctx)]) continue;
+                if (!tr.suppression || tr.suppression.releasedAt || tr.suppression.type === 'not_wanted' || tr.suppression.type === 'follow_up_later') continue;
+                var tombKey = _identityKey(tr.customerId, tr.watchCategory, tr.productId, ctx);
+                if (seenRawKeys[tombKey]) continue;
                 _releaseSuppression(tr, 'condition_cleared');
                 persistCount++;
               }
             }
 
-            // Auto-resolve actives whose condition is gone
-            var actKeys = Object.keys(activeMap);
-            for (var ai = 0; ai < actKeys.length; ai++) {
-              var ak = actKeys[ai];
-              if (seenKeys[ak]) continue;
-              var stale = activeMap[ak];
-              if (!stale || stale.status !== 'active') continue;
-              stale.status = 'resolved';
-              stale.lastEvaluatedAt = now;
-              stale.resolution = {
-                type: 'auto',
-                resolvedAt: now,
-                note: null
-              };
-              // Keep reason + note history intact
-              _persist(stale);
-              persistCount++;
+            // Auto-resolve active occurrences only when the raw generator has
+            // successfully established that the condition is genuinely absent.
+            // Inactive/deleted customers generate no Watches, so their active
+            // occurrences are closed here (v71 behavior, resolution 'auto').
+            if (!custActive || extractOk) {
+              var actKeys = Object.keys(activeMap);
+              for (var ai = 0; ai < actKeys.length; ai++) {
+                var ak = actKeys[ai];
+                if (seenRawKeys[ak]) continue;
+                var stale = activeMap[ak];
+                if (!stale || stale.status !== 'active') continue;
+                stale.status = 'resolved';
+                stale.lastEvaluatedAt = now;
+                stale.resolution = {
+                  type: custActive ? 'condition_cleared' : 'auto',
+                  resolvedAt: now,
+                  note: null
+                };
+                _persist(stale);
+                persistCount++;
+              }
             }
           }
         } finally {
@@ -662,6 +805,7 @@
       var r = rows[i];
       if (!r || r.status !== 'active') continue;
       if (customerId && String(r.customerId) !== String(customerId)) continue;
+      if (!_isCustomerActive(r.customerId)) continue;
       out.push(r);
     }
     // Sort: unreviewed first, then level desc
@@ -674,6 +818,22 @@
       var lb = levelRank[b.level] || 0;
       if (lb !== la) return lb - la;
       return String(b.lastEvaluatedAt || '').localeCompare(String(a.lastEvaluatedAt || ''));
+    });
+    return out;
+  }
+
+  function getPendingWatchFollowUps(customerId) {
+    var rows = _allOccurrences();
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r || r.status === 'active' || !r.suppression || r.suppression.releasedAt) continue;
+      if (r.suppression.type !== 'follow_up_later') continue;
+      if (customerId && String(r.customerId) !== String(customerId)) continue;
+      out.push(r);
+    }
+    out.sort(function (a, b) {
+      return String(b.suppression.decidedAt || b.lastEvaluatedAt || '').localeCompare(String(a.suppression.decidedAt || a.lastEvaluatedAt || ''));
     });
     return out;
   }
@@ -721,8 +881,12 @@
     if (!rec) return null;
     if (rec.status !== 'active') return null;
     var code = reasonCode ? String(reasonCode) : null;
+    // 'dismiss' is an explicit close action, not a reason code. Never
+    // silently reinterpret it as 'other'; callers must use
+    // dismissWatchOccurrence() so the lifecycle state is actually closed.
+    if (code === 'dismiss') return null;
     if (code && !VALID_REASON_CODES[code]) {
-      // Allow unknown codes only as 'other' for safety
+      // Preserve the existing safe fallback for unknown reason codes.
       code = 'other';
     }
     if (code === 'still_stock' || code === 'not_wanted' || code === 'follow_up_later') {
@@ -772,8 +936,9 @@
       note: note ? String(note).slice(0, 500) : null
     };
     // Closes ONLY this cycle: the marker stops the same evidence from
-    // re-opening it immediately, but is released as soon as the state
-    // changes (purchase / condition cleared / level escalated).
+    // re-opening it immediately. It can be released only by a real raw-condition
+    // clear, an explicit seller reversal, or a genuine severity escalation of
+    // this dismissed case.
     rec.suppression = _decisionSnapshot(rec, 'dismiss');
     // Reason/comment history (if any was recorded earlier) is untouched.
     _persist(rec);
@@ -822,6 +987,48 @@
     return out;
   }
 
+  /** Complete a pending follow-up with an explicit result. Cancelling is
+   * deliberately separate (reverseWatchDecision) and never becomes not_wanted. */
+  function completeWatchFollowUp(occurrenceId, resultCode, comment) {
+    var rec = _mem[occurrenceId];
+    if (!rec || rec.status === 'active' || !rec.suppression || rec.suppression.releasedAt) return null;
+    if (rec.suppression.type !== 'follow_up_later') return null;
+    var code = resultCode ? String(resultCode) : '';
+    if (!VALID_REASON_CODES[code] || code === 'follow_up_later') return null;
+    if (code === 'not_wanted' && _normPid(rec.productId) == null) return null;
+    var now = _nowISO();
+    var text = comment ? String(comment).slice(0, 500) : (rec.reason && rec.reason.comment ? rec.reason.comment : '');
+    if (code === 'dismiss') {
+      rec.reason = { code: 'dismiss', label: 'بررسی شد، فعلاً پیگیری نمی‌خواهم', comment: text, recordedAt: now };
+      rec.resolution = { type: 'follow_up_completed_dismiss', resolvedAt: now, note: null };
+      // Completion ends the pending follow-up, but holds this current subject
+      // under the ordinary dismiss suppression. It is not not_wanted, and it
+      // can still be reopened later by the existing genuine escalation path.
+      rec.suppression = _decisionSnapshot(rec, 'dismiss');
+      _persist(rec);
+      return rec;
+    }
+    rec.reason = {
+      code: code,
+      comment: text,
+      recordedAt: now
+    };
+    rec.resolution = { type: 'follow_up_completed', resolvedAt: now, note: null };
+    // Completing a follow-up with a factual cause (price/competitor/no_need/
+    // quality/other) is still a seller answer to the SAME subject. Do not
+    // release the hold while the raw Watch remains active: the next reconcile
+    // would otherwise create a new occurrence with a fresh id immediately.
+    // This is deliberately not not_wanted and is not a permanent suppression;
+    // reconcile may release it only when the raw condition is genuinely clear.
+    rec.suppression = _decisionSnapshot(rec, 'follow_up_result');
+    rec.suppression.resultCode = code;
+    rec.suppression.resultComment = text;
+    rec.suppression.releasedAt = null;
+    rec.suppression.releasedBy = null;
+    _persist(rec);
+    return rec;
+  }
+
   /** Explicit seller reversal of a decision (by occurrence id). */
   function reverseWatchDecision(occurrenceId) {
     var rec = _mem[occurrenceId];
@@ -835,7 +1042,7 @@
       function pack() {
         var occurrences = _allOccurrences();
         resolve({
-          version: 1,
+          version: 2,
           dbVersion: WATCH_DB_VERSION,
           occurrences: occurrences
         });
@@ -852,13 +1059,36 @@
         return;
       }
       var rows = Array.isArray(bundle.occurrences) ? bundle.occurrences : [];
-      // Soft validation: keep well-formed rows only
+      // Soft validation + backward-compatible migration. Old V1 dismissed rows
+      // may have resolution/reason data but no suppression marker. We reconstruct
+      // only the decision that is already explicit in that row: known seller
+      // decision codes remain themselves; all other manual dismissals become the
+      // generic 'dismiss' decision. No new business reason/evidence is invented.
       var cleaned = [];
+      var decisionTypes = { still_stock: true, not_wanted: true, follow_up_later: true };
       for (var i = 0; i < rows.length; i++) {
         var r = rows[i];
         if (!r || r.id == null || r.customerId == null || !r.watchCategory) continue;
         if (r.status !== 'active' && r.status !== 'resolved' && r.status !== 'dismissed') {
           r.status = 'resolved';
+        }
+        if (r.status === 'dismissed' && !r.suppression) {
+          var rt = r.resolution && r.resolution.type ? String(r.resolution.type) : '';
+          var rc = r.reason && r.reason.code ? String(r.reason.code) : '';
+          var inferred = decisionTypes[rc] ? rc : (rt === 'manual_dismiss' ? 'dismiss' : null);
+          if (inferred) {
+            var decidedAt = (r.resolution && r.resolution.resolvedAt) || (r.reason && r.reason.recordedAt) || r.lastEvaluatedAt || r.firstDetectedAt || _nowISO();
+            r.suppression = {
+              type: inferred,
+              decidedAt: decidedAt,
+              atInvoiceSeq: null,
+              atDate: String(decidedAt).slice(0, 10),
+              levelAtDecision: r.level || null,
+              releasedAt: null,
+              releasedBy: null,
+              migratedFrom: 'watch_lifecycle_v1'
+            };
+          }
         }
         cleaned.push(r);
       }
@@ -906,10 +1136,12 @@
   global.reconcileWatchLifecycle = reconcileWatchLifecycle;
   global.getActiveWatchOccurrences = getActiveWatchOccurrences;
   global.getWatchLifecycleSummary = getWatchLifecycleSummary;
+  global.getPendingWatchFollowUps = getPendingWatchFollowUps;
   global.recordWatchReason = recordWatchReason;
   global.dismissWatchOccurrence = dismissWatchOccurrence;
   global.filterSuppressedWatchObservations = filterSuppressedWatchObservations;
   global.reverseWatchDecision = reverseWatchDecision;
+  global.completeWatchFollowUp = completeWatchFollowUp;
   global.getWatchResponseOptions = getWatchResponseOptions;
   global.exportWatchLifecycleBundle = exportWatchLifecycleBundle;
   global.restoreWatchLifecycleBundle = restoreWatchLifecycleBundle;

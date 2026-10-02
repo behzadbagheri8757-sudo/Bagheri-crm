@@ -851,7 +851,8 @@
       reason: opts.reason,
       deviationStrength: opts.deviationStrength,
       source: opts.source,
-      watchComponents: opts.watchComponents || null
+      watchComponents: opts.watchComponents || null,
+      evidence: opts.evidence || null
     };
   }
 
@@ -866,7 +867,8 @@
       level: level,
       reason: 'نشانه‌های زودهنگام کاهش خرید (حدود ' + _fa(declinePct) + '٪) مشاهده می‌شود',
       deviationStrength: Math.min(1, declinePct / 30),
-      source: 'account'
+      source: 'account',
+      evidence: { salesPrevious30: b.salesPrev30, salesRecent30: b.sales30, declinePercent: declinePct, comparison: '۳۰ روز قبل در برابر ۳۰ روز اخیر' }
     }));
   }
 
@@ -880,7 +882,8 @@
       level: level,
       reason: 'مشتری در حال نزدیک‌شدن به عقب‌افتادن از الگوی معمول خرید است',
       deviationStrength: Math.min(1, ratio),
-      source: 'account'
+      source: 'account',
+      evidence: { daysSinceLast: b.daysSinceLast, averageIntervalDays: b.avgIntervalDays, ratio: ratio, comparison: 'فاصله فعلی از خرید در برابر فاصله معمول خرید' }
     }));
   }
 
@@ -911,11 +914,28 @@
     }
     if (decliningCount < 1) return;
     var level = decliningCount >= 2 ? 'medium' : 'low';
+    var affected = [];
+    for (var ai = 0; ai < earlyKeys.length; ai++) {
+      var apid = earlyKeys[ai];
+      var ae = split.early[apid];
+      var al = split.late[apid];
+      var aq = al ? al.qty : 0;
+      if (!(ae.qty >= 2 && aq <= ae.qty * 0.5)) continue;
+      if (_isGroupRetained(apid, productsById, lateProductIds)) continue;
+      affected.push({ productId: apid, productName: ae.name || _watchProductName(apid), earlyQty: ae.qty, lateQty: aq });
+    }
     out.push(_mkWatch(cid, 'BASKET_SHRINK_WATCH', {
       level: level,
-      reason: 'تنوع سبد خرید اخیر رو به کاهش است',
+      reason: 'افت مقدار کالاهای مشخص بین نیمه اول و نیمه دوم فاکتورها مشاهده می‌شود',
       deviationStrength: Math.min(1, decliningCount / 2),
-      source: 'account'
+      source: 'account',
+      evidence: {
+        comparison: 'نیمه اول فاکتورها در برابر نیمه دوم فاکتورها',
+        invoiceCount: split.invoiceCount,
+        earlyInvoiceCount: Math.floor(split.invoiceCount / 2),
+        lateInvoiceCount: split.invoiceCount - Math.floor(split.invoiceCount / 2),
+        affectedProducts: affected
+      }
     }));
   }
 
@@ -943,11 +963,28 @@
     }
     if (lostCount < 1) return;
     var level = lostCount >= 2 ? 'medium' : 'low';
+    var lostProducts = [];
+    for (var li = 0; li < earlyKeys.length; li++) {
+      var lpid = earlyKeys[li];
+      var le = split.early[lpid];
+      var ll = split.late[lpid];
+      var lq = ll ? ll.qty : 0;
+      if (!(le.qty >= 3 && lq === 0)) continue;
+      if (_isGroupRetained(lpid, productsById, lateProductIds)) continue;
+      lostProducts.push({ productId: lpid, productName: le.name || _watchProductName(lpid), earlyQty: le.qty, lateQty: lq });
+    }
     out.push(_mkWatch(cid, 'KEY_PRODUCT_LOST_WATCH', {
       level: level,
       reason: 'توقف زودهنگام خرید یک یا چند محصول کلیدی مشاهده می‌شود',
       deviationStrength: Math.min(1, lostCount / 2),
-      source: 'account'
+      source: 'account',
+      evidence: {
+        comparison: 'نیمه اول فاکتورها در برابر نیمه دوم فاکتورها',
+        invoiceCount: split.invoiceCount,
+        earlyInvoiceCount: Math.floor(split.invoiceCount / 2),
+        lateInvoiceCount: split.invoiceCount - Math.floor(split.invoiceCount / 2),
+        lostProducts: lostProducts
+      }
     }));
   }
 

@@ -1261,6 +1261,11 @@
         productName: _productName(pair.productId, ctx),
         typicalCycle: historical.typicalCycle,
         currentGap: current.currentGap,
+        typicalQuantity: historical.typicalQuantity,
+        recentQuantity: recent.typicalQuantity,
+        recentFrequency: current.recentFrequency,
+        expectedFrequency: (historical.typicalFrequency != null && historical.typicalCycle != null)
+          ? historical.typicalFrequency * (historical.typicalCycle * SKU_PARAMS.frequencyWindowMultiplier) : null,
         eventRatio: eventRatio,
         freqRatio: freqRatio,
         presenceDrop: presenceDrop,
@@ -1312,7 +1317,8 @@
             category: 'SKU_DELAY_WATCH',
             level: delayRatio >= 0.40 ? 'high' : (delayRatio >= 0.30 ? 'medium' : 'low'),
             deviationStrength: Math.min(1, m.currentGap / (0.5 * m.typicalCycle)),
-            reason: 'تأخیر زودهنگام در خرید «' + m.productName + '» نسبت به الگوی معمول مشاهده می‌شود'
+            reason: 'تأخیر زودهنگام در خرید «' + m.productName + '» نسبت به الگوی معمول مشاهده می‌شود',
+            evidence: { currentGap: m.currentGap, typicalCycle: m.typicalCycle, purchaseCount: m.purchaseCount, comparison: 'فاصله فعلی از خرید در برابر چرخه معمول خرید' }
           });
         }
       }
@@ -1323,7 +1329,8 @@
           category: 'SKU_QUANTITY_DROP_WATCH',
           level: m.eventRatio < 0.75 ? 'medium' : 'low',
           deviationStrength: Math.min(1, (1 - m.eventRatio) / 0.3),
-          reason: 'کاهش زودهنگام در مقدار خرید «' + m.productName + '» مشاهده می‌شود'
+          reason: 'کاهش زودهنگام در مقدار خرید «' + m.productName + '» مشاهده می‌شود',
+          evidence: { recentQuantity: m.recentQuantity, typicalQuantity: m.typicalQuantity, ratio: m.eventRatio, purchaseCount: m.purchaseCount, comparison: 'مقدار خرید اخیر در برابر مقدار معمول خرید' }
         });
       }
 
@@ -1333,7 +1340,8 @@
           category: 'SKU_FREQUENCY_DROP_WATCH',
           level: m.freqRatio < 0.75 ? 'medium' : 'low',
           deviationStrength: Math.min(1, (1 - m.freqRatio) / 0.3),
-          reason: 'کاهش زودهنگام در تعداد دفعات خرید «' + m.productName + '» مشاهده می‌شود'
+          reason: 'کاهش زودهنگام در تعداد دفعات خرید «' + m.productName + '» مشاهده می‌شود',
+          evidence: { recentFrequency: m.recentFrequency, expectedFrequency: m.expectedFrequency, ratio: m.freqRatio, purchaseCount: m.purchaseCount, comparison: 'دفعات خرید اخیر در برابر دفعات مورد انتظار در همان پنجره' }
         });
       }
 
@@ -1358,7 +1366,8 @@
           category: 'LINE_DROP_WATCH',
           level: m.presenceDrop >= 0.45 ? 'medium' : 'low',
           deviationStrength: Math.min(1, m.presenceDrop / 0.5),
-          reason: '«' + m.productName + '» به‌تدریج از سبد خریدهای اخیر کم‌رنگ‌تر شده است'
+          reason: '«' + m.productName + '» به‌تدریج از سبد خریدهای اخیر کم‌رنگ‌تر شده است',
+          evidence: { historicalPresenceRate: m.historicalPresenceRate, currentBasketPresence: m.currentBasketPresence, presenceDrop: m.presenceDrop, comparison: 'حضور تاریخی کالا در سبد در برابر حضور فعلی' }
         });
       }
 
@@ -1385,7 +1394,8 @@
           reason: reasons.join('؛ '),
           deviationStrength: deviationStrength,
           source: 'sku',
-          watchComponents: watchComponents
+          watchComponents: watchComponents,
+          evidence: { components: components.map(function (x) { return { category: x.category, evidence: x.evidence || null }; }) }
         });
       } else {
         var comp = components[0];
@@ -1399,7 +1409,8 @@
           reason: comp.reason,
           deviationStrength: comp.deviationStrength,
           source: 'sku',
-          watchComponents: null
+          watchComponents: null,
+          evidence: comp.evidence || null
         });
       }
     }
