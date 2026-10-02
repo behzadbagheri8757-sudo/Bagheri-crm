@@ -1,0 +1,112 @@
+--- base_final/Bagheri-crm-main/js/intelligence/watch_lifecycle.js	2026-10-01 21:50:36.000000000 +0000
++++ audit_final/Bagheri-crm-main/js/intelligence/watch_lifecycle.js	2026-10-01 22:14:46.859378375 +0000
+@@ -865,8 +865,12 @@
+     if (!rec) return null;
+     if (rec.status !== 'active') return null;
+     var code = reasonCode ? String(reasonCode) : null;
++    // 'dismiss' is an explicit close action, not a reason code. Never
++    // silently reinterpret it as 'other'; callers must use
++    // dismissWatchOccurrence() so the lifecycle state is actually closed.
++    if (code === 'dismiss') return null;
+     if (code && !VALID_REASON_CODES[code]) {
+-      // Allow unknown codes only as 'other' for safety
++      // Preserve the existing safe fallback for unknown reason codes.
+       code = 'other';
+     }
+     if (code === 'still_stock' || code === 'not_wanted' || code === 'follow_up_later') {
+@@ -994,12 +998,17 @@
+       recordedAt: now
+     };
+     rec.resolution = { type: 'follow_up_completed', resolvedAt: now, note: null };
+-    if (code === 'still_stock' || code === 'not_wanted') {
+-      rec.suppression = _decisionSnapshot(rec, code);
+-    } else {
+-      rec.suppression.releasedAt = now;
+-      rec.suppression.releasedBy = 'follow_up_completed';
+-    }
++    // Completing a follow-up with a factual cause (price/competitor/no_need/
++    // quality/other) is still a seller answer to the SAME subject. Do not
++    // release the hold while the raw Watch remains active: the next reconcile
++    // would otherwise create a new occurrence with a fresh id immediately.
++    // This is deliberately not not_wanted and is not a permanent suppression;
++    // reconcile may release it only when the raw condition is genuinely clear.
++    rec.suppression = _decisionSnapshot(rec, 'follow_up_result');
++    rec.suppression.resultCode = code;
++    rec.suppression.resultComment = text;
++    rec.suppression.releasedAt = null;
++    rec.suppression.releasedBy = null;
+     _persist(rec);
+     return rec;
+   }
+--- base_final/Bagheri-crm-main/js/views/customer.js	2026-10-01 21:49:24.000000000 +0000
++++ audit_final/Bagheri-crm-main/js/views/customer.js	2026-10-01 22:15:29.848104690 +0000
+@@ -261,6 +261,15 @@
+     return String(q) + ' ' + unit;
+   }
+ 
++  function basketShrinkLabel(o) {
++    var e = o && o.evidence;
++    var names = e && Array.isArray(e.affectedProducts) ? e.affectedProducts.map(function (x) { return x && (x.productName || x.productId); }).filter(Boolean) : [];
++    if (!names.length) return 'افت مقدار کالاهای مشخص بین نیمه اول و نیمه دوم فاکتورها';
++    var listed = names.length === 1 ? '«' + names[0] + '»' : names.slice(0, 4).map(function (n) { return '«' + n + '»'; }).join('، ');
++    if (names.length > 4) listed += ' و ' + (names.length - 4) + ' کالای دیگر';
++    return 'افت مقدار ' + listed + ' بین نیمه اول و نیمه دوم فاکتورها';
++  }
++
+   function watchEvidenceHtml(o) {
+     var e = o && o.evidence;
+     if (!e) return '';
+@@ -396,7 +405,7 @@
+     if (occs.length) {
+       var wrows = occs.map(function (o) {
+         var label = (o.productName ? ('«' + esc(o.productName) + '» — ') : '') + esc(o.generatedReason || '');
+-        if (o.watchCategory === 'BASKET_SHRINK_WATCH') label = 'افت مقدار چند کالای مشخص در نیمه دوم فاکتورها نسبت به نیمه اول مشاهده شده است؛ علت کاهش مقدار این کالاها را بپرسید.';
++        if (o.watchCategory === 'BASKET_SHRINK_WATCH') label = esc(basketShrinkLabel(o)) + '؛ علت کاهش مقدار این کالاها را بپرسید.';
+         if (!o.productName && o.watchCategory === 'KEY_PRODUCT_LOST_WATCH') label = 'یک یا چند کالای کلیدی از خریدهای اخیر این مشتری حذف شده‌اند؛ علت را از مشتری بپرسید.';
+         var reviewed = !!(o.reason);
+         var badge = reviewed
+--- base_final/Bagheri-crm-main/js/views/watches.js	2026-10-01 21:49:24.000000000 +0000
++++ audit_final/Bagheri-crm-main/js/views/watches.js	2026-10-01 22:15:49.068392673 +0000
+@@ -88,6 +88,15 @@
+   /* Local presentational label only (UI text), not a business rule.
+      Falls back to the raw stored category string for anything unmapped,
+      so no meaning is invented for codes not listed here. */
++  function basketShrinkLabel(o) {
++    var e = o && o.evidence;
++    var names = e && Array.isArray(e.affectedProducts) ? e.affectedProducts.map(function (x) { return x && (x.productName || x.productId); }).filter(Boolean) : [];
++    if (!names.length) return 'افت مقدار کالاهای مشخص بین نیمه اول و نیمه دوم فاکتورها';
++    var listed = names.length === 1 ? '«' + names[0] + '»' : names.slice(0, 4).map(function (n) { return '«' + n + '»'; }).join('، ');
++    if (names.length > 4) listed += ' و ' + (names.length - 4) + ' کالای دیگر';
++    return 'افت مقدار ' + listed + ' بین نیمه اول و نیمه دوم فاکتورها';
++  }
++
+   function categoryLabel(cat) {
+     switch (cat) {
+       case 'PURCHASE_DECLINE_WATCH': return 'کاهش خرید (نشانه اولیه)';
+@@ -187,7 +196,7 @@
+       var g = groups[key];
+       var rows = g.items.map(function (o) {
+         var prodName = productNameForOccurrence(o);
+-        var catLabel = categoryLabel(o.watchCategory);
++        var catLabel = o.watchCategory === 'BASKET_SHRINK_WATCH' ? basketShrinkLabel(o) : categoryLabel(o.watchCategory);
+         var reviewed = !!o.reason;
+         return '<div class="watch-list-row tx-row" data-watch-id="' + esc(o.id) + '" role="link" tabindex="0">' +
+           '<div class="watch-list-main">' +
+@@ -300,7 +309,7 @@
+       root.innerHTML = '<div class="watch-page-head"><div><h2 class="section-title">جزئیات هشدار</h2></div></div><div class="empty">این هشدار پیدا نشد یا دیگر فعال نیست.</div><div class="btn-row"><a class="btn secondary" href="' + watchesHref() + '">بازگشت به هشدارها</a></div>';
+       return;
+     }
+-    var custName = customerNameById(occ.customerId), prodName = productNameForOccurrence(occ), catLabel = categoryLabel(occ.watchCategory);
++    var custName = customerNameById(occ.customerId), prodName = productNameForOccurrence(occ), catLabel = occ.watchCategory === 'BASKET_SHRINK_WATCH' ? basketShrinkLabel(occ) : categoryLabel(occ.watchCategory);
+     var reasonHtml = occ.reason ? '<div class="watch-detail-block"><div class="label">علت ثبت‌شده</div><div class="watch-detail-value">' + esc((typeof watchReasonLabel === 'function') ? watchReasonLabel(occ.reason.code) : occ.reason.code) + (occ.reason.comment ? ' — ' + esc(occ.reason.comment) : '') + '</div></div>' : '';
+     root.innerHTML =
+       '<div class="watch-detail-top"><button type="button" class="btn secondary small" data-watch-back>‹&nbsp; بازگشت به هشدارها</button></div>' +
+@@ -308,7 +317,7 @@
+         '<div class="watch-detail-head"><div class="watch-detail-customer"><div class="watch-detail-kicker">مشتری</div><div class="watch-detail-customer-name">' + esc(custName) + '</div></div><span class="watch-severity-badge watch-severity-' + esc(occ.level || 'low') + '">' + esc(levelLabel(occ.level)) + '</span></div>' +
+         (prodName ? '<div class="watch-detail-block"><div class="label">محصول</div><div class="watch-detail-value">' + esc(prodName) + '</div></div>' : '') +
+         '<div class="watch-detail-block"><div class="label">نوع هشدار</div><div class="watch-detail-value">' + esc(catLabel) + '</div></div>' +
+-        '<div class="watch-detail-block watch-detail-reason"><div class="label">چرا این مورد نمایش داده شده؟</div><div class="watch-detail-value">' + esc(occ.generatedReason || 'نشانه‌ای از تغییر در رفتار خرید مشاهده شده است.') + '</div></div>' +
++        '<div class="watch-detail-block watch-detail-reason"><div class="label">چرا این مورد نمایش داده شده؟</div><div class="watch-detail-value">' + esc(occ.watchCategory === 'BASKET_SHRINK_WATCH' ? basketShrinkLabel(occ) + '؛ علت کاهش مقدار این کالاها را بررسی کنید.' : (occ.generatedReason || 'نشانه‌ای از تغییر در رفتار خرید مشاهده شده است.')) + '</div></div>' +
+         watchEvidenceText(occ) +
+         reasonHtml +
+       '</div>' +

@@ -1,0 +1,928 @@
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/intelligence/watch_lifecycle.js	2026-09-29 21:03:42.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/intelligence/watch_lifecycle.js	2026-10-01 20:54:41.591543250 +0000
+@@ -24,6 +24,7 @@
+      getWatchResponseOptions(occurrenceId) -> option[]
+      exportWatchLifecycleBundle() -> Promise<object|null>
+      restoreWatchLifecycleBundle(bundle) -> Promise<boolean>
++     getPendingWatchFollowUps([customerId]) -> Occurrence[]
+      WATCH_REASON_OPTIONS
+    ============================================================ */
+ 'use strict';
+@@ -270,6 +271,28 @@
+     return t < cutoffMs;
+   }
+ 
++  function _migrateLegacyDismissedRows() {
++    var changed = false;
++    var ids = Object.keys(_mem);
++    var decisionTypes = { still_stock: true, not_wanted: true, follow_up_later: true };
++    for (var i = 0; i < ids.length; i++) {
++      var r = _mem[ids[i]];
++      if (!r || r.status !== 'dismissed' || r.suppression) continue;
++      var rt = r.resolution && r.resolution.type ? String(r.resolution.type) : '';
++      var rc = r.reason && r.reason.code ? String(r.reason.code) : '';
++      var inferred = decisionTypes[rc] ? rc : (rt === 'manual_dismiss' ? 'dismiss' : null);
++      if (!inferred) continue;
++      var decidedAt = (r.resolution && r.resolution.resolvedAt) || (r.reason && r.reason.recordedAt) || r.lastEvaluatedAt || r.firstDetectedAt || _nowISO();
++      r.suppression = { type: inferred, decidedAt: decidedAt, atInvoiceSeq: null, atDate: String(decidedAt).slice(0, 10), levelAtDecision: r.level || null, releasedAt: null, releasedBy: null, migratedFrom: 'watch_lifecycle_v1' };
++      _mem[r.id] = r;
++      _dirtyIds[r.id] = true;
++      _idbPut(r);
++      changed = true;
++    }
++    if (changed) _saveLS();
++    return changed;
++  }
++
+   function _sweepExpiredHistory() {
+     var cutoffMs = Date.now() - (WATCH_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+     var ids = Object.keys(_mem);
+@@ -300,8 +323,8 @@
+ 
+   _loadLS();
+   _openIdb(function (db) {
+-    if (db) _idbHydrate(function () { _sweepExpiredHistory(); });
+-    else _sweepExpiredHistory();
++    if (db) _idbHydrate(function () { _migrateLegacyDismissedRows(); _sweepExpiredHistory(); });
++    else { _migrateLegacyDismissedRows(); _sweepExpiredHistory(); }
+   });
+ 
+   function _allOccurrences() {
+@@ -379,46 +402,21 @@
+     return out;
+   }
+ 
+-  // Data-derived (never time-derived) contradictory event: a sale registered
+-  // AFTER the decision for the same subject. Invoice numbers come from the
+-  // global monotonic data.invoiceSeq counter, so "after" is exact even though
+-  // invoices only carry a date (no time). Date compare is a strict fallback.
+-  function _purchaseSince(tomb, ctx) {
+-    var s = tomb.suppression;
+-    var invs;
+-    try {
+-      if (typeof customerInvoices === 'function') invs = customerInvoices(tomb.customerId, ctx) || [];
+-      else if (typeof data !== 'undefined' && Array.isArray(data.invoices)) {
+-        invs = data.invoices.filter(function (i) { return i && i.customerId === tomb.customerId; });
+-      } else invs = [];
+-    } catch (e) { return false; }
+-    var fam = _familyOfPid(_normPid(tomb.productId), ctx); // null => account-level
+-    for (var i = 0; i < invs.length; i++) {
+-      var inv = invs[i];
+-      if (!inv) continue;
+-      var after = false;
+-      var n = Number(inv.number);
+-      if (s.atInvoiceSeq != null && isFinite(n)) after = n > s.atInvoiceSeq;
+-      else if (s.atDate) after = String(inv.date || '') > s.atDate;
+-      if (!after) continue;
+-      var items = inv.items || [];
+-      for (var j = 0; j < items.length; j++) {
+-        var it = items[j];
+-        if (!it || !it.productId || !(it.qty > 0)) continue;
+-        if (fam == null || _familyOfPid(_normPid(it.productId), ctx) === fam) return true;
+-      }
+-    }
+-    return false;
+-  }
+-
+-  // Returns a release reason string, or null if the decision still holds.
++  // Seller decisions are not released by purchase alone. A purchase may be
++  // small, unrelated to the observed dimension, or simply replenish stock.
++  // Only a real disappearance of the raw Watch condition ends the current
++  // cycle (handled explicitly by reconcileWatchLifecycle). A manual dismiss is
++  // the one decision for which a genuine severity escalation may reopen the
++  // current subject: the seller dismissed the present case, not all future
++  // important warnings. still_stock/follow_up_later/not_wanted remain held.
+   function _releaseReasonFor(tomb, watch, ctx) {
+-    var s = tomb.suppression;
+-    if (_purchaseSince(tomb, ctx)) return 'purchase';
+-    if (s.type === 'not_wanted') return null; // only purchase/explicit reversal
+-    var was = LEVEL_RANK[s.levelAtDecision] || 0;
+-    var now = LEVEL_RANK[watch && watch.level] || 0;
+-    if (was > 0 && now > was) return 'escalated';
++    var s = tomb && tomb.suppression;
++    if (!s || s.releasedAt) return null;
++    if (s.type === 'dismiss') {
++      var was = LEVEL_RANK[s.levelAtDecision] || 0;
++      var now = LEVEL_RANK[watch && watch.level] || 0;
++      if (was > 0 && now > was) return 'escalated';
++    }
+     return null;
+   }
+ 
+@@ -468,7 +466,10 @@
+       lastEvaluatedAt: now,
+       snoozeUntil: null,
+       reason: null,
+-      resolution: null
++      resolution: null,
++      evidence: watch.evidence ? watch.evidence : null,
++      source: watch.source || null,
++      watchComponents: watch.watchComponents || null
+     };
+   }
+ 
+@@ -499,6 +500,31 @@
+     return c2.active !== false;
+   }
+ 
++  function _findLatestAlertSuperseded(key, ctx) {
++    var rows = _allOccurrences();
++    var best = null;
++    var bestTs = '';
++    for (var i = 0; i < rows.length; i++) {
++      var r = rows[i];
++      if (!r || r.status === 'active') continue;
++      if (!r.resolution || r.resolution.type !== 'alert_superseded') continue;
++      var k = _identityKey(r.customerId, r.watchCategory, r.productId, ctx);
++      if (k !== key) continue;
++      var ts = String(r.lastEvaluatedAt || r.firstDetectedAt || '');
++      if (!best || ts > bestTs) { best = r; bestTs = ts; }
++    }
++    return best;
++  }
++
++  function _markAlertSuperseded(rec, now) {
++    if (!rec || rec.status !== 'active') return false;
++    rec.status = 'resolved';
++    rec.lastEvaluatedAt = now;
++    rec.resolution = { type: 'alert_superseded', resolvedAt: now, note: null };
++    _persist(rec);
++    return true;
++  }
++
+   function reconcileWatchLifecycle(customerId, ctx) {
+     return new Promise(function (resolve) {
+       function run() {
+@@ -561,32 +587,111 @@
+ 
+             var tombs = _newTombs();
+             var activeMap = _activeByIdentity(cid, ctx, tombs);
+-            var seenKeys = Object.create(null);
++            var rawWatches = [];
++            var visibleWatches = [];
++            var extractOk = false;
++            var confirmedOk = false;
++
++            if (custActive && typeof extractWatchObservations === 'function') {
++              try {
++                // First get the raw Watch generation with no confirmed override.
++                // This is intentionally the same generator/rules; passing [] only
++                // exposes whether a Watch was generated before Alert supersession.
++                rawWatches = extractWatchObservations(cid, [], ctx) || [];
++                extractOk = true;
++              } catch (eRawW) { rawWatches = []; }
+ 
+-            for (var wi = 0; wi < watches.length; wi++) {
+-              var w = watches[wi];
+-              if (!w || !w.category) continue;
+-              var key = _identityKey(cid, w.category, w.productId, ctx);
+-              seenKeys[key] = true;
+-              var existing = activeMap[key];
++              if (extractOk) {
++                try {
++                  var confirmedForLifecycle = [];
++                  if (typeof extractCustomerSignals === 'function') {
++                    confirmedForLifecycle = extractCustomerSignals(cid, ctx) || [];
++                    confirmedOk = true;
++                  }
++                  // If confirmed-signal extraction is unavailable/fails, fail open:
++                  // do not claim an Alert conversion we cannot prove.
++                  visibleWatches = confirmedOk
++                    ? (extractWatchObservations(cid, confirmedForLifecycle, ctx) || [])
++                    : rawWatches.slice();
++                } catch (eVisibleW) {
++                  visibleWatches = rawWatches.slice();
++                  confirmedOk = false;
++                }
++              }
++            }
++
++            var rawByKey = Object.create(null);
++            var visibleByKey = Object.create(null);
++            for (var rwi = 0; rwi < rawWatches.length; rwi++) {
++              var rw = rawWatches[rwi];
++              if (rw && rw.category) rawByKey[_identityKey(cid, rw.category, rw.productId, ctx)] = rw;
++            }
++            for (var vwi = 0; vwi < visibleWatches.length; vwi++) {
++              var vw = visibleWatches[vwi];
++              if (vw && vw.category) visibleByKey[_identityKey(cid, vw.category, vw.productId, ctx)] = vw;
++            }
++
++            var seenRawKeys = Object.create(null);
++            var seenVisibleKeys = Object.create(null);
++            var visibleKeys = Object.keys(visibleByKey);
++
++            // Update/create visible Watches. A previously Alert-superseded cycle
++            // is reactivated if the same raw Watch remains after the Alert filter
++            // disappears; that is continuation of the same issue, not a new cycle.
++            for (var vki = 0; vki < visibleKeys.length; vki++) {
++              var vk = visibleKeys[vki];
++              var w = visibleByKey[vk];
++              seenVisibleKeys[vk] = true;
++              seenRawKeys[vk] = true;
++              var existing = activeMap[vk];
+               if (!existing) {
+-                // A live seller decision on this subject blocks a new cycle
+-                // until it is released by a contradictory/changed state.
++                var alertAnchor = _findLatestAlertSuperseded(vk, ctx);
++                if (alertAnchor) {
++                  alertAnchor.status = 'active';
++                  alertAnchor.level = w.level || alertAnchor.level;
++                  alertAnchor.generatedReason = w.reason || alertAnchor.generatedReason;
++                  alertAnchor.lastEvaluatedAt = now;
++                  alertAnchor.resolution = null;
++                  alertAnchor.evidence = w.evidence ? w.evidence : (alertAnchor.evidence || null);
++                  alertAnchor.source = w.source || alertAnchor.source || null;
++                  alertAnchor.watchComponents = w.watchComponents || alertAnchor.watchComponents || null;
++                  var anchorPid = _normPid(w.productId);
++                  if (anchorPid != null) alertAnchor.productId = anchorPid;
++                  if (w.productName != null) alertAnchor.productName = w.productName;
++                  _persist(alertAnchor);
++                  persistCount++;
++                  activeMap[vk] = alertAnchor;
++                  existing = alertAnchor;
++                }
++              }
++              if (!existing) {
++                // A live seller decision blocks a new cycle. Escalation can release
++                // only an ordinary manual dismiss (see _releaseReasonFor).
+                 var held = false;
+                 var ts = _findTombs(tombs, cid, w.category, w.productId, ctx);
+                 for (var ti = 0; ti < ts.length; ti++) {
+                   var rel = _releaseReasonFor(ts[ti], w, ctx);
+-                  if (rel) { _releaseSuppression(ts[ti], rel); persistCount++; }
+-                  else held = true;
++                  if (rel) {
++                    _releaseSuppression(ts[ti], rel);
++                    persistCount++;
++                    // Genuine escalation reopens the SAME occurrence; it is not
++                    // a new Watch cycle and must not create a duplicate ID.
++                    if (!existing && ts[ti].status !== 'active' && ts[ti].suppression.releasedAt) {
++                      existing = ts[ti];
++                      existing.status = 'active';
++                      existing.resolution = null;
++                    }
++                  } else held = true;
+                 }
+-                if (held) continue;
++                if (held && !existing) continue;
+               }
+               if (existing) {
+                 existing.level = w.level || existing.level;
+                 existing.generatedReason = w.reason || existing.generatedReason;
+                 existing.lastEvaluatedAt = now;
+-                // Keep the LAST SKU seen (display metadata) on the same
+-                // Family-level Watch; identity itself is unaffected.
++                existing.evidence = w.evidence ? w.evidence : (existing.evidence || null);
++                existing.source = w.source || existing.source || null;
++                existing.watchComponents = w.watchComponents || existing.watchComponents || null;
+                 var lastPid = _normPid(w.productId);
+                 if (lastPid != null) existing.productId = lastPid;
+                 if (w.productName != null) existing.productName = w.productName;
+@@ -602,38 +707,56 @@
+               }
+             }
+ 
+-            // Condition gone (successful evaluation only) -> the cycle a
+-            // dismiss / still_stock / follow_up_later decision belonged to has
+-            // ended; a later recurrence is a genuinely new cycle.
+-            // not_wanted is NOT released by this: only purchase / reversal.
++            // Raw Watch exists but is filtered because an active Confirmed Signal
++            // supersedes it. This is a conversion to Alert, NOT condition_cleared.
++            // Do not create a new cycle while the raw Watch condition remains.
++            if (custActive && extractOk && confirmedOk) {
++              var rawKeys = Object.keys(rawByKey);
++              for (var rki = 0; rki < rawKeys.length; rki++) {
++                var rk = rawKeys[rki];
++                seenRawKeys[rk] = true;
++                if (visibleByKey[rk]) continue;
++                var alertActive = activeMap[rk];
++                if (alertActive && alertActive.status === 'active') {
++                  if (_markAlertSuperseded(alertActive, now)) persistCount++;
++                }
++              }
++            }
++
++            // A true condition clear is provable only when the RAW Watch generator
++            // successfully ran and the raw Watch is absent. A Watch missing only
++            // because an Alert filter hid it is therefore never auto-resolved here.
+             if (custActive && extractOk) {
+               var tl = _tombList(tombs);
+               for (var tk = 0; tk < tl.length; tk++) {
+                 var tr = tl[tk];
+                 if (!tr.suppression || tr.suppression.releasedAt || tr.suppression.type === 'not_wanted') continue;
+-                if (seenKeys[_identityKey(tr.customerId, tr.watchCategory, tr.productId, ctx)]) continue;
++                var tombKey = _identityKey(tr.customerId, tr.watchCategory, tr.productId, ctx);
++                if (seenRawKeys[tombKey]) continue;
+                 _releaseSuppression(tr, 'condition_cleared');
+                 persistCount++;
+               }
+             }
+ 
+-            // Auto-resolve actives whose condition is gone
+-            var actKeys = Object.keys(activeMap);
+-            for (var ai = 0; ai < actKeys.length; ai++) {
+-              var ak = actKeys[ai];
+-              if (seenKeys[ak]) continue;
+-              var stale = activeMap[ak];
+-              if (!stale || stale.status !== 'active') continue;
+-              stale.status = 'resolved';
+-              stale.lastEvaluatedAt = now;
+-              stale.resolution = {
+-                type: 'auto',
+-                resolvedAt: now,
+-                note: null
+-              };
+-              // Keep reason + note history intact
+-              _persist(stale);
+-              persistCount++;
++            // Auto-resolve active occurrences only when the raw generator has
++            // successfully established that the condition is genuinely absent.
++            if (custActive && extractOk) {
++              var actKeys = Object.keys(activeMap);
++              for (var ai = 0; ai < actKeys.length; ai++) {
++                var ak = actKeys[ai];
++                if (seenRawKeys[ak]) continue;
++                var stale = activeMap[ak];
++                if (!stale || stale.status !== 'active') continue;
++                stale.status = 'resolved';
++                stale.lastEvaluatedAt = now;
++                stale.resolution = {
++                  type: 'condition_cleared',
++                  resolvedAt: now,
++                  note: null
++                };
++                _persist(stale);
++                persistCount++;
++              }
+             }
+           }
+         } finally {
+@@ -678,6 +801,22 @@
+     return out;
+   }
+ 
++  function getPendingWatchFollowUps(customerId) {
++    var rows = _allOccurrences();
++    var out = [];
++    for (var i = 0; i < rows.length; i++) {
++      var r = rows[i];
++      if (!r || r.status === 'active' || !r.suppression || r.suppression.releasedAt) continue;
++      if (r.suppression.type !== 'follow_up_later') continue;
++      if (customerId && String(r.customerId) !== String(customerId)) continue;
++      out.push(r);
++    }
++    out.sort(function (a, b) {
++      return String(b.suppression.decidedAt || b.lastEvaluatedAt || '').localeCompare(String(a.suppression.decidedAt || a.lastEvaluatedAt || ''));
++    });
++    return out;
++  }
++
+   function getWatchLifecycleSummary() {
+     var rows = getActiveWatchOccurrences();
+     var unreviewed = 0;
+@@ -772,8 +911,9 @@
+       note: note ? String(note).slice(0, 500) : null
+     };
+     // Closes ONLY this cycle: the marker stops the same evidence from
+-    // re-opening it immediately, but is released as soon as the state
+-    // changes (purchase / condition cleared / level escalated).
++    // re-opening it immediately. It can be released only by a real raw-condition
++    // clear, an explicit seller reversal, or a genuine severity escalation of
++    // this dismissed case.
+     rec.suppression = _decisionSnapshot(rec, 'dismiss');
+     // Reason/comment history (if any was recorded earlier) is untouched.
+     _persist(rec);
+@@ -822,6 +962,32 @@
+     return out;
+   }
+ 
++  /** Complete a pending follow-up with an explicit result. Cancelling is
++   * deliberately separate (reverseWatchDecision) and never becomes not_wanted. */
++  function completeWatchFollowUp(occurrenceId, resultCode, comment) {
++    var rec = _mem[occurrenceId];
++    if (!rec || rec.status === 'active' || !rec.suppression || rec.suppression.releasedAt) return null;
++    if (rec.suppression.type !== 'follow_up_later') return null;
++    var code = resultCode ? String(resultCode) : '';
++    if (!VALID_REASON_CODES[code] || code === 'follow_up_later') return null;
++    if (code === 'not_wanted' && _normPid(rec.productId) == null) return null;
++    var now = _nowISO();
++    rec.reason = {
++      code: code,
++      comment: comment ? String(comment).slice(0, 500) : (rec.reason && rec.reason.comment ? rec.reason.comment : ''),
++      recordedAt: now
++    };
++    rec.resolution = { type: 'follow_up_completed', resolvedAt: now, note: null };
++    if (code === 'still_stock' || code === 'not_wanted') {
++      rec.suppression = _decisionSnapshot(rec, code);
++    } else {
++      rec.suppression.releasedAt = now;
++      rec.suppression.releasedBy = 'follow_up_completed';
++    }
++    _persist(rec);
++    return rec;
++  }
++
+   /** Explicit seller reversal of a decision (by occurrence id). */
+   function reverseWatchDecision(occurrenceId) {
+     var rec = _mem[occurrenceId];
+@@ -835,7 +1001,7 @@
+       function pack() {
+         var occurrences = _allOccurrences();
+         resolve({
+-          version: 1,
++          version: 2,
+           dbVersion: WATCH_DB_VERSION,
+           occurrences: occurrences
+         });
+@@ -852,14 +1018,37 @@
+         return;
+       }
+       var rows = Array.isArray(bundle.occurrences) ? bundle.occurrences : [];
+-      // Soft validation: keep well-formed rows only
++      // Soft validation + backward-compatible migration. Old V1 dismissed rows
++      // may have resolution/reason data but no suppression marker. We reconstruct
++      // only the decision that is already explicit in that row: known seller
++      // decision codes remain themselves; all other manual dismissals become the
++      // generic 'dismiss' decision. No new business reason/evidence is invented.
+       var cleaned = [];
++      var decisionTypes = { still_stock: true, not_wanted: true, follow_up_later: true };
+       for (var i = 0; i < rows.length; i++) {
+         var r = rows[i];
+         if (!r || r.id == null || r.customerId == null || !r.watchCategory) continue;
+         if (r.status !== 'active' && r.status !== 'resolved' && r.status !== 'dismissed') {
+           r.status = 'resolved';
+         }
++        if (r.status === 'dismissed' && !r.suppression) {
++          var rt = r.resolution && r.resolution.type ? String(r.resolution.type) : '';
++          var rc = r.reason && r.reason.code ? String(r.reason.code) : '';
++          var inferred = decisionTypes[rc] ? rc : (rt === 'manual_dismiss' ? 'dismiss' : null);
++          if (inferred) {
++            var decidedAt = (r.resolution && r.resolution.resolvedAt) || (r.reason && r.reason.recordedAt) || r.lastEvaluatedAt || r.firstDetectedAt || _nowISO();
++            r.suppression = {
++              type: inferred,
++              decidedAt: decidedAt,
++              atInvoiceSeq: null,
++              atDate: String(decidedAt).slice(0, 10),
++              levelAtDecision: r.level || null,
++              releasedAt: null,
++              releasedBy: null,
++              migratedFrom: 'watch_lifecycle_v1'
++            };
++          }
++        }
+         cleaned.push(r);
+       }
+       _mem = Object.create(null);
+@@ -906,10 +1095,12 @@
+   global.reconcileWatchLifecycle = reconcileWatchLifecycle;
+   global.getActiveWatchOccurrences = getActiveWatchOccurrences;
+   global.getWatchLifecycleSummary = getWatchLifecycleSummary;
++  global.getPendingWatchFollowUps = getPendingWatchFollowUps;
+   global.recordWatchReason = recordWatchReason;
+   global.dismissWatchOccurrence = dismissWatchOccurrence;
+   global.filterSuppressedWatchObservations = filterSuppressedWatchObservations;
+   global.reverseWatchDecision = reverseWatchDecision;
++  global.completeWatchFollowUp = completeWatchFollowUp;
+   global.getWatchResponseOptions = getWatchResponseOptions;
+   global.exportWatchLifecycleBundle = exportWatchLifecycleBundle;
+   global.restoreWatchLifecycleBundle = restoreWatchLifecycleBundle;
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/intelligence/signals.js	2026-09-28 20:46:39.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/intelligence/signals.js	2026-10-01 20:52:34.141055806 +0000
+@@ -851,7 +851,8 @@
+       reason: opts.reason,
+       deviationStrength: opts.deviationStrength,
+       source: opts.source,
+-      watchComponents: opts.watchComponents || null
++      watchComponents: opts.watchComponents || null,
++      evidence: opts.evidence || null
+     };
+   }
+ 
+@@ -866,7 +867,8 @@
+       level: level,
+       reason: 'نشانه‌های زودهنگام کاهش خرید (حدود ' + _fa(declinePct) + '٪) مشاهده می‌شود',
+       deviationStrength: Math.min(1, declinePct / 30),
+-      source: 'account'
++      source: 'account',
++      evidence: { salesPrevious30: b.salesPrev30, salesRecent30: b.sales30, declinePercent: declinePct, comparison: '۳۰ روز قبل در برابر ۳۰ روز اخیر' }
+     }));
+   }
+ 
+@@ -880,7 +882,8 @@
+       level: level,
+       reason: 'مشتری در حال نزدیک‌شدن به عقب‌افتادن از الگوی معمول خرید است',
+       deviationStrength: Math.min(1, ratio),
+-      source: 'account'
++      source: 'account',
++      evidence: { daysSinceLast: b.daysSinceLast, averageIntervalDays: b.avgIntervalDays, ratio: ratio, comparison: 'فاصله فعلی از خرید در برابر فاصله معمول خرید' }
+     }));
+   }
+ 
+@@ -911,11 +914,28 @@
+     }
+     if (decliningCount < 1) return;
+     var level = decliningCount >= 2 ? 'medium' : 'low';
++    var affected = [];
++    for (var ai = 0; ai < earlyKeys.length; ai++) {
++      var apid = earlyKeys[ai];
++      var ae = split.early[apid];
++      var al = split.late[apid];
++      var aq = al ? al.qty : 0;
++      if (!(ae.qty >= 2 && aq <= ae.qty * 0.5)) continue;
++      if (_isGroupRetained(apid, productsById, lateProductIds)) continue;
++      affected.push({ productId: apid, productName: ae.name || _watchProductName(apid), earlyQty: ae.qty, lateQty: aq });
++    }
+     out.push(_mkWatch(cid, 'BASKET_SHRINK_WATCH', {
+       level: level,
+       reason: 'تنوع سبد خرید اخیر رو به کاهش است',
+       deviationStrength: Math.min(1, decliningCount / 2),
+-      source: 'account'
++      source: 'account',
++      evidence: {
++        comparison: 'نیمه اول فاکتورها در برابر نیمه دوم فاکتورها',
++        invoiceCount: split.invoiceCount,
++        earlyInvoiceCount: Math.floor(split.invoiceCount / 2),
++        lateInvoiceCount: split.invoiceCount - Math.floor(split.invoiceCount / 2),
++        affectedProducts: affected
++      }
+     }));
+   }
+ 
+@@ -943,11 +963,28 @@
+     }
+     if (lostCount < 1) return;
+     var level = lostCount >= 2 ? 'medium' : 'low';
++    var lostProducts = [];
++    for (var li = 0; li < earlyKeys.length; li++) {
++      var lpid = earlyKeys[li];
++      var le = split.early[lpid];
++      var ll = split.late[lpid];
++      var lq = ll ? ll.qty : 0;
++      if (!(le.qty >= 3 && lq === 0)) continue;
++      if (_isGroupRetained(lpid, productsById, lateProductIds)) continue;
++      lostProducts.push({ productId: lpid, productName: le.name || _watchProductName(lpid), earlyQty: le.qty, lateQty: lq });
++    }
+     out.push(_mkWatch(cid, 'KEY_PRODUCT_LOST_WATCH', {
+       level: level,
+       reason: 'توقف زودهنگام خرید یک یا چند محصول کلیدی مشاهده می‌شود',
+       deviationStrength: Math.min(1, lostCount / 2),
+-      source: 'account'
++      source: 'account',
++      evidence: {
++        comparison: 'نیمه اول فاکتورها در برابر نیمه دوم فاکتورها',
++        invoiceCount: split.invoiceCount,
++        earlyInvoiceCount: Math.floor(split.invoiceCount / 2),
++        lateInvoiceCount: split.invoiceCount - Math.floor(split.invoiceCount / 2),
++        lostProducts: lostProducts
++      }
+     }));
+   }
+ 
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/intelligence/sku_intelligence.js	2026-09-28 20:45:48.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/intelligence/sku_intelligence.js	2026-10-01 20:52:45.111445775 +0000
+@@ -1261,6 +1261,11 @@
+         productName: _productName(pair.productId, ctx),
+         typicalCycle: historical.typicalCycle,
+         currentGap: current.currentGap,
++        typicalQuantity: historical.typicalQuantity,
++        recentQuantity: recent.typicalQuantity,
++        recentFrequency: current.recentFrequency,
++        expectedFrequency: (historical.typicalFrequency != null && historical.typicalCycle != null)
++          ? historical.typicalFrequency * (historical.typicalCycle * SKU_PARAMS.frequencyWindowMultiplier) : null,
+         eventRatio: eventRatio,
+         freqRatio: freqRatio,
+         presenceDrop: presenceDrop,
+@@ -1312,7 +1317,8 @@
+             category: 'SKU_DELAY_WATCH',
+             level: delayRatio >= 0.40 ? 'high' : (delayRatio >= 0.30 ? 'medium' : 'low'),
+             deviationStrength: Math.min(1, m.currentGap / (0.5 * m.typicalCycle)),
+-            reason: 'تأخیر زودهنگام در خرید «' + m.productName + '» نسبت به الگوی معمول مشاهده می‌شود'
++            reason: 'تأخیر زودهنگام در خرید «' + m.productName + '» نسبت به الگوی معمول مشاهده می‌شود',
++            evidence: { currentGap: m.currentGap, typicalCycle: m.typicalCycle, purchaseCount: m.purchaseCount, comparison: 'فاصله فعلی از خرید در برابر چرخه معمول خرید' }
+           });
+         }
+       }
+@@ -1323,7 +1329,8 @@
+           category: 'SKU_QUANTITY_DROP_WATCH',
+           level: m.eventRatio < 0.75 ? 'medium' : 'low',
+           deviationStrength: Math.min(1, (1 - m.eventRatio) / 0.3),
+-          reason: 'کاهش زودهنگام در مقدار خرید «' + m.productName + '» مشاهده می‌شود'
++          reason: 'کاهش زودهنگام در مقدار خرید «' + m.productName + '» مشاهده می‌شود',
++          evidence: { recentQuantity: m.recentQuantity, typicalQuantity: m.typicalQuantity, ratio: m.eventRatio, purchaseCount: m.purchaseCount, comparison: 'مقدار خرید اخیر در برابر مقدار معمول خرید' }
+         });
+       }
+ 
+@@ -1333,7 +1340,8 @@
+           category: 'SKU_FREQUENCY_DROP_WATCH',
+           level: m.freqRatio < 0.75 ? 'medium' : 'low',
+           deviationStrength: Math.min(1, (1 - m.freqRatio) / 0.3),
+-          reason: 'کاهش زودهنگام در تعداد دفعات خرید «' + m.productName + '» مشاهده می‌شود'
++          reason: 'کاهش زودهنگام در تعداد دفعات خرید «' + m.productName + '» مشاهده می‌شود',
++          evidence: { recentFrequency: m.recentFrequency, expectedFrequency: m.expectedFrequency, ratio: m.freqRatio, purchaseCount: m.purchaseCount, comparison: 'دفعات خرید اخیر در برابر دفعات مورد انتظار در همان پنجره' }
+         });
+       }
+ 
+@@ -1358,7 +1366,8 @@
+           category: 'LINE_DROP_WATCH',
+           level: m.presenceDrop >= 0.45 ? 'medium' : 'low',
+           deviationStrength: Math.min(1, m.presenceDrop / 0.5),
+-          reason: '«' + m.productName + '» به‌تدریج از سبد خریدهای اخیر کم‌رنگ‌تر شده است'
++          reason: '«' + m.productName + '» به‌تدریج از سبد خریدهای اخیر کم‌رنگ‌تر شده است',
++          evidence: { historicalPresenceRate: m.historicalPresenceRate, currentBasketPresence: m.currentBasketPresence, presenceDrop: m.presenceDrop, comparison: 'حضور تاریخی کالا در سبد در برابر حضور فعلی' }
+         });
+       }
+ 
+@@ -1385,7 +1394,8 @@
+           reason: reasons.join('؛ '),
+           deviationStrength: deviationStrength,
+           source: 'sku',
+-          watchComponents: watchComponents
++          watchComponents: watchComponents,
++          evidence: { components: components.map(function (x) { return { category: x.category, evidence: x.evidence || null }; }) }
+         });
+       } else {
+         var comp = components[0];
+@@ -1399,7 +1409,8 @@
+           reason: comp.reason,
+           deviationStrength: comp.deviationStrength,
+           source: 'sku',
+-          watchComponents: null
++          watchComponents: null,
++          evidence: comp.evidence || null
+         });
+       }
+     }
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/views/customer.js	2026-09-29 21:03:42.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/views/customer.js	2026-10-01 20:53:13.179884253 +0000
+@@ -253,6 +253,73 @@
+       '<div class="dash-activity customer-rejection-list">' + rows + '</div>';
+   }
+ 
++  function watchQtyText(q, productId) {
++    if (q == null || !isFinite(Number(q))) return '';
++    var p = (typeof data !== 'undefined' && Array.isArray(data.products))
++      ? data.products.find(function (x) { return x && x.id === productId; }) : null;
++    var unit = p && p.packageWeight ? ('بسته ' + p.packageWeight) : 'واحد';
++    return String(q) + ' ' + unit;
++  }
++
++  function watchEvidenceHtml(o) {
++    var e = o && o.evidence;
++    if (!e) return '';
++    var bits = [];
++    if (e.comparison) bits.push(esc(e.comparison));
++    if (e.salesPrevious30 != null && e.salesRecent30 != null) {
++      bits.push('فروش: ' + esc(String(Math.round(e.salesPrevious30))) + ' ← ' + esc(String(Math.round(e.salesRecent30))));
++    }
++    if (e.daysSinceLast != null && e.averageIntervalDays != null) {
++      bits.push('فاصله: ' + esc(String(e.daysSinceLast)) + ' روز در برابر ' + esc(String(e.averageIntervalDays)) + ' روز معمول');
++    }
++    if (Array.isArray(e.affectedProducts) && e.affectedProducts.length) {
++      bits.push(e.affectedProducts.map(function (x) {
++        return '«' + esc(x.productName || x.productId || '') + '»: ' + watchQtyText(x.earlyQty, x.productId) + ' ← ' + watchQtyText(x.lateQty, x.productId);
++      }).join(' · '));
++    }
++    if (Array.isArray(e.lostProducts) && e.lostProducts.length) {
++      bits.push(e.lostProducts.map(function (x) {
++        return '«' + esc(x.productName || x.productId || '') + '»: ' + watchQtyText(x.earlyQty, x.productId) + ' ← ۰';
++      }).join(' · '));
++    }
++    if (e.currentGap != null && e.typicalCycle != null) bits.push('فاصله فعلی ' + esc(String(e.currentGap)) + ' روز / چرخه معمول ' + esc(String(e.typicalCycle)) + ' روز');
++    if (e.recentQuantity != null && e.typicalQuantity != null) bits.push('مقدار اخیر ' + esc(String(e.recentQuantity)) + ' / معمول ' + esc(String(e.typicalQuantity)));
++    if (e.recentFrequency != null && e.expectedFrequency != null) bits.push('دفعات اخیر ' + esc(String(e.recentFrequency)) + ' / مورد انتظار ' + esc(String(Math.round(e.expectedFrequency * 10) / 10)));
++    if (e.historicalPresenceRate != null && e.currentBasketPresence != null) bits.push('حضور سبد: ' + esc(String(Math.round(e.historicalPresenceRate * 100))) + '٪ → ' + esc(String(Math.round(e.currentBasketPresence * 100))) + '٪');
++    if (Array.isArray(e.components) && e.components.length) {
++      var componentBits = [];
++      e.components.forEach(function (c) {
++        if (!c || !c.evidence) return;
++        var ce = c.evidence;
++        if (ce.currentGap != null && ce.typicalCycle != null) componentBits.push('تأخیر: ' + ce.currentGap + '/' + ce.typicalCycle);
++        else if (ce.recentQuantity != null && ce.typicalQuantity != null) componentBits.push('مقدار: ' + ce.recentQuantity + '/' + ce.typicalQuantity);
++        else if (ce.recentFrequency != null && ce.expectedFrequency != null) componentBits.push('دفعات: ' + ce.recentFrequency + '/' + Math.round(ce.expectedFrequency * 10) / 10);
++        else if (ce.historicalPresenceRate != null && ce.currentBasketPresence != null) componentBits.push('سبد: ' + Math.round(ce.historicalPresenceRate * 100) + '٪→' + Math.round(ce.currentBasketPresence * 100) + '٪');
++      });
++      if (componentBits.length) bits.push(componentBits.join(' · '));
++    }
++    if (!bits.length) return '';
++    return '<div class="watch-evidence"><span class="watch-evidence-label">شاهد:</span> ' + bits.join(' | ') + '</div>';
++  }
++
++  function pendingFollowUpHtml(cid) {
++    if (typeof getPendingWatchFollowUps !== 'function') return '';
++    var rows = [];
++    try { rows = getPendingWatchFollowUps(cid) || []; } catch (e) { rows = []; }
++    if (!rows.length) return '';
++    var html = rows.map(function (o) {
++      var product = o.productName ? ('«' + esc(o.productName) + '» — ') : '';
++      return '<div class="watch-followup-row" data-followup-id="' + esc(o.id) + '">' +
++        '<div class="watch-followup-main"><div><strong>پیگیری بعدی</strong> · ' + product + esc(o.generatedReason || 'همان موضوع قبلی') + '</div>' +
++        watchEvidenceHtml(o) +
++        (o.reason && o.reason.comment ? '<div class="watch-reason">یادداشت قبلی: ' + esc(o.reason.comment) + '</div>' : '') + '</div>' +
++        '<div class="watch-followup-actions"><button type="button" class="btn secondary small" data-followup-complete="' + esc(o.id) + '">ثبت نتیجه</button>' +
++        '<button type="button" class="btn secondary small" data-followup-cancel="' + esc(o.id) + '">لغو پیگیری</button></div></div>';
++    }).join('');
++    return '<div class="card wide watch-followup-card"><div class="label">پیگیری‌های منتظر</div>' +
++      '<div class="report-note watch-note">این موارد فقط هنگام مواجهه با همین مشتری یادآوری می‌شوند و تا ثبت نتیجه یا لغو صریح باقی می‌مانند.</div>' + html + '</div>';
++  }
++
+   function intelligenceWatchHtml(cid, ctx) {
+     if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function' && typeof getActiveWatchOccurrences !== 'function') return '';
+ 
+@@ -294,6 +361,8 @@
+             level: w.level,
+             generatedReason: w.reason,
+             reason: null,
++            evidence: w.evidence || null,
++            watchComponents: w.watchComponents || null,
+             status: 'active'
+           };
+         });
+@@ -327,6 +396,8 @@
+     if (occs.length) {
+       var wrows = occs.map(function (o) {
+         var label = (o.productName ? ('«' + esc(o.productName) + '» — ') : '') + esc(o.generatedReason || '');
++        if (!o.productName && o.watchCategory === 'BASKET_SHRINK_WATCH') label = 'سبد خرید این مشتری در بخش‌هایی از کالاها کوچک‌تر شده است؛ کدام کالاها را کمتر یا متفاوت می‌خرد؟';
++        if (!o.productName && o.watchCategory === 'KEY_PRODUCT_LOST_WATCH') label = 'یک یا چند کالای کلیدی از خریدهای اخیر این مشتری حذف شده‌اند؛ علت را از مشتری بپرسید.';
+         var reviewed = !!(o.reason);
+         var badge = reviewed
+           ? '<span class="watch-reviewed">بررسی شده</span>'
+@@ -346,7 +417,7 @@
+             '<span class="watch-occ-status">' + badge +
+               '<div class="watch-level-label ' + levelClass(o.level) + '">' + esc(levelLabel(o.level)) + '</div>' +
+             '</span>' +
+-          '</div>' + reasonBit +
++          '</div>' + reasonBit + watchEvidenceHtml(o) +
+         '</div>';
+       }).join('');
+       watchHtml = '<div class="card wide watch-lifecycle-card" id="watch-lifecycle-card">' +
+@@ -355,7 +426,8 @@
+         '<div class="watch-occ-list">' + wrows + '</div></div>';
+     }
+ 
+-    return confirmedHtml + watchHtml;
++    var followUpHtml = pendingFollowUpHtml(cid);
++    return followUpHtml + confirmedHtml + watchHtml;
+   }
+ 
+   function openWatchReasonSheet(occurrenceId, onDone) {
+@@ -427,6 +499,63 @@
+     }
+   }
+ 
++  function openWatchFollowUpSheet(occurrenceId, cid, onDone) {
++    if (!occurrenceId || typeof getPendingWatchFollowUps !== 'function' || typeof openSheet !== 'function') return;
++    var pending = [];
++    try { pending = getPendingWatchFollowUps(cid) || []; } catch (e) { pending = []; }
++    var occ = pending.find(function (x) { return x && x.id === occurrenceId; });
++    if (!occ) return;
++    var options = [
++      { code: 'still_stock', label: 'هنوز موجودی دارد' },
++      { code: 'not_wanted', label: 'این محصول را نمی‌خواهد' },
++      { code: 'dismiss', label: 'این مورد فعلی را کنار می‌گذارم' },
++      { code: 'price', label: 'قیمت' },
++      { code: 'competitor', label: 'خرید از رقیب' },
++      { code: 'no_need', label: 'فعلاً نیاز ندارد' },
++      { code: 'quality', label: 'مشکل کیفیت' },
++      { code: 'other', label: 'سایر' }
++    ].filter(function (x) { return x.code !== 'not_wanted' || !!occ.productId; });
++    var buttons = options.map(function (o) { return '<button type="button" class="btn secondary small" data-followup-result="' + esc(o.code) + '" style="width:100%;margin-bottom:6px;text-align:right;">' + esc(o.label) + '</button>'; }).join('');
++    openSheet('<div class="sheet-title">ثبت نتیجه پیگیری</div>' + watchEvidenceHtml(occ) + '<div id="watch-followup-results">' + buttons + '</div>' + '<div class="field" style="margin-top:10px;"><label>یادداشت (اختیاری)</label><input id="watch-followup-note" type="text" autocomplete="off"></div>' + '<div class="btn-row" style="margin-top:10px;"><button type="button" class="btn secondary" id="watch-followup-cancel-sheet">انصراف</button></div>');
++    var cancel = document.getElementById('watch-followup-cancel-sheet');
++    if (cancel) cancel.onclick = function () { if (typeof closeModal === 'function') closeModal(); };
++    var list = document.getElementById('watch-followup-results');
++    if (list) list.addEventListener('click', function (e) {
++      var btn = e.target.closest('[data-followup-result]'); if (!btn) return;
++      var note = document.getElementById('watch-followup-note');
++      var code = btn.getAttribute('data-followup-result');
++      var result = null;
++      if (code === 'dismiss') {
++        // Explicit completion of the pending follow-up; do not turn it into not_wanted.
++        result = typeof completeWatchFollowUp === 'function' ? completeWatchFollowUp(occurrenceId, 'other', note ? note.value : '') : null;
++      } else if (typeof completeWatchFollowUp === 'function') {
++        result = completeWatchFollowUp(occurrenceId, code, note ? note.value : '');
++      }
++      if (typeof showToast === 'function') showToast(result ? 'نتیجه پیگیری ثبت شد' : 'ثبت نتیجه ممکن نشد');
++      if (typeof closeModal === 'function') closeModal();
++      if (typeof onDone === 'function') onDone();
++    });
++  }
++
++  function bindWatchFollowUps(root, cid) {
++    if (!root) return;
++    root.querySelectorAll('[data-followup-complete]').forEach(function (el) {
++      el.addEventListener('click', function () {
++        openWatchFollowUpSheet(el.getAttribute('data-followup-complete'), cid, function () { drawCustomerPage(rootEl || root); });
++      });
++    });
++    root.querySelectorAll('[data-followup-cancel]').forEach(function (el) {
++      el.addEventListener('click', function () {
++        if (typeof reverseWatchDecision !== 'function') return;
++        var id = el.getAttribute('data-followup-cancel');
++        var ok = false;
++        try { ok = !!reverseWatchDecision(id); } catch (e) { ok = false; }
++        if (typeof showToast === 'function') showToast(ok ? 'پیگیری لغو شد' : 'لغو پیگیری ممکن نشد');
++        drawCustomerPage(rootEl || root);
++      });
++    });
++  }
++
+   function bindWatchLifecycleRows(root) {
+     if (!root) return;
+     root.querySelectorAll('[data-watch-occ]').forEach(function (el) {
+@@ -995,6 +1124,7 @@
+       };
+     }
+     bindWatchLifecycleRows(root);
++    bindWatchFollowUps(root, id);
+   }
+ 
+   function mount(root, params) {
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/views/watches.js	2026-09-29 21:03:42.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/views/watches.js	2026-10-01 20:53:39.626698227 +0000
+@@ -51,6 +51,22 @@
+     return null;
+   }
+ 
++  function watchEvidenceText(o) {
++    var e = o && o.evidence;
++    if (!e) return '';
++    var bits = [];
++    if (e.comparison) bits.push(e.comparison);
++    if (e.salesPrevious30 != null && e.salesRecent30 != null) bits.push('فروش ' + Math.round(e.salesPrevious30) + ' ← ' + Math.round(e.salesRecent30));
++    if (e.daysSinceLast != null && e.averageIntervalDays != null) bits.push('فاصله ' + e.daysSinceLast + ' روز / معمول ' + e.averageIntervalDays + ' روز');
++    if (Array.isArray(e.affectedProducts) && e.affectedProducts.length) bits.push(e.affectedProducts.map(function(x){ return (x.productName || x.productId) + ': ' + x.earlyQty + ' ← ' + x.lateQty; }).join(' · '));
++    if (Array.isArray(e.lostProducts) && e.lostProducts.length) bits.push(e.lostProducts.map(function(x){ return (x.productName || x.productId) + ': ' + x.earlyQty + ' ← ۰'; }).join(' · '));
++    if (e.currentGap != null && e.typicalCycle != null) bits.push('فاصله فعلی ' + e.currentGap + ' / چرخه معمول ' + e.typicalCycle);
++    if (e.recentQuantity != null && e.typicalQuantity != null) bits.push('مقدار اخیر ' + e.recentQuantity + ' / معمول ' + e.typicalQuantity);
++    if (e.recentFrequency != null && e.expectedFrequency != null) bits.push('دفعات اخیر ' + e.recentFrequency + ' / مورد انتظار ' + Math.round(e.expectedFrequency * 10) / 10);
++    if (e.historicalPresenceRate != null && e.currentBasketPresence != null) bits.push('حضور سبد ' + Math.round(e.historicalPresenceRate * 100) + '٪ → ' + Math.round(e.currentBasketPresence * 100) + '٪');
++    return bits.length ? '<div class="watch-evidence"><span class="watch-evidence-label">شاهد:</span> ' + esc(bits.join(' | ')) + '</div>' : '';
++  }
++
+   /* Existing stored severity only — never recalculated. */
+   function levelLabel(level) {
+     return level === 'high' ? 'زیاد' : level === 'medium' ? 'متوسط' : level === 'low' ? 'کم' : (level || '—');
+@@ -167,6 +183,7 @@
+           '<div class="watch-list-main">' +
+             '<div class="watch-list-title tx-row-title">' + esc(prodName || catLabel) + '</div>' +
+             (prodName ? '<div class="watch-list-sub">' + esc(catLabel) + '</div>' : '') +
++            watchEvidenceText(o) +
+           '</div>' +
+           '<div class="watch-list-meta">' +
+             '<span class="watch-severity-badge watch-severity-' + esc(o.level || 'low') + '">' + esc(levelLabel(o.level)) + '</span>' +
+@@ -282,6 +299,7 @@
+         (prodName ? '<div class="watch-detail-block"><div class="label">محصول</div><div class="watch-detail-value">' + esc(prodName) + '</div></div>' : '') +
+         '<div class="watch-detail-block"><div class="label">نوع هشدار</div><div class="watch-detail-value">' + esc(catLabel) + '</div></div>' +
+         '<div class="watch-detail-block watch-detail-reason"><div class="label">چرا این مورد نمایش داده شده؟</div><div class="watch-detail-value">' + esc(occ.generatedReason || 'نشانه‌ای از تغییر در رفتار خرید مشاهده شده است.') + '</div></div>' +
++        watchEvidenceText(occ) +
+         reasonHtml +
+       '</div>' +
+       '<div class="watch-detail-actions tx-actions-primary">' +
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/app.js	2026-09-30 20:54:24.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/app.js	2026-10-01 20:53:24.188526522 +0000
+@@ -1286,11 +1286,24 @@
+     if (typeof customerBehavior === 'function') visitBehavior = customerBehavior(cid) || {};
+   } catch (eVisitContext) { visitBehavior = {}; }
+   let visitWatchCount = 0;
++  let visitFollowUps = [];
+   try {
+     if (typeof getActiveWatchOccurrences === 'function') {
+       visitWatchCount = (getActiveWatchOccurrences(cid) || []).length;
+     }
+-  } catch (eVisitWatch) { visitWatchCount = 0; }
++    if (typeof getPendingWatchFollowUps === 'function') {
++      visitFollowUps = getPendingWatchFollowUps(cid) || [];
++    }
++  } catch (eVisitWatch) { visitWatchCount = 0; visitFollowUps = []; }
++  const followUpReminderHtml = visitFollowUps.length
++    ? '<div class="visit-watch-followups"><div class="visit-watch-followups-title">پیگیری‌های منتظر برای این مشتری</div>' +
++      visitFollowUps.map(function (o) {
++        return '<div class="visit-watch-followup-item"><div><strong>' + esc(o.productName ? ('«' + o.productName + '»') : 'همان موضوع قبلی') + '</strong> — ' + esc(o.generatedReason || 'سؤال قبلی را پیگیری کنید') + '</div>' +
++          (o.evidence && o.evidence.comparison ? '<div class="sub">شاهد: ' + esc(o.evidence.comparison) + '</div>' : '') +
++          (o.reason && o.reason.comment ? '<div class="sub">یادداشت: ' + esc(o.reason.comment) + '</div>' : '') +
++          '</div>';
++      }).join('') + '</div>'
++    : '';
+   const lastVisitDate = visitBehavior.lastVisit && visitBehavior.lastVisit.date
+     ? faDate(visitBehavior.lastVisit.date)
+     : '—';
+@@ -1311,6 +1324,7 @@
+         '<span>آخرین ویزیت: ' + esc(lastVisitDate) + '</span>' +
+         '<span>هشدار فعال: ' + esc(String(visitWatchCount)) + ' مورد</span>' +
+       '</div>' +
++      followUpReminderHtml +
+     '</div>' +
+     '<div style="display:flex;gap:8px;">' +
+       '<div class="field" style="flex:1;"><label>تاریخ</label>' + shamsiDateInputHTML('f-date', todayISO()) + '</div>' +
+--- /mnt/data/watch_work/baseline/Bagheri-crm-main/js/backup.js	2026-09-28 17:59:06.000000000 +0000
++++ /mnt/data/watch_work/src/Bagheri-crm-main/js/backup.js	2026-10-01 20:53:42.511668560 +0000
+@@ -360,7 +360,7 @@
+ 
+ function _validateWatchLifecycleBundle(bundle){
+   if(!_isPlainObject(bundle)) return false;
+-  if(bundle.version != null && Number(bundle.version) !== 1) return false;
++  if(bundle.version != null && ![1,2].includes(Number(bundle.version))) return false;
+   if(!Array.isArray(bundle.occurrences)) return false;
+   for(const row of bundle.occurrences){
+     if(!_isPlainObject(row) || row.id == null || row.customerId == null || !row.watchCategory) return false;
