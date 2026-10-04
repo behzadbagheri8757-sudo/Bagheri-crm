@@ -51,30 +51,18 @@
     return null;
   }
 
-  function watchQtyText(q, productId) {
-    if (q == null || !isFinite(Number(q))) return '';
-    var p = (typeof data !== 'undefined' && Array.isArray(data.products)) ? data.products.find(function(x){ return x && x.id === productId; }) : null;
-    // Product master data is the only unit source. packageWeight means the
-    // registered sale is by package; otherwise this CRM records the quantity
-    // directly in kilograms. No product name is inspected to infer a unit.
-    var unit = p && p.packageWeight ? 'بسته' : 'کیلو';
-    return String(q) + ' ' + unit;
+  /* Level 0: one human sentence. Level 2: raw evidence lines inside a single «جزئیات»
+     disclosure (nothing is dropped — it just no longer sits on the first level).
+     Both come from js/app.js → BagheriPresent (presentation only). */
+  function humanSentence(o) {
+    var P = global.BagheriPresent;
+    if (P) return P.watchSentence(o);
+    return (o && o.generatedReason) || '';
   }
 
   function watchEvidenceText(o) {
-    var e = o && o.evidence;
-    if (!e) return '';
-    var bits = [];
-    if (e.comparison) bits.push(e.comparison);
-    if (e.salesPrevious30 != null && e.salesRecent30 != null) bits.push('فروش ' + Math.round(e.salesPrevious30) + ' ← ' + Math.round(e.salesRecent30));
-    if (e.daysSinceLast != null && e.averageIntervalDays != null) bits.push('فاصله ' + e.daysSinceLast + ' روز / معمول ' + e.averageIntervalDays + ' روز');
-    if (Array.isArray(e.affectedProducts) && e.affectedProducts.length) bits.push(e.affectedProducts.map(function(x){ return '«' + (x.productName || x.productId || '') + '»: ' + watchQtyText(x.earlyQty, x.productId) + ' ← ' + watchQtyText(x.lateQty, x.productId); }).join(' · '));
-    if (Array.isArray(e.lostProducts) && e.lostProducts.length) bits.push(e.lostProducts.map(function(x){ return '«' + (x.productName || x.productId || '') + '»: ' + watchQtyText(x.earlyQty, x.productId) + ' ← ۰'; }).join(' · '));
-    if (e.currentGap != null && e.typicalCycle != null) bits.push('فاصله فعلی ' + e.currentGap + ' / چرخه معمول ' + e.typicalCycle);
-    if (e.recentQuantity != null && e.typicalQuantity != null) bits.push('مقدار اخیر ' + e.recentQuantity + ' / معمول ' + e.typicalQuantity);
-    if (e.recentFrequency != null && e.expectedFrequency != null) bits.push('دفعات اخیر ' + e.recentFrequency + ' / مورد انتظار ' + Math.round(e.expectedFrequency * 10) / 10);
-    if (e.historicalPresenceRate != null && e.currentBasketPresence != null) bits.push('حضور سبد ' + Math.round(e.historicalPresenceRate * 100) + '٪ → ' + Math.round(e.currentBasketPresence * 100) + '٪');
-    return bits.length ? '<div class="watch-evidence"><span class="watch-evidence-label">شاهد:</span> ' + esc(bits.join(' | ')) + '</div>' : '';
+    var P = global.BagheriPresent;
+    return P ? P.detailsHtml(P.watchDetailLines(o)) : '';
   }
 
   /* Existing stored severity only — never recalculated. */
@@ -85,31 +73,10 @@
     return level === 'high' ? '#B3261E' : level === 'medium' ? '#C77700' : '#6B7280';
   }
 
-  /* Local presentational label only (UI text), not a business rule.
-     Falls back to the raw stored category string for anything unmapped,
-     so no meaning is invented for codes not listed here. */
-  function basketShrinkLabel(o) {
-    var e = o && o.evidence;
-    var names = e && Array.isArray(e.affectedProducts) ? e.affectedProducts.map(function (x) { return x && (x.productName || x.productId); }).filter(Boolean) : [];
-    if (!names.length) return 'افت مقدار کالاهای مشخص بین نیمه اول و نیمه دوم فاکتورها';
-    var listed = names.length === 1 ? '«' + names[0] + '»' : names.slice(0, 4).map(function (n) { return '«' + n + '»'; }).join('، ');
-    if (names.length > 4) listed += ' و ' + (names.length - 4) + ' کالای دیگر';
-    return 'افت مقدار ' + listed + ' بین نیمه اول و نیمه دوم فاکتورها';
-  }
-
+  /* Human label for the watch type (presentation text only; falls back to a neutral phrase). */
   function categoryLabel(cat) {
-    switch (cat) {
-      case 'PURCHASE_DECLINE_WATCH': return 'کاهش خرید (نشانه اولیه)';
-      case 'BEHIND_PATTERN_WATCH': return 'عقب‌افتادگی از الگوی خرید (نشانه اولیه)';
-      case 'BASKET_SHRINK_WATCH': return 'افت مقدار کالاهای مشخص بین نیمه اول و نیمه دوم فاکتورها (نشانه اولیه)';
-      case 'KEY_PRODUCT_LOST_WATCH': return 'از دست رفتن محصول کلیدی (نشانه اولیه)';
-      case 'SKU_DELAY_WATCH': return 'تأخیر در خرید کالا';
-      case 'SKU_QUANTITY_DROP_WATCH': return 'کاهش مقدار خرید کالا';
-      case 'SKU_FREQUENCY_DROP_WATCH': return 'کاهش تناوب خرید کالا';
-      case 'LINE_DROP_WATCH': return 'کم‌رنگ شدن محصول در سبد';
-      case 'COMBINED_SKU_WATCH': return 'تضعیف چند کالا با هم';
-      default: return cat ? 'هشدار رفتاری' : '—';
-    }
+    var P = global.BagheriPresent;
+    return P ? P.watchLabel(cat) : (cat ? 'تغییر در رفتار خرید' : '—');
   }
 
   function watchReasonSheet(occurrenceId, onDone) {
@@ -196,17 +163,17 @@
       var g = groups[key];
       var rows = g.items.map(function (o) {
         var prodName = productNameForOccurrence(o);
-        var catLabel = o.watchCategory === 'BASKET_SHRINK_WATCH' ? basketShrinkLabel(o) : categoryLabel(o.watchCategory);
+        var catLabel = categoryLabel(o.watchCategory);
+        var sentence = humanSentence(o);
         var reviewed = !!o.reason;
         return '<div class="watch-list-row tx-row" data-watch-id="' + esc(o.id) + '" role="link" tabindex="0">' +
           '<div class="watch-list-main">' +
             '<div class="watch-list-title tx-row-title">' + esc(prodName || catLabel) + '</div>' +
-            (prodName ? '<div class="watch-list-sub">' + esc(catLabel) + '</div>' : '') +
-            watchEvidenceText(o) +
+            (sentence ? '<div class="watch-list-text">' + esc(sentence) + '</div>' : '') +
           '</div>' +
           '<div class="watch-list-meta">' +
             '<span class="watch-severity-badge watch-severity-' + esc(o.level || 'low') + '">' + esc(levelLabel(o.level)) + '</span>' +
-            '<span class="watch-reviewed-badge ' + (reviewed ? 'is-reviewed' : '') + '">' + (reviewed ? 'علت ثبت شده' : 'نیاز به بررسی') + '</span>' +
+            (reviewed ? '<span class="watch-reviewed-badge is-reviewed">علت ثبت شده</span>' : '') +
           '</div>' +
         '</div>';
       }).join('');
@@ -309,17 +276,17 @@
       root.innerHTML = '<div class="watch-page-head"><div><h2 class="section-title">جزئیات هشدار</h2></div></div><div class="empty">این هشدار پیدا نشد یا دیگر فعال نیست.</div><div class="btn-row"><a class="btn secondary" href="' + watchesHref() + '">بازگشت به هشدارها</a></div>';
       return;
     }
-    var custName = customerNameById(occ.customerId), prodName = productNameForOccurrence(occ), catLabel = occ.watchCategory === 'BASKET_SHRINK_WATCH' ? basketShrinkLabel(occ) : categoryLabel(occ.watchCategory);
+    var custName = customerNameById(occ.customerId), prodName = productNameForOccurrence(occ), catLabel = categoryLabel(occ.watchCategory), sentence = humanSentence(occ);
     var reasonHtml = occ.reason ? '<div class="watch-detail-block"><div class="label">علت ثبت‌شده</div><div class="watch-detail-value">' + esc((typeof watchReasonLabel === 'function') ? watchReasonLabel(occ.reason.code) : occ.reason.code) + (occ.reason.comment ? ' — ' + esc(occ.reason.comment) : '') + '</div></div>' : '';
     root.innerHTML =
       '<div class="watch-detail-top"><button type="button" class="btn secondary small" data-watch-back>‹&nbsp; بازگشت به هشدارها</button></div>' +
       '<div class="card wide watch-detail-card" data-watch-open-customer="' + esc(occ.customerId) + '" role="link" tabindex="0">' +
         '<div class="watch-detail-head"><div class="watch-detail-customer"><div class="watch-detail-kicker">مشتری</div><div class="watch-detail-customer-name">' + esc(custName) + '</div></div><span class="watch-severity-badge watch-severity-' + esc(occ.level || 'low') + '">' + esc(levelLabel(occ.level)) + '</span></div>' +
         (prodName ? '<div class="watch-detail-block"><div class="label">محصول</div><div class="watch-detail-value">' + esc(prodName) + '</div></div>' : '') +
-        '<div class="watch-detail-block"><div class="label">نوع هشدار</div><div class="watch-detail-value">' + esc(catLabel) + '</div></div>' +
-        '<div class="watch-detail-block watch-detail-reason"><div class="label">چرا این مورد نمایش داده شده؟</div><div class="watch-detail-value">' + esc(occ.watchCategory === 'BASKET_SHRINK_WATCH' ? basketShrinkLabel(occ) + '؛ علت کاهش مقدار این کالاها را بررسی کنید.' : (occ.generatedReason || 'نشانه‌ای از تغییر در رفتار خرید مشاهده شده است.')) + '</div></div>' +
-        watchEvidenceText(occ) +
+        '<div class="watch-detail-block"><div class="label">موضوع</div><div class="watch-detail-value">' + esc(catLabel) + '</div></div>' +
+        '<div class="watch-detail-block watch-detail-reason"><div class="label">چرا نمایش داده شده؟</div><div class="watch-detail-value">' + esc(sentence || 'نشانه‌ای از تغییر در رفتار خرید مشاهده شده است.') + '</div></div>' +
         reasonHtml +
+        watchEvidenceText(occ) +
       '</div>' +
       '<div class="watch-detail-actions tx-actions-primary">' +
         '<button type="button" class="btn primary" data-watch-reason-open="' + esc(occ.id) + '">' + (occ.reason ? 'ویرایش علت' : 'ثبت علت') + '</button>' +
