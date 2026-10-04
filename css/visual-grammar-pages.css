@@ -763,3 +763,353 @@ main .empty{margin:14px 0;}
 html[data-theme="dark"] #main.customer-detail-view .watch-level-high{
   color:#F3A56B;
 }
+
+/* ==========================================================================
+   Delivery & Visual Hierarchy patch  (prefix: bp-)
+   Scoped to new/changed components only. Uses --vg-* tokens exclusively, so
+   Light and Dark resolve automatically (tokens are redefined under
+   html[data-theme="dark"]). No global visual grammar is changed.
+   ========================================================================== */
+
+/* ---- shared: one-tap disclosure «جزئیات» (Level 2) ---- */
+.bp-more{
+  margin-top:var(--vg-space-tight);
+}
+.bp-more > summary{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  min-height:28px;
+  padding:2px 0;
+  font-size:.74rem;
+  font-weight:500;
+  color:var(--vg-color-primary);
+  cursor:pointer;
+  list-style:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.bp-more > summary::-webkit-details-marker{display:none;}
+.bp-more > summary::after{
+  content:'';
+  width:11px;
+  height:11px;
+  background-color:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;
+  transition:transform .15s ease;
+}
+.bp-more[open] > summary::after{transform:rotate(180deg);}
+.bp-more-body{
+  margin-top:var(--vg-space-tight);
+  padding:8px 12px;
+  background:var(--vg-color-surface-soft);
+  border-radius:12px;
+}
+.bp-more-line{
+  font-size:.74rem;
+  line-height:1.8;
+  color:var(--vg-color-text-secondary);
+  overflow-wrap:anywhere;
+}
+.bp-more-line + .bp-more-line{
+  margin-top:2px;
+  padding-top:2px;
+  border-top:1px solid var(--vg-color-divider);
+}
+
+/* ---- shared: title + one human sentence rows ---- */
+.bp-row-title{
+  font-size:.88rem;
+  font-weight:600;
+  line-height:1.6;
+  color:var(--vg-color-text);
+  overflow-wrap:anywhere;
+}
+.bp-row-text{
+  margin-top:2px;
+  font-size:.82rem;
+  line-height:1.8;
+  color:var(--vg-color-text-secondary);
+  overflow-wrap:anywhere;
+}
+.bp-row-note{
+  margin-top:2px;
+  font-size:.74rem;
+  line-height:1.7;
+  color:var(--vg-color-text-muted);
+  overflow-wrap:anywhere;
+}
+.bp-sheet-text{margin:0 0 var(--vg-space-related);}
+
+/* ---- Customer Detail · P0 «الان مهم است» ---- */
+.bp-focus{
+  margin:0 0 var(--vg-space-group);
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+  overflow:hidden;
+}
+.bp-focus-head{
+  padding:12px 14px 4px;
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--vg-color-text-muted);
+}
+.bp-topic{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:11px 14px;
+  -webkit-tap-highlight-color:transparent;
+}
+.bp-topic + .bp-topic{border-top:1px solid var(--vg-color-divider);}
+.bp-topic.is-tap{cursor:pointer;}
+.bp-topic.is-tap:active{background:var(--vg-color-surface-soft);}
+.bp-topic-dot{
+  flex:none;
+  width:8px;
+  height:8px;
+  margin-top:.62rem;
+  border-radius:50%;
+  background:var(--vg-color-neutral);
+}
+.bp-topic-dot.is-critical,
+.bp-topic-dot.is-high{background:var(--vg-color-danger);}
+.bp-topic-dot.is-medium{background:var(--vg-color-warning);}
+.bp-topic-main{flex:1;min-width:0;}
+.bp-topic-title{
+  font-size:.9rem;
+  font-weight:600;
+  line-height:1.6;
+  color:var(--vg-color-text);
+  overflow-wrap:anywhere;
+}
+.bp-topic-text{
+  margin-top:1px;
+  font-size:.82rem;
+  line-height:1.8;
+  color:var(--vg-color-text-secondary);
+  overflow-wrap:anywhere;
+}
+.bp-topic-flag{
+  display:inline-block;
+  margin-inline-start:4px;
+  padding:0 6px;
+  font-size:.64rem;
+  font-weight:500;
+  line-height:1.6;
+  color:var(--vg-color-text-muted);
+  background:var(--vg-color-neutral-soft);
+  border-radius:var(--vg-radius-pill);
+  vertical-align:middle;
+}
+.bp-topic-chev{
+  flex:none;
+  align-self:center;
+  color:var(--vg-color-text-muted);
+  opacity:.6;
+  font-size:1.1rem;
+  line-height:1;
+}
+
+/* ---- Customer Detail · Level 1 glance + collapsed lists ---- */
+.bp-glance{
+  margin:0 0 var(--vg-space-related);
+  padding:10px 14px;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+}
+.bp-glance-line{
+  font-size:.84rem;
+  line-height:1.85;
+  color:var(--vg-color-text);
+  overflow-wrap:anywhere;
+}
+.bp-glance-line + .bp-glance-line{
+  margin-top:4px;
+  padding-top:4px;
+  border-top:1px solid var(--vg-color-divider);
+}
+#main.customer-detail-view .customer-rejection-details{margin-bottom:var(--vg-space-related);}
+#main.customer-detail-view .watch-occ-item + .watch-occ-item{
+  margin-top:2px;
+  padding-top:2px;
+  border-top:1px dotted var(--vg-color-divider);
+}
+#main.customer-detail-view .watch-occ-item .watch-occ-row{border-bottom:0;}
+#main.customer-detail-view .watch-occ-row.bp-occ{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:var(--vg-space-related);
+  padding:8px 0 4px;
+}
+#main.customer-detail-view .bp-occ-main{flex:1;min-width:0;}
+#main.customer-detail-view .bp-occ-side{
+  flex:none;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+  white-space:nowrap;
+}
+#main.customer-detail-view .bp-conf-text{
+  flex:1;
+  min-width:0;
+  line-height:1.8;
+  overflow-wrap:anywhere;
+}
+#main.customer-detail-view .bp-followup{padding:2px 0;}
+#main.customer-detail-view .bp-followup + .bp-followup{
+  margin-top:var(--vg-space-related);
+  padding-top:var(--vg-space-related);
+  border-top:1px solid var(--vg-color-divider);
+}
+#main.customer-detail-view .watch-followup-card{margin-bottom:var(--vg-space-group);}
+#main.customer-detail-view .watch-followup-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:var(--vg-space-related);
+}
+
+/* ---- Pre-Visit context (inside the visit sheet) ---- */
+.visit-precontext.bp-pre{
+  padding:12px 14px;
+  background:var(--vg-color-surface-soft);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-soft);
+}
+.bp-pre .visit-precontext-title{
+  font-size:.95rem;
+  margin-bottom:var(--vg-space-tight);
+}
+.bp-pre-story{
+  font-size:.82rem;
+  line-height:1.8;
+  color:var(--vg-color-text-secondary);
+  margin-bottom:var(--vg-space-related);
+  overflow-wrap:anywhere;
+}
+.bp-pre-last,
+.visit-watch-followups{
+  margin-top:var(--vg-space-related);
+  padding-top:var(--vg-space-related);
+  border-top:1px solid var(--vg-color-divider);
+}
+.bp-pre-label{
+  font-size:.7rem;
+  font-weight:600;
+  color:var(--vg-color-text-muted);
+  margin-bottom:2px;
+}
+.bp-pre-line{
+  font-size:.84rem;
+  line-height:1.8;
+  color:var(--vg-color-text);
+  overflow-wrap:anywhere;
+}
+.bp-pre-note{
+  font-size:.76rem;
+  line-height:1.7;
+  color:var(--vg-color-text-muted);
+  overflow-wrap:anywhere;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.bp-pre-points{
+  margin-top:var(--vg-space-related);
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.bp-pre-point{
+  padding:7px 10px;
+  font-size:.8rem;
+  line-height:1.75;
+  color:var(--vg-color-text);
+  background:var(--vg-color-surface);
+  border-radius:10px;
+  border-inline-start:3px solid var(--vg-color-warning);
+  overflow-wrap:anywhere;
+}
+.bp-pre-point.is-danger{border-inline-start-color:var(--vg-color-danger);}
+.bp-pre .visit-precontext-grid{
+  margin-top:var(--vg-space-related);
+  font-size:.74rem;
+}
+.visit-watch-followup-item + .visit-watch-followup-item{margin-top:6px;}
+
+/* ---- Visit form: Next Action select (compact, native iOS picker) ---- */
+.bp-next-field select{width:100%;}
+
+/* ---- Product context hints: visit reaction step, picker, invoice row ---- */
+.bp-hint{
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+  margin:-2px 0 var(--vg-space-related);
+}
+.bp-hint-line{
+  display:block;
+  font-size:.74rem;
+  line-height:1.7;
+  color:var(--vg-color-text-muted);
+  overflow-wrap:anywhere;
+}
+.bp-hint-line.is-warn{color:var(--vg-color-warning);}
+.bp-hint-line.is-info{color:var(--vg-color-primary);}
+
+.prod-drop-main{
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+}
+.prod-drop-main .prod-drop-name{flex:0 0 auto;}
+.prod-drop-hint{
+  display:flex;
+  flex-direction:column;
+}
+.prod-drop-hint .bp-hint-line{font-size:.7rem;line-height:1.6;}
+.prod-drop-item:has(.prod-drop-hint){padding-top:9px;padding-bottom:9px;}
+
+.inv-line-intel{
+  margin:4px 14px 0;
+  font-size:11.5px;
+  line-height:1.6;
+  color:var(--vg-color-warning);
+  overflow-wrap:anywhere;
+}
+.inv-line-intel[hidden]{display:none;}
+
+/* ---- Watch list / detail ---- */
+.watch-customer-items .watch-list-row{
+  align-items:flex-start;
+  padding:11px 2px;
+}
+.watch-list-text{
+  margin-top:2px;
+  font-size:.76rem;
+  line-height:1.8;
+  color:var(--vg-color-text-secondary);
+  overflow-wrap:anywhere;
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.watch-list-meta{flex:none;}
+.watch-detail-card .bp-more{margin-top:var(--vg-space-related);}
+.watch-detail-card .bp-more-body{background:var(--vg-color-surface-soft);}
+.watch-detail-reason .watch-detail-value{overflow-wrap:anywhere;}
+
+/* Dark: warning-toned text on the soft warning chip keeps contrast (tokens already swap),
+   but the legacy hard-coded amber used by .watch-detail-reason is too dark on dark surfaces. */
+html[data-theme="dark"] .watch-detail-reason .watch-detail-value{color:var(--vg-color-warning);}
