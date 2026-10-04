@@ -1249,6 +1249,325 @@ function bindNoPurchasePrompt(cid){
    Partial in-progress product is dropped on Save & Finish.
    Backward-compatible: old visits without offeredProducts / stockSource OK.
    Does not touch invoice/stock/FIFO. */
+/* ============================================================
+   BAGHERI — Presentation helpers (Delivery / Context patch)
+   PRESENTATION ONLY. Turns facts the system already stores or
+   computes (watch occurrences, visit offeredProducts, stock sources,
+   invoices) into short human Persian lines. It computes no new
+   Intelligence, creates no Signal/Watch, never mutates data and never
+   touches accounting / FIFO / persistence.
+   Used by: openAddVisit + openInvoiceForm (this file),
+            views/customer.js, views/watches.js.
+   ============================================================ */
+window.BagheriPresent = (function () {
+  'use strict';
+
+  function fa(v) { return typeof enToFaDigits === 'function' ? enToFaDigits(String(v)) : String(v); }
+  function n0(v) { return fa(Math.round(Number(v))); }
+  function n1(v) { return fa(Math.round(Number(v) * 10) / 10); }
+  function pct01(v) { return fa(Math.round(Number(v) * 100)) + '٪'; }
+  function money(v) { return typeof toman === 'function' ? toman(Math.round(Number(v))) : n0(v); }
+  var LV = { critical: 4, high: 3, medium: 2, low: 1 };
+  function lvRank(l) { return LV[l] || 0; }
+
+  function productById(pid) {
+    if (!pid || typeof data === 'undefined' || !Array.isArray(data.products)) return null;
+    return data.products.find(function (p) { return p && p.id === pid; }) || null;
+  }
+  function pname(pid, fallback) {
+    var p = productById(pid);
+    return (p && p.name) || fallback || '';
+  }
+  /* Unit comes from product master data only (same rule the Watch views already use). */
+  function qtyText(q, pid) {
+    if (q == null || !isFinite(Number(q))) return '';
+    var p = productById(pid);
+    return n1(q) + ' ' + (p && p.packageWeight ? 'بسته' : 'کیلو');
+  }
+
+  /* ---------- labels ---------- */
+  var WATCH_LABELS = {
+    PURCHASE_DECLINE_WATCH: 'خرید کلی کمتر شده',
+    BEHIND_PATTERN_WATCH: 'نزدیک به عقب‌افتادن از زمان معمول خرید',
+    BASKET_SHRINK_WATCH: 'افت مقدار خرید',
+    KEY_PRODUCT_LOST_WATCH: 'کالای کلیدی خریده نشده',
+    SKU_DELAY_WATCH: 'دیرتر از معمول خریده شده',
+    SKU_QUANTITY_DROP_WATCH: 'مقدار خرید کمتر شده',
+    SKU_FREQUENCY_DROP_WATCH: 'کمتر از قبل خریده می‌شود',
+    LINE_DROP_WATCH: 'در سبد اخیر کم‌رنگ شده',
+    COMBINED_SKU_WATCH: 'چند نشانه هم‌زمان'
+  };
+  var WATCH_SHORT = {
+    KEY_PRODUCT_LOST_WATCH: 'در خریدهای اخیر دیده نمی‌شود',
+    BASKET_SHRINK_WATCH: 'مقدار خرید کمتر شده',
+    SKU_DELAY_WATCH: 'دیرتر از معمول خریده شده',
+    SKU_QUANTITY_DROP_WATCH: 'مقدار خرید اخیر کمتر از معمول شده',
+    SKU_FREQUENCY_DROP_WATCH: 'کمتر از قبل خریده می‌شود',
+    LINE_DROP_WATCH: 'در سبد اخیر کم‌رنگ شده',
+    COMBINED_SKU_WATCH: 'چند نشانه کاهش خرید دارد'
+  };
+  /* Confirmed SKU-level signals that may speak about ONE product. Anything not listed here
+     (payment, check, visit, general decline ...) is never shown in a product hint. */
+  var CONFIRMED_PRODUCT_SHORT = {
+    SKU_DELAY: WATCH_SHORT.SKU_DELAY_WATCH,
+    SKU_QUANTITY_DROP: WATCH_SHORT.SKU_QUANTITY_DROP_WATCH,
+    SKU_FREQUENCY_DROP: WATCH_SHORT.SKU_FREQUENCY_DROP_WATCH,
+    LINE_DROP: WATCH_SHORT.LINE_DROP_WATCH
+  };
+  var COMPONENT_LABELS = {
+    SKU_DELAY_WATCH: 'تأخیر در خرید',
+    SKU_QUANTITY_DROP_WATCH: 'کاهش مقدار',
+    SKU_FREQUENCY_DROP_WATCH: 'کاهش دفعات خرید',
+    LINE_DROP_WATCH: 'کم‌رنگ شدن در سبد'
+  };
+  var REASON_LABELS = {
+    price: 'قیمت', quality: 'کیفیت', competitor: 'رقیب', unavailable: 'موجود نبود',
+    no_need: 'نیاز نداشت', still_stock: 'موجودی داشت', other: ''
+  };
+  function watchLabel(cat) { return WATCH_LABELS[cat] || 'تغییر در رفتار خرید'; }
+  function reasonLabel(code) { return REASON_LABELS[code] || ''; }
+
+  /* ---------- Stock source: stored fact -> later context ---------- */
+  function stockSentence(src) {
+    if (src === 'competitor') return 'مشتری گفت این محصول را فعلاً از تأمین‌کننده دیگری تهیه می‌کند.';
+    if (src === 'ours') return 'مشتری گفت موجودی این محصول را از ما دارد.';
+    if (src === 'unknown') return 'مشتری گفت هنوز موجودی دارد؛ منبع آن مشخص نیست.';
+    return '';
+  }
+  function stockShort(src) {
+    if (src === 'competitor') return 'فعلاً از تأمین‌کننده دیگری تهیه می‌کند';
+    if (src === 'ours') return 'موجودی فعلی را از ما دارد';
+    if (src === 'unknown') return 'هنوز موجودی دارد (منبع نامشخص)';
+    return '';
+  }
+
+  /* ---------- Watch: Level 0 sentence ---------- */
+  function namesText(list, max) {
+    var arr = (list || []).map(function (x) { return x && (x.productName || x.productId); }).filter(Boolean);
+    if (!arr.length) return '';
+    var shown = arr.slice(0, max || 2).map(function (n) { return '«' + n + '»'; });
+    var s = shown.join(' و ');
+    if (arr.length > shown.length) s += ' و ' + n0(arr.length - shown.length) + ' کالای دیگر';
+    return s;
+  }
+
+  function sentenceFor(cat, e, pid, o) {
+    e = e || {};
+    switch (cat) {
+      case 'SKU_DELAY_WATCH':
+        if (e.typicalCycle != null) {
+          // Real "days since last purchase" when the evidence carries it.
+          if (e.daysSinceLast != null)
+            return n0(e.daysSinceLast) + ' روز از آخرین خرید گذشته؛ این مشتری معمولاً هر ' + n0(e.typicalCycle) + ' روز خرید می‌کند.';
+          // currentGap is the delay relative to the usual cycle (daysSinceLast - typicalCycle).
+          if (e.currentGap != null && e.currentGap > 0)
+            return n0(e.currentGap) + ' روز از زمان معمول خرید گذشته؛ این مشتری معمولاً هر ' + n0(e.typicalCycle) + ' روز خرید می‌کند.';
+        }
+        break;
+      case 'BEHIND_PATTERN_WATCH':
+        if (e.daysSinceLast != null && e.averageIntervalDays != null)
+          return n0(e.daysSinceLast) + ' روز از آخرین خرید گذشته؛ این مشتری معمولاً هر ' + n0(e.averageIntervalDays) + ' روز خرید می‌کند.';
+        break;
+      case 'SKU_QUANTITY_DROP_WATCH':
+        if (e.recentQuantity != null && e.typicalQuantity != null)
+          return 'مقدار خرید اخیر ' + qtyText(e.recentQuantity, pid) + ' بوده؛ مقدار معمول ' + qtyText(e.typicalQuantity, pid) + ' است.';
+        break;
+      case 'SKU_FREQUENCY_DROP_WATCH':
+        if (e.recentFrequency != null && e.expectedFrequency != null)
+          return 'در بازهٔ اخیر ' + n0(e.recentFrequency) + ' بار خرید ثبت شده؛ معمولاً حدود ' + n1(e.expectedFrequency) + ' بار.';
+        break;
+      case 'LINE_DROP_WATCH':
+        if (e.historicalPresenceRate != null && e.currentBasketPresence != null)
+          return 'قبلاً در حدود ' + pct01(e.historicalPresenceRate) + ' خریدها بوده؛ اخیراً فقط در ' + pct01(e.currentBasketPresence) + ' خریدها دیده شده.';
+        break;
+      case 'PURCHASE_DECLINE_WATCH':
+        if (e.declinePercent != null)
+          return 'خرید ۳۰ روز اخیر حدود ' + n0(e.declinePercent) + '٪ کمتر از ۳۰ روز قبل است.';
+        break;
+      case 'BASKET_SHRINK_WATCH': {
+        var an = namesText(e.affectedProducts, 2);
+        return an ? 'مقدار خرید ' + an + ' نسبت به قبل به نصف یا کمتر رسیده.' : 'مقدار خرید چند کالا نسبت به قبل به نصف یا کمتر رسیده.';
+      }
+      case 'KEY_PRODUCT_LOST_WATCH': {
+        var ln = namesText(e.lostProducts, 2);
+        var many = Array.isArray(e.lostProducts) && e.lostProducts.length > 1;
+        return ln ? ln + (many ? ' در خریدهای اخیر دیده نمی‌شوند.' : ' در خریدهای اخیر دیده نمی‌شود، در حالی که قبلاً خریده می‌شد.') : 'یک یا چند کالای کلیدی در خریدهای اخیر دیده نمی‌شود.';
+      }
+      case 'COMBINED_SKU_WATCH': {
+        var cats = (o && Array.isArray(o.watchComponents) && o.watchComponents.length)
+          ? o.watchComponents
+          : ((e.components || []).map(function (c) { return c && c.category; }));
+        var labels = cats.map(function (c) { return COMPONENT_LABELS[c]; }).filter(Boolean);
+        if (labels.length) return 'چند نشانه هم‌زمان دیده شده: ' + labels.join('، ') + '.';
+        break;
+      }
+    }
+    return '';
+  }
+  function watchSentence(o) {
+    if (!o) return '';
+    var s = '';
+    try { s = sentenceFor(o.watchCategory, o.evidence, o.productId, o); } catch (e) { s = ''; }
+    return s || o.generatedReason || '';
+  }
+
+  /* ---------- Watch: Level 1/2 raw evidence (kept, moved out of Level 0) ---------- */
+  function evidenceLines(e, pid) {
+    var out = [];
+    if (!e) return out;
+    if (e.comparison) out.push('مبنای مقایسه: ' + e.comparison);
+    if (e.salesPrevious30 != null && e.salesRecent30 != null) out.push('فروش: ' + money(e.salesPrevious30) + ' ← ' + money(e.salesRecent30));
+    if (e.daysSinceLast != null && e.averageIntervalDays != null) out.push('فاصله از آخرین خرید: ' + n0(e.daysSinceLast) + ' روز؛ فاصله معمول: ' + n0(e.averageIntervalDays) + ' روز');
+    if (Array.isArray(e.affectedProducts) && e.affectedProducts.length) {
+      e.affectedProducts.forEach(function (x) {
+        out.push('«' + (x.productName || x.productId || '') + '»: قبلاً ' + qtyText(x.earlyQty, x.productId) + ' ← اخیراً ' + qtyText(x.lateQty, x.productId));
+      });
+    }
+    if (Array.isArray(e.lostProducts) && e.lostProducts.length) {
+      e.lostProducts.forEach(function (x) {
+        out.push('«' + (x.productName || x.productId || '') + '»: قبلاً ' + qtyText(x.earlyQty, x.productId) + ' ← اخیراً ۰');
+      });
+    }
+    if (e.currentGap != null && e.typicalCycle != null) out.push('تأخیر فعلی: ' + n0(e.currentGap) + ' روز؛ چرخه معمول: ' + n0(e.typicalCycle) + ' روز');
+    if (e.recentQuantity != null && e.typicalQuantity != null) out.push('مقدار اخیر: ' + qtyText(e.recentQuantity, pid) + '؛ مقدار معمول: ' + qtyText(e.typicalQuantity, pid));
+    if (e.recentFrequency != null && e.expectedFrequency != null) out.push('دفعات اخیر: ' + n0(e.recentFrequency) + '؛ مورد انتظار: ' + n1(e.expectedFrequency));
+    if (e.historicalPresenceRate != null && e.currentBasketPresence != null) out.push('حضور در سبد: ' + pct01(e.historicalPresenceRate) + ' ← ' + pct01(e.currentBasketPresence));
+    if (e.purchaseCount != null) out.push('تعداد خرید ثبت‌شده: ' + n0(e.purchaseCount));
+    if (e.invoiceCount != null) out.push('تعداد فاکتور بررسی‌شده: ' + n0(e.invoiceCount));
+    return out;
+  }
+  function watchDetailLines(o) {
+    if (!o) return [];
+    var e = o.evidence;
+    var lines = [];
+    if (e && Array.isArray(e.components) && e.components.length) {
+      e.components.forEach(function (c) {
+        if (!c || !c.evidence) return;
+        var tag = COMPONENT_LABELS[c.category] || 'مؤلفه';
+        evidenceLines(c.evidence, o.productId).forEach(function (l) { lines.push(tag + ' — ' + l); });
+      });
+    } else {
+      lines = evidenceLines(e, o.productId);
+    }
+    return lines;
+  }
+  function detailsHtml(lines, label) {
+    if (!lines || !lines.length) return '';
+    return '<details class="bp-more"><summary>' + esc(label || 'جزئیات') + '</summary><div class="bp-more-body">' +
+      lines.map(function (l) { return '<div class="bp-more-line">' + esc(l) + '</div>'; }).join('') +
+      '</div></details>';
+  }
+
+  /* ---------- Customer × product context (Pre-Visit / Picker / Invoice row) ---------- */
+  function relDays(iso) {
+    if (!iso || typeof _behaviorDaysDiff !== 'function' || typeof todayISO !== 'function') return '';
+    var d = _behaviorDaysDiff(iso, todayISO());
+    if (d == null || d < 0) return '';
+    if (d === 0) return 'امروز';
+    if (d === 1) return 'دیروز';
+    return n0(d) + ' روز پیش';
+  }
+  function lastOfferMap(cid) {
+    var map = Object.create(null);
+    var c = (data.customers || []).find(function (x) { return x && x.id === cid; });
+    if (!c || !Array.isArray(c.visits)) return map;
+    c.visits.forEach(function (v) {
+      if (!v || !Array.isArray(v.offeredProducts)) return;
+      var key = (v.date || '') + ' ' + (v.time || '');
+      v.offeredProducts.forEach(function (op) {
+        if (!op || !op.productId) return;
+        var cur = map[op.productId];
+        if (!cur || key >= cur.key) {
+          map[op.productId] = { key: key, date: v.date, reaction: op.reaction, reason: op.rejectionReason || null, stockSource: op.stockSource || null };
+        }
+      });
+    });
+    return map;
+  }
+  function lastPurchaseMap(cid, excludeInvoiceId) {
+    var map = Object.create(null);
+    (data.invoices || []).forEach(function (inv) {
+      if (!inv || inv.customerId !== cid) return;
+      if (excludeInvoiceId && inv.id === excludeInvoiceId) return;
+      (inv.items || []).forEach(function (it) {
+        if (!it || !it.productId || !(Number(it.qty) > 0)) return;
+        var d = String(inv.date || '');
+        if (!map[it.productId] || d > map[it.productId]) map[it.productId] = d;
+      });
+    });
+    return map;
+  }
+  /* Returns pid -> up to 2 lines [{t, tone:'warn'|'info'|'muted'}]. Built once per sheet. */
+  function productHints(cid, opts) {
+    opts = opts || {};
+    var offers = {}, buys = {}, watchByPid = Object.create(null), sigByPid = Object.create(null);
+    try { offers = lastOfferMap(cid); } catch (e1) { offers = {}; }
+    try { buys = lastPurchaseMap(cid, opts.excludeInvoiceId); } catch (e2) { buys = {}; }
+    try {
+      var occs = typeof getActiveWatchOccurrences === 'function' ? (getActiveWatchOccurrences(cid) || []) : [];
+      occs.forEach(function (o) {
+        if (!o || !o.productId) return;
+        var cur = watchByPid[o.productId];
+        if (!cur || lvRank(o.level) > lvRank(cur.level)) watchByPid[o.productId] = o;
+      });
+    } catch (e3) { watchByPid = Object.create(null); }
+    /* Confirmed signals that still hold for a specific product even when its Watch is no longer
+       active (e.g. resolved). Only signals whose own productId matches are kept. */
+    try {
+      var sigs = typeof extractCustomerSignals === 'function' ? (extractCustomerSignals(cid) || []) : [];
+      sigs.forEach(function (sg) {
+        if (!sg || sg.status !== 'active' || sg.type !== 'risk') return;
+        if (!sg.productId || sg.productId === 'multi') return;
+        if (!CONFIRMED_PRODUCT_SHORT[sg.category]) return;
+        var cur = sigByPid[sg.productId];
+        if (!cur || lvRank(sg.severity) > lvRank(cur.severity)) sigByPid[sg.productId] = sg;
+      });
+    } catch (e4) { sigByPid = Object.create(null); }
+
+    return function (pid) {
+      var lines = [];
+      var of = offers[pid];
+      if (of) {
+        var when = relDays(of.date);
+        if (of.reaction === 'rejected') {
+          if (of.reason === 'still_stock' && of.stockSource) {
+            lines.push({ t: stockShort(of.stockSource) + (when ? ' · ' + when : ''), tone: 'warn' });
+          } else if (of.reason === 'still_stock') {
+            lines.push({ t: 'بار قبل گفت هنوز موجودی دارد' + (when ? ' · ' + when : ''), tone: 'warn' });
+          } else {
+            var rl = reasonLabel(of.reason);
+            lines.push({ t: 'بار قبل رد کرد' + (rl ? ' — ' + rl : '') + (when ? ' · ' + when : ''), tone: 'warn' });
+          }
+        } else if (of.reaction === 'deferred') {
+          lines.push({ t: 'بار قبل گفت بعداً تصمیم می‌گیرد' + (when ? ' · ' + when : ''), tone: 'info' });
+        }
+      }
+      var w = watchByPid[pid];
+      var sgp = sigByPid[pid];
+      if (w && WATCH_SHORT[w.watchCategory]) lines.push({ t: WATCH_SHORT[w.watchCategory], tone: 'warn' });
+      else if (sgp) lines.push({ t: CONFIRMED_PRODUCT_SHORT[sgp.category], tone: 'warn' });
+      if (buys[pid]) {
+        var r = relDays(buys[pid]);
+        if (r) lines.push({ t: 'آخرین خرید: ' + r, tone: 'muted' });
+      }
+      return lines.slice(0, 2);
+    };
+  }
+  function hintHtml(lines) {
+    return (lines || []).map(function (l) {
+      return '<span class="bp-hint-line is-' + esc(l.tone || 'muted') + '">' + esc(l.t) + '</span>';
+    }).join('');
+  }
+
+  return {
+    fa: fa, n0: n0, n1: n1, lvRank: lvRank, pname: pname, qtyText: qtyText,
+    watchLabel: watchLabel, watchSentence: watchSentence, watchDetailLines: watchDetailLines,
+    detailsHtml: detailsHtml, evidenceLines: evidenceLines, namesText: namesText,
+    stockSentence: stockSentence, stockShort: stockShort, reasonLabel: reasonLabel,
+    relDays: relDays, productHints: productHints, hintHtml: hintHtml
+  };
+})();
+
 function openAddVisit(cid){
   const RESULT_CHIPS = [
     { value: VISIT_RESULTS[0], label: 'سفارش گرفته شد' },
@@ -1285,31 +1604,111 @@ function openAddVisit(cid){
   try {
     if (typeof customerBehavior === 'function') visitBehavior = customerBehavior(cid) || {};
   } catch (eVisitContext) { visitBehavior = {}; }
-  let visitWatchCount = 0;
+  const BP = window.BagheriPresent || null;
+  let visitWatches = [];
   let visitFollowUps = [];
   try {
-    if (typeof getActiveWatchOccurrences === 'function') {
-      visitWatchCount = (getActiveWatchOccurrences(cid) || []).length;
+    if (typeof getActiveWatchOccurrences === 'function') visitWatches = getActiveWatchOccurrences(cid) || [];
+    if (typeof getPendingWatchFollowUps === 'function') visitFollowUps = getPendingWatchFollowUps(cid) || [];
+  } catch (eVisitWatch) { visitWatches = []; visitFollowUps = []; }
+  let visitStory = '';
+  try {
+    if (typeof buildCustomerStory === 'function') {
+      const st = buildCustomerStory(cid);
+      visitStory = (st && st.summary) ? st.summary : '';
     }
-    if (typeof getPendingWatchFollowUps === 'function') {
-      visitFollowUps = getPendingWatchFollowUps(cid) || [];
+  } catch (eVisitStory) { visitStory = ''; }
+  let visitSignals = [];
+  try {
+    if (typeof extractCustomerSignals === 'function') {
+      visitSignals = (extractCustomerSignals(cid) || []).filter(function (s) { return s && s.status === 'active'; });
     }
-  } catch (eVisitWatch) { visitWatchCount = 0; visitFollowUps = []; }
+  } catch (eVisitSig) { visitSignals = []; }
+
+  /* Pre-Visit = "what must I not forget for this customer?" — compact, max 2 points,
+     chosen by existing severity/level only (nothing is recalculated here). */
+  const visitLast = visitBehavior.lastVisit || null;
+  const visitPoints = [];
+  const visitPointProducts = {};
+  function addVisitPoint(text, tone, pid){
+    if (!text || visitPoints.length >= 2) return;
+    visitPoints.push({ text: text, tone: tone });
+    if (pid) visitPointProducts[pid] = true;
+  }
+  const visitMoneySig = visitSignals.find(function (s) { return s.category === 'PAYMENT_OVERDUE' || s.category === 'CHECK_BOUNCED'; });
+  if (visitMoneySig) addVisitPoint(visitMoneySig.reason, 'danger');
+  if (BP && visitLast && Array.isArray(visitLast.offeredProducts)) {
+    const rej = visitLast.offeredProducts.filter(function (op) { return op && op.reaction === 'rejected'; });
+    const pick = rej.find(function (op) { return op.rejectionReason === 'still_stock' && op.stockSource; }) || rej[0];
+    if (pick) {
+      const pn = BP.pname(pick.productId, '');
+      const rl = BP.reasonLabel(pick.rejectionReason);
+      if (pn) {
+        addVisitPoint(
+          (pick.rejectionReason === 'still_stock' && pick.stockSource)
+            ? '«' + pn + '»: ' + BP.stockSentence(pick.stockSource)
+            : '«' + pn + '» را ویزیت قبلی رد کرد' + (rl ? ' (' + rl + ')' : '') + '.',
+          'warn', pick.productId
+        );
+      }
+    }
+  }
+  let visitUsedWatch = false;
+  if (BP && visitWatches.length) {
+    const sortedW = visitWatches.slice().sort(function (a, b) { return BP.lvRank(b.level) - BP.lvRank(a.level); });
+    const w = sortedW.find(function (o) { return !(o.productId && visitPointProducts[o.productId]); });
+    if (w) {
+      visitUsedWatch = true;
+      addVisitPoint((w.productName ? '«' + w.productName + '»: ' : '') + BP.watchSentence(w), 'warn', w.productId);
+    }
+  }
+  if (BP && !visitUsedWatch && !visitStory) {
+    const riskSig = visitSignals
+      .filter(function (s) { return s !== visitMoneySig && s.type === 'risk' && s.reason && !(s.productId && visitPointProducts[s.productId]); })
+      .sort(function (a, b) { return BP.lvRank(b.severity) - BP.lvRank(a.severity); })[0];
+    if (riskSig) addVisitPoint(riskSig.reason, 'warn', riskSig.productId);
+  }
+
+  let visitLastHtml = '';
+  if (visitLast) {
+    const when = BP ? BP.relDays(visitLast.date) : '';
+    visitLastHtml =
+      '<div class="bp-pre-last">' +
+        '<div class="bp-pre-label">آخرین پیگیری' + (when ? ' · ' + esc(when) : '') + '</div>' +
+        (visitLast.result ? '<div class="bp-pre-line">' + esc(visitLast.result) + '</div>' : '') +
+        (visitLast.nextAction ? '<div class="bp-pre-line">اقدام بعدی قبلی: ' + esc(visitLast.nextAction) + '</div>' : '') +
+        (visitLast.note ? '<div class="bp-pre-note">' + esc(visitLast.note) + '</div>' : '') +
+      '</div>';
+  }
   const followUpReminderHtml = visitFollowUps.length
-    ? '<div class="visit-watch-followups"><div class="visit-watch-followups-title">پیگیری‌های منتظر برای این مشتری</div>' +
-      visitFollowUps.map(function (o) {
-        return '<div class="visit-watch-followup-item"><div><strong>' + esc(o.productName ? ('«' + o.productName + '»') : 'همان موضوع قبلی') + '</strong> — ' + esc(o.generatedReason || 'سؤال قبلی را پیگیری کنید') + '</div>' +
-          (o.evidence && o.evidence.comparison ? '<div class="sub">شاهد: ' + esc(o.evidence.comparison) + '</div>' : '') +
-          (o.reason && o.reason.comment ? '<div class="sub">یادداشت: ' + esc(o.reason.comment) + '</div>' : '') +
+    ? '<div class="visit-watch-followups"><div class="bp-pre-label">پیگیری‌های منتظر</div>' +
+      visitFollowUps.slice(0, 2).map(function (o) {
+        const sentence = BP ? BP.watchSentence(o) : (o.generatedReason || '');
+        return '<div class="visit-watch-followup-item">' +
+          '<div class="bp-pre-line"><strong>' + esc(o.productName ? ('«' + o.productName + '»') : 'همان موضوع قبلی') + '</strong>' + (sentence ? ' — ' + esc(sentence) : '') + '</div>' +
+          (o.reason && o.reason.comment ? '<div class="bp-pre-note">' + esc(o.reason.comment) + '</div>' : '') +
           '</div>';
-      }).join('') + '</div>'
+      }).join('') +
+      (visitFollowUps.length > 2 ? '<div class="bp-pre-note">و ' + (BP ? BP.n0(visitFollowUps.length - 2) : (visitFollowUps.length - 2)) + ' پیگیری دیگر</div>' : '') +
+      '</div>'
     : '';
-  const lastVisitDate = visitBehavior.lastVisit && visitBehavior.lastVisit.date
-    ? faDate(visitBehavior.lastVisit.date)
-    : '—';
-  const lastInvoiceDate = visitBehavior.lastInvoiceDate
-    ? faDate(visitBehavior.lastInvoiceDate)
-    : '—';
+  const lastInvoiceText = visitBehavior.lastInvoiceDate
+    ? ((BP && BP.relDays(visitBehavior.lastInvoiceDate)) || faDate(visitBehavior.lastInvoiceDate))
+    : '';
+  const visitPreHtml =
+    '<div class="visit-precontext bp-pre">' +
+      '<div class="visit-precontext-title">' + esc(visitCustomer ? visitCustomer.name : 'مشتری') + '</div>' +
+      (visitStory ? '<div class="bp-pre-story">' + esc(visitStory) + '</div>' : '') +
+      visitLastHtml +
+      (visitPoints.length
+        ? '<div class="bp-pre-points">' + visitPoints.map(function (pt) {
+            return '<div class="bp-pre-point is-' + esc(pt.tone) + '">' + esc(pt.text) + '</div>';
+          }).join('') + '</div>'
+        : '') +
+      followUpReminderHtml +
+      (lastInvoiceText ? '<div class="visit-precontext-grid"><span>آخرین خرید: ' + esc(lastInvoiceText) + '</span></div>' : '') +
+    '</div>';
+  const visitHints = BP ? BP.productHints(cid) : null;
 
   function chipBtn(group, value, label){
     return '<button type="button" class="chip-opt" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
@@ -1317,20 +1716,16 @@ function openAddVisit(cid){
 
   openSheet(
     '<h3>ثبت ویزیت</h3>' +
-    '<div class="visit-precontext">' +
-      '<div class="visit-precontext-title">' + esc(visitCustomer ? visitCustomer.name : 'مشتری') + '</div>' +
-      '<div class="visit-precontext-grid">' +
-        '<span>آخرین خرید: ' + esc(lastInvoiceDate) + '</span>' +
-        '<span>آخرین ویزیت: ' + esc(lastVisitDate) + '</span>' +
-        '<span>هشدار فعال: ' + esc(String(visitWatchCount)) + ' مورد</span>' +
-      '</div>' +
-      followUpReminderHtml +
-    '</div>' +
+    visitPreHtml +
     '<div style="display:flex;gap:8px;">' +
       '<div class="field" style="flex:1;"><label>تاریخ</label>' + shamsiDateInputHTML('f-date', todayISO()) + '</div>' +
       '<div class="field" style="flex:1;"><label>ساعت</label><input id="f-time" type="time" value="' + nowHHMM() + '"></div>' +
     '</div>' +
     '<div id="visit-card-stage" class="visit-card-stage" aria-live="polite"></div>' +
+    '<div class="field bp-next-field" style="margin-top:12px;"><label for="f-next-action">اقدام بعدی (اختیاری)</label>' +
+      '<select id="f-next-action"><option value="">بدون اقدام</option>' +
+      VISIT_NEXT_ACTIONS.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('') +
+      '</select></div>' +
     '<div class="field" style="margin-top:12px;"><label>یادداشت کوتاه (اختیاری)</label><input id="f-visit-note" placeholder="اختیاری" autocomplete="off"></div>' +
     '<div class="btn-row visit-save-actions" style="margin-top:8px;">' +
       '<button type="button" class="btn" id="save-visit">ثبت و پایان</button>' +
@@ -1344,8 +1739,18 @@ function openAddVisit(cid){
     pendingProductId: null,
     pendingReaction: null,
     pendingRejectionReason: null,
+    nextAction: null, // optional; one of VISIT_NEXT_ACTIONS
     step: 'result', // result | product | reaction | rejectReason | stockSource | another | done
   };
+  const nextActionEl = document.getElementById('f-next-action');
+  if (nextActionEl) {
+    nextActionEl.addEventListener('change', function () {
+      const v = nextActionEl.value;
+      state.nextAction = (v && VISIT_NEXT_ACTIONS.indexOf(v) >= 0) ? v : null;
+      const sheetEl = nextActionEl.closest('.sheet');
+      if (sheetEl) sheetEl.dataset.dirty = '1';
+    });
+  }
   const stage = document.getElementById('visit-card-stage');
 
   function validOffered(){
@@ -1416,6 +1821,10 @@ function openAddVisit(cid){
       html =
         '<div class="visit-card visit-card-enter" data-visit-step="reaction">' +
           '<div class="q-title">واکنش مشتری؟ <span class="sub" style="display:inline;font-weight:400;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
+          (function () {
+            const hl = visitHints ? visitHints(state.pendingProductId) : [];
+            return hl.length ? '<div class="bp-hint">' + BP.hintHtml(hl) + '</div>' : '';
+          })() +
           '<div class="chip-wrap">' + REACTION_CHIPS.map(function (o) {
             return chipBtn('reaction', o.value, o.label);
           }).join('') + '</div>' +
@@ -1614,6 +2023,7 @@ function openAddVisit(cid){
       ordered: state.result === VISIT_RESULTS[0],
     };
     if (note) visit.note = note;
+    if (state.nextAction && VISIT_NEXT_ACTIONS.indexOf(state.nextAction) >= 0) visit.nextAction = state.nextAction;
     if (offered.length) visit.offeredProducts = offered;
 
     c.visits = c.visits || [];
@@ -1761,6 +2171,23 @@ function openInvoiceForm(cid, editInv, opts){
     ? editInv.items.map(it=>({productId:it.productId, qty:it.qty, price:it.price, discount:it.discount||0, buyPrice:it.buyPrice}))
     : [{productId:'', qty:1, price:0, discount:0}];
   const cust = data.customers.find(c=>c.id===cid); // presentation only: Customer Context header
+  // Presentation only: one-time per-sheet context map (last offer/reject, stock source,
+  // relevant active watch, last purchase). Reads existing facts; never writes or recalculates.
+  let productHintFn = null;
+  function productHint(productId){
+    if(!productHintFn){
+      try{
+        productHintFn = window.BagheriPresent
+          ? window.BagheriPresent.productHints(cid, {excludeInvoiceId: editInv ? editInv.id : null})
+          : function(){ return []; };
+      }catch(eHint){ productHintFn = function(){ return []; }; }
+    }
+    try{ return productHintFn(productId) || []; }catch(eHint2){ return []; }
+  }
+  function productIntelLine(productId){
+    const l = productHint(productId).filter(h=>h.tone!=='muted')[0];
+    return l ? l.t : '';
+  }
   const existingCheck = editInv ? data.checks.find(c=>c.invoiceId===editInv.id) : null;
   let cashPaid = editInv ? (editInv.cashPaid||0) : 0;
   let cardPaid = editInv ? (editInv.cardPaid||0) : 0;
@@ -1869,6 +2296,12 @@ function openInvoiceForm(cid, editInv, opts){
         avgCost.textContent = `میانگین خرید: ${toman(fifoCost)} ت`;
         avgCost.classList.toggle('is-below', (r.price||0) < fifoCost);
       }
+      const intelEl = line.querySelector('.inv-line-intel');
+      if(intelEl){
+        const intelText = productIntelLine(prod.id);
+        intelEl.textContent = intelText;
+        intelEl.hidden = !intelText;
+      }
       const lastAny = lastSaleAnyCustomer(prod.id);
       const lastCust = lastSaleToCustomer(prod.id);
       const marketAny = line.querySelector('[data-market="last-any"]');
@@ -1904,14 +2337,20 @@ function openInvoiceForm(cid, editInv, opts){
     const activeOnly = data.products.filter(p=>p.active!==false);
     const list = (q ? activeOnly.filter(p=>(p.name||'').includes(q)) : activeOnly).slice(0, 40);
     if(!list.length) return `<div class="prod-drop-empty">کالایی پیدا نشد</div>`;
-    return list.map(p=>`
+    return list.map(p=>{
+      const hl = productHint(p.id);
+      return `
       <div class="prod-drop-item" data-row="${idx}" data-pid="${esc(p.id)}" role="button" tabindex="0">
         <span class="prod-drop-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></span>
-        <span class="prod-drop-name">${esc(p.name)}</span>
+        <span class="prod-drop-main">
+          <span class="prod-drop-name">${esc(p.name)}</span>
+          ${hl.length ? `<span class="prod-drop-hint">${window.BagheriPresent.hintHtml(hl)}</span>` : ''}
+        </span>
         <span class="prod-drop-stock">${enToFaDigits(String(p.stockQty||0))}</span>
         <span class="prod-drop-chevron" aria-hidden="true">›</span>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
   function productDropPanelHtml(idx){
     return `
@@ -1932,6 +2371,7 @@ function openInvoiceForm(cid, editInv, opts){
       const rowFifo = prod ? invoiceFifoCost(prod.id) : 0;
       const rowLastAny = prod ? lastSaleAnyCustomer(prod.id) : null;
       const rowLastCustomer = prod ? lastSaleToCustomer(prod.id) : null;
+      const rowIntelText = prod ? productIntelLine(prod.id) : '';
       const priceDisp = (typeof formatLiveAmount==='function' && r.price) ? formatLiveAmount(String(r.price)) : (r.price||'');
       const label = prod ? esc(prod.name) : '';
       const lineAmt = (r.qty||0) * (r.price||0);
@@ -1951,6 +2391,7 @@ function openInvoiceForm(cid, editInv, opts){
           </span>
         </div>
         <div class="inv-line-avg-cost${prod && (r.price||0) < rowFifo?' is-below':''}" data-row="${idx}" style="display:${prod?'block':'none'}">${prod?`میانگین خرید: ${toman(rowFifo)} ت`:''}</div>
+        <div class="inv-line-intel" data-row="${idx}"${rowIntelText?'':' hidden'}>${esc(rowIntelText)}</div>
         <details class="inv-line-market-details" data-row="${idx}" ${prod?'':'hidden'}>
           <summary>اطلاعات بازار</summary>
           <div class="inv-line-market-row"><span>آخرین فروش کلی</span><strong data-market="last-any">${rowLastAny?`${toman(rowLastAny.price)} ت — ${faDate(rowLastAny.date)}`:'ثبت نشده'}</strong></div>
