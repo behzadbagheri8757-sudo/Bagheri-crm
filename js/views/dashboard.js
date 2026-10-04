@@ -58,7 +58,7 @@
   }
 
   function quickActionsHtml() {
-    const gameShortcut = '<a class="section-action" href="#/game">Sales Game ←</a>';
+    const gameShortcut = '<a class="section-action" href="#/game">مرکز بازی فروش ←</a>';
   function qaIco(name) { return dashboardIcon(name, 20); }
 
   return '<div class="dashboard-block dash-quick-actions-block">' +
