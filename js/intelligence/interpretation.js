@@ -55,17 +55,16 @@
       case 'LONG_NO_VISIT':
         return 'تأخیر در ویزیت';
       case 'SKU_DELAY':
-        return 'تأخیر خرید' + name;
+        return 'تأخیر خرید SKU' + name;
       case 'SKU_QUANTITY_DROP':
-        return 'کاهش مقدار خرید' + name;
+        return 'کاهش مقدار SKU' + name;
       case 'SKU_FREQUENCY_DROP':
-        return 'کاهش تعداد خرید' + name;
+        return 'کاهش تناوب SKU' + name;
       case 'LINE_DROP':
-        return 'کم‌رنگ شدن خرید' + name;
+        return 'حذف خط محصول' + name;
       case 'MULTI_SKU_DECLINE':
-        return 'افت خرید چند کالا';
       case 'COMBINED_SKU_DETERIORATION':
-        return 'افت همزمان خرید چند کالا';
+        return 'تضعیف چند SKU';
       case 'KEY_PRODUCT_LOST':
         return 'از دست رفتن محصول کلیدی';
       case 'BASKET_SHRINK':
