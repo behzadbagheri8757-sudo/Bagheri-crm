@@ -926,8 +926,9 @@ let _modalHideTimer = null;
 /* In-app confirmation layer. It sits above an existing sheet when needed, so
    destructive actions can be confirmed without replacing/dismissing an
    in-flight form or changing its state. */
-function appConfirm(message, confirmLabel){
+function appConfirm(message, confirmLabel, cancelLabel){
   confirmLabel = confirmLabel || 'تأیید';
+  cancelLabel = cancelLabel || 'انصراف';
   return new Promise(function(resolve){
     const root = document.getElementById('modalRoot');
     if(!root){ resolve(false); return; }
@@ -935,8 +936,10 @@ function appConfirm(message, confirmLabel){
     layer.className = 'confirm-overlay';
     layer.setAttribute('role','alertdialog');
     layer.setAttribute('aria-modal','true');
-    layer.innerHTML = '<div class="confirm-card"><div class="confirm-message"></div><div class="btn-row"><button type="button" class="btn secondary" data-confirm-cancel>انصراف</button><button type="button" class="btn danger" data-confirm-ok>'+esc(confirmLabel)+'</button></div></div>';
+    layer.innerHTML = '<div class="confirm-card"><div class="confirm-message"></div><div class="btn-row"><button type="button" class="btn secondary" data-confirm-cancel></button><button type="button" class="btn danger" data-confirm-ok></button></div></div>';
     layer.querySelector('.confirm-message').textContent = String(message || 'ادامه می‌دهید؟');
+    layer.querySelector('[data-confirm-cancel]').textContent = String(cancelLabel);
+    layer.querySelector('[data-confirm-ok]').textContent = String(confirmLabel);
     root.appendChild(layer);
     let settled = false;
     function finish(value){
@@ -949,12 +952,64 @@ function appConfirm(message, confirmLabel){
     layer.querySelector('[data-confirm-ok]').addEventListener('click', function(){ finish(true); });
     layer.addEventListener('click', function(e){ if(e.target === layer) finish(false); });
     requestAnimationFrame(function(){
-      const ok = layer.querySelector('[data-confirm-ok]');
+      const ok = layer.querySelector('[data-confirm-cancel]');
       if(ok) ok.focus();
     });
   });
 }
 
+/* Central dirty-form guard. Only forms explicitly opened with dirtyCheck:true
+   participate; informational/filter sheets stay clean and keep their old UX. */
+let _dirtyGuardRoute = null;
+let _dirtyExitPromise = null;
+let _dirtyBeforeUnloadBound = false;
+function _dirtyBeforeUnloadHandler(e){
+  if(typeof window.__getAppDirtyState !== 'function') return;
+  if(!window.__getAppDirtyState()) return;
+  e.preventDefault();
+  e.returnValue = '';
+}
+function _syncDirtyBeforeUnload(){
+  const dirty = typeof window.__getAppDirtyState === 'function' && !!window.__getAppDirtyState();
+  if(dirty && !_dirtyBeforeUnloadBound){
+    window.addEventListener('beforeunload', _dirtyBeforeUnloadHandler);
+    _dirtyBeforeUnloadBound = true;
+  } else if(!dirty && _dirtyBeforeUnloadBound){
+    window.removeEventListener('beforeunload', _dirtyBeforeUnloadHandler);
+    _dirtyBeforeUnloadBound = false;
+  }
+}
+function _getActiveDirtySheet(){
+  const sheet = document.querySelector('#modalRoot .overlay.show .sheet');
+  if(!sheet || sheet.dataset.dirtyCheck !== '1' || sheet.dataset.dirty !== '1') return null;
+  return sheet;
+}
+function _setRouteDirtyState(dirty, clearFn){
+  _dirtyGuardRoute = dirty ? { clear: typeof clearFn === 'function' ? clearFn : function(){} } : null;
+  _syncDirtyBeforeUnload();
+}
+function _getAppDirtyState(){
+  return !!(_getActiveDirtySheet() || _dirtyGuardRoute);
+}
+window.__getAppDirtyState = _getAppDirtyState;
+window.__setRouteDirtyState = _setRouteDirtyState;
+window.__syncDirtyBeforeUnload = _syncDirtyBeforeUnload;
+window.__requestAppExit = function(reason){
+  if(_dirtyExitPromise) return _dirtyExitPromise;
+  if(window.__sheetSaveInFlight > 0) return Promise.resolve(false);
+  const sheet = _getActiveDirtySheet();
+  const routeDirty = _dirtyGuardRoute;
+  if(!sheet && !routeDirty){ _syncDirtyBeforeUnload(); return Promise.resolve(true); }
+  _dirtyExitPromise = appConfirm('تغییرات ذخیره نشده‌اند. می‌خواهید بدون ذخیره خارج شوید؟', 'خروج بدون ذخیره', 'ادامه ویرایش').then(function(ok){
+    if(!ok) return false;
+    if(sheet) sheet.dataset.dirty = '0';
+    if(routeDirty && typeof routeDirty.clear === 'function') routeDirty.clear();
+    _dirtyGuardRoute = null;
+    _syncDirtyBeforeUnload();
+    return true;
+  }).finally(function(){ _dirtyExitPromise = null; });
+  return _dirtyExitPromise;
+};
 
 function closeModal(){
   const overlay = document.getElementById('overlay');
@@ -969,6 +1024,13 @@ function closeModal(){
   const sheetEl = overlay.querySelector('.sheet');
   if(sheetEl) sheetEl.classList.remove('show');
   try{ document.body.classList.remove('modal-open'); }catch(_e){}
+  const closedSheet = sheetEl;
+  if(closedSheet && closedSheet.__escapeHandler){
+    document.removeEventListener('keydown', closedSheet.__escapeHandler);
+    closedSheet.__escapeHandler = null;
+  }
+  if(closedSheet && closedSheet.dataset.dirtyCheck === '1') closedSheet.dataset.dirty = '0';
+  _syncDirtyBeforeUnload();
   if(_modalHideTimer){ clearTimeout(_modalHideTimer); }
   _modalHideTimer = setTimeout(() => {
     _modalHideTimer = null;
@@ -1037,20 +1099,32 @@ function openSheet(html, opts){
   try{ document.body.classList.add('modal-open'); }catch(_e){}
   const overlay = document.getElementById('overlay');
   const sheet = overlay.querySelector('.sheet');
+  const escapeHandler = function(e){
+    if(e.key !== 'Escape' || !overlay.classList.contains('show')) return;
+    if(document.querySelector('#modalRoot .confirm-overlay')) return;
+    e.preventDefault();
+    Promise.resolve(window.__requestAppExit('escape')).then(function(ok){ if(ok) closeModal(); });
+  };
+  sheet.__escapeHandler = escapeHandler;
+  document.addEventListener('keydown', escapeHandler);
   if (opts.dirtyCheck) {
     sheet.dataset.dirtyCheck = '1';
     sheet.dataset.dirty = '0';
-    sheet.addEventListener('input', function(){ sheet.dataset.dirty = '1'; });
-    sheet.addEventListener('change', function(){ sheet.dataset.dirty = '1'; });
+    const markDirty = function(){
+      sheet.dataset.dirty = '1';
+      _syncDirtyBeforeUnload();
+    };
+    sheet.addEventListener('input', markDirty);
+    sheet.addEventListener('change', markDirty);
   }
   requestAnimationFrame(() => {
     overlay.classList.add('show');
     sheet.classList.add('show');
   });
-  overlay.addEventListener('click', async (e)=>{ if(e.target.id==='overlay'){ if(sheet.dataset.dirtyCheck === '1' && sheet.dataset.dirty === '1'){ if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌رود؟')) closeModal(); } else closeModal(); } });
+  overlay.addEventListener('click', async (e)=>{ if(e.target.id==='overlay'){ if(await window.__requestAppExit('backdrop')) closeModal(); } });
   overlay.addEventListener('touchmove', function(e){
     if(!e.target.closest('.sheet')) e.preventDefault();
   }, {passive:false});
-  document.getElementById('closeX').addEventListener('click', async function(){ if(sheet.dataset.dirtyCheck === '1' && sheet.dataset.dirty === '1'){ if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌رود؟')) closeModal(); } else closeModal(); });
-  bindSheetDragToDismiss(sheet, sheet.querySelector('.sheet-handle'), async function(){ if(sheet.dataset.dirtyCheck === '1' && sheet.dataset.dirty === '1'){ if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌رود؟')) closeModal(); } else closeModal(); });
+  document.getElementById('closeX').addEventListener('click', async function(){ if(await window.__requestAppExit('close')) closeModal(); });
+  bindSheetDragToDismiss(sheet, sheet.querySelector('.sheet-handle'), async function(){ if(await window.__requestAppExit('drag')) closeModal(); });
 }

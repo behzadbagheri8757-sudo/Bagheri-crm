@@ -28,6 +28,11 @@
   let lastSeq = 0;
   let activeGhost = null;
   let activeGhostTimer = null;
+  let lastCommittedHash = '';
+  let suppressHashchange = false;
+  let allowHashchange = false;
+  let pendingExternalNavigation = null;
+  let externalGuardPromise = null;
 
   function normalizePath(raw) {
     if (!raw || raw === '') return '/';
@@ -165,9 +170,10 @@
         reducedMotion = !!(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches);
       } catch (e) { /* ignore */ }
 
-      // A route change must not leave a sheet mounted over the new route.
-      // If a save is in flight, let its continuation finish first; its own
-      // success/error path owns the sheet lifecycle.
+      // Route transitions are allowed to mount only after the central dirty
+      // guard has approved leaving the current sheet/form. navigate() guards
+      // programmatic navigation; this branch is only reached for an already
+      // approved hashchange (or the initial route).
       if(!(global.__sheetSaveInFlight > 0)){
         try { if(typeof global.closeModal === 'function') global.closeModal(); } catch(_e) {}
         try {
@@ -274,6 +280,7 @@
         requestAnimationFrame(function () {
           try { window.scrollTo(0, saved != null ? saved : 0); } catch (e) {}
         });
+        lastCommittedHash = hash;
       }
     } finally {
       resolving = false;
@@ -306,13 +313,23 @@
       if (typeof ViewHost !== 'undefined' && ViewHost.refreshCurrent) ViewHost.refreshCurrent();
       return;
     }
-    try { scrollPositions.set(cur, window.scrollY || window.pageYOffset || 0); } catch (e) {}
-    location.hash = p + q;
-    // hashchange will call resolve; if hash is already same in some browsers, force resolve
-    try {
-      navSeq++;
-      history.replaceState({ navSeq: navSeq, isBack: !!(opts && opts.isBack) }, '', location.hash);
-    } catch (e) { /* ignore — direction detection just falls back to 'none' */ }
+    const commit = function(){
+      try { scrollPositions.set(cur, window.scrollY || window.pageYOffset || 0); } catch (e) {}
+      allowHashchange = true;
+      location.hash = p + q;
+      try {
+        navSeq++;
+        history.replaceState({ navSeq: navSeq, isBack: !!(opts && opts.isBack) }, '', location.hash);
+      } catch (e) { /* ignore — direction detection just falls back to 'none' */ }
+    };
+    if(typeof global.__requestAppExit === 'function'){
+      if(externalGuardPromise) return;
+      externalGuardPromise = Promise.resolve(global.__requestAppExit('route')).then(function(ok){
+        if(ok) commit();
+      }).finally(function(){ externalGuardPromise = null; });
+      return;
+    }
+    commit();
   }
 
   /** Explicit back-intent navigation (e.g. header Back button), which always
@@ -350,6 +367,40 @@
         suppressNextHashchangeOnce = false;
         return;
       }
+      if (allowHashchange) {
+        allowHashchange = false;
+        resolve();
+        return;
+      }
+      if (suppressHashchange) {
+        suppressHashchange = false;
+        const pending = pendingExternalNavigation;
+        pendingExternalNavigation = null;
+        if (pending && typeof global.__requestAppExit === 'function') {
+          Promise.resolve(global.__requestAppExit('external-route')).then(function(ok){
+            if(!ok) return;
+            allowHashchange = true;
+            history.go(-pending.restoreDelta);
+          });
+        }
+        return;
+      }
+      const dirty = typeof global.__getAppDirtyState === 'function' && global.__getAppDirtyState();
+      if (dirty || global.__sheetSaveInFlight > 0) {
+        const targetHash = location.hash || '#/';
+        const previousHash = lastCommittedHash || '#/';
+        if(targetHash === previousHash) { resolve(); return; }
+        let restoreDelta = -1; // direct hash/link navigation creates a new entry
+        try {
+          const st = history.state;
+          if(st && typeof st.navSeq === 'number' && st.navSeq < lastSeq) restoreDelta = 1;
+          else if(st && typeof st.navSeq === 'number' && st.navSeq > lastSeq) restoreDelta = -1;
+        } catch(_e) {}
+        pendingExternalNavigation = { targetHash: targetHash, restoreDelta: restoreDelta };
+        suppressHashchange = true;
+        history.go(restoreDelta);
+        return;
+      }
       resolve();
     });
     // Initial: if no hash, set default without firing duplicate if possible
@@ -366,6 +417,7 @@
       // Covers browsers where the hashchange above never fires at all.
       resolve();
     } else {
+      lastCommittedHash = location.hash || '#/';
       resolve();
     }
   }

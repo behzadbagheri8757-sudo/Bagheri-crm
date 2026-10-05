@@ -557,8 +557,13 @@ const _INTEL_CONFIRMED_CATEGORIES = new Set([
 const _INTEL_FEEDBACK_REASONS = new Set(['competitor_bought','still_stock','no_need','price_issue','liquidity']);
 const _INTEL_FEEDBACK_SOURCES = new Set(['visit','invoice']);
 const _INTEL_BASELINE_REASONS = new Set(['establish','shift']);
-function _validateIntelligenceBundle(bundle, customerIds, productIds){
+function _validateIntelligenceBundle(bundle, customerIds, productIds, products, analysisGroups){
   if(!_isPlainObject(bundle)) return false;
+  // Family identity (runtime: familyId = product.analysisGroupId || product.id) is derived
+  // from the backup's own products/analysisGroups — never hard-coded.
+  const groupIds=new Set((Array.isArray(analysisGroups)?analysisGroups:[]).map(g=>String(g&&g.id)));
+  const familyOf=new Map();
+  (Array.isArray(products)?products:[]).forEach(p=>{ if(p&&p.id!=null) familyOf.set(String(p.id),(p.analysisGroupId!=null&&p.analysisGroupId!=='')?String(p.analysisGroupId):String(p.id)); });
   if(bundle.dbVersion != null && Number(bundle.dbVersion) !== 3) return false;
   for(const k of ['occurrences','seller_feedback','baseline_cache']) if(!Array.isArray(bundle[k])) return false;
   const occKeys=new Set();
@@ -570,7 +575,7 @@ function _validateIntelligenceBundle(bundle, customerIds, productIds){
     if(!customerIds.has(String(parts[0]))) return false;
     if(!_INTEL_CONFIRMED_CATEGORIES.has(parts[1])) return false;
     const pid=parts.slice(2).join('|');
-    if(pid && pid!=='multi' && !productIds.has(String(pid))) return false;
+    if(pid && pid!=='multi' && !productIds.has(String(pid)) && !groupIds.has(String(pid))) return false;
     const dates=new Set();
     for(const d of row.dates){ if(!_isIsoDateOnly(d) || dates.has(d)) return false; dates.add(d); }
   }
@@ -596,7 +601,9 @@ function _validateIntelligenceBundle(bundle, customerIds, productIds){
     if(!Number.isInteger(Number(b.purchaseCount)) || Number(b.purchaseCount)<0) return false;
     if(!_isIsoTimestamp(b.updatedAt)) return false;
     if(b.reason != null && !_INTEL_BASELINE_REASONS.has(String(b.reason))) return false;
-    if(b.key !== String(b.customerId)+'|'+String(b.productId)) return false;
+    const bPid=String(b.productId), bFam=familyOf.get(bPid)||bPid, bPrefix=String(b.customerId)+'|';
+    // Runtime key = customerId|familyId; legacy customerId|productId (pre-Family records the runtime leaves untouched) stays valid.
+    if(b.key !== bPrefix+bFam && b.key !== bPrefix+bPid) return false;
   }
   return true;
 }
@@ -776,13 +783,13 @@ function validateBackupShape(parsed){
     // whitelist) must not reject the whole backup — CRM data (customers,
     // invoices, payments, etc.) is authoritative and independent of this
     // read-only, best-effort analytics layer. Drop just the bundle.
-    if(parsed.intelligence != null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)){
+    if(parsed.intelligence != null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds, parsed.products, parsed.analysisGroups)){
       try{ console.warn('backup intelligence bundle invalid — ignoring (CRM data unaffected)'); }catch(_e){}
       delete parsed.intelligence;
     }
   } else {
     if(parsed.prospectScout!=null && !_validateProspectBundle(parsed.prospectScout, customerIds, new Set(), schema)) return false;
-    if(parsed.intelligence!=null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds)){
+    if(parsed.intelligence!=null && !_validateIntelligenceBundle(parsed.intelligence, customerIds, productIds, parsed.products, parsed.analysisGroups)){
       try{ console.warn('backup intelligence bundle invalid — ignoring (CRM data unaffected)'); }catch(_e){}
       delete parsed.intelligence;
     }
@@ -841,7 +848,7 @@ async function restoreProspectScoutBundleStrict(bundle){
   return true;
 }
 async function restoreIntelligenceBundleStrict(bundle){
-  if(!_validateIntelligenceBundle(bundle,new Set((data.customers||[]).map(x=>String(x.id))),new Set((data.products||[]).map(x=>String(x.id))))) throw new Error('Intelligence bundle validation failed');
+  if(!_validateIntelligenceBundle(bundle,new Set((data.customers||[]).map(x=>String(x.id))),new Set((data.products||[]).map(x=>String(x.id))),data.products,data.analysisGroups)) throw new Error('Intelligence bundle validation failed');
   const db=await openIntelligenceDbForBackup();
   try{
     await runIntelligenceRestoreTx(db,bundle);

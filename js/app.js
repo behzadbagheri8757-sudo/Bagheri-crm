@@ -526,7 +526,7 @@ function openAddProduct(editId){
         </div>
       `).join('')}
     `:''}
-  `);
+  `, {dirtyCheck:true});
 
   async function persist(){
     const liveProduct = productId ? data.products.find(x=>x.id===productId) : null;
@@ -676,7 +676,7 @@ function openAddCustomer(editId){
       <div class="empty" style="padding:4px 0 0;text-align:right;font-size:.75rem;">بدهی مشتری از قبل از استفاده از این برنامه رو اینجا بزن. اگه خودت بهش بدهکاری (طلبکاره)، عدد رو منفی بزن. این مبلغ توی گزارش فروش/سود حساب نمی‌شه، فقط توی مانده حساب میاد.</div>
     </div>
     <div class="btn-row"><button class="btn" id="save-customer">ذخیره</button></div>
-  `);
+  `, {dirtyCheck:true});
   document.getElementById('save-customer').addEventListener('click', async (e)=>{
     await withSubmitGuard(e.currentTarget, async ()=>{
       const name = document.getElementById('f-name').value.trim();
@@ -1032,7 +1032,7 @@ function openEditStandalonePayment(cid, paymentId){
     <div class="field"><label>مبلغ (تومان)</label><input id="ep-amount" type="text" inputmode="decimal" value="${esc(amountStr)}"></div>
     <div class="field"><label>توضیح (اختیاری)</label><input id="ep-note" value="${esc(noteStr)}"></div>
     <div class="btn-row"><button class="btn" id="ep-save">ذخیره</button><button class="btn danger secondary" id="ep-delete">حذف دریافت</button></div>
-  `);
+  `, {dirtyCheck:true});
   document.getElementById('ep-method').addEventListener('change', e=>{ method=e.target.value; });
   document.getElementById('ep-date').addEventListener('input', e=>{ dateStr=e.target.value; });
   document.getElementById('ep-amount').addEventListener('input', e=>{ amountStr=e.target.value; });
@@ -1087,7 +1087,7 @@ function openAddCheck(cid){
     <div class="field"><label>مبلغ (تومان)</label><input id="f-amount" type="text" inputmode="decimal"></div>
     <div class="field"><label>تاریخ سررسید</label>${shamsiDateInputHTML('f-due', todayISO())}</div>
     <div class="btn-row"><button class="btn" id="save-check">ثبت</button></div>
-  `);
+  `, {dirtyCheck:true});
   document.getElementById('save-check').addEventListener('click', async (e)=>{
     await withSubmitGuard(e.currentTarget, async ()=>{
       const amount = numVal(document.getElementById('f-amount'));
@@ -2626,9 +2626,7 @@ function openInvoiceForm(cid, editInv, opts){
       if(genericClose) genericClose.style.display = 'none';
       const cancelBtn = document.getElementById('inv-cancel');
       if(cancelBtn) cancelBtn.addEventListener('click', async ()=>{
-        if(sheetEl && sheetEl.dataset.dirty === '1'){
-          if(await appConfirm('تغییرات ذخیره‌نشده از بین می‌روند. از فاکتور خارج می‌شوید؟')) closeModal();
-        } else closeModal();
+        if(await window.__requestAppExit('invoice-cancel')) closeModal();
       });
     })();
     if(_prevScrollTop){
@@ -3300,7 +3298,7 @@ function openAddSupplier(){
       <div class="empty" style="padding:4px 0 0;text-align:right;font-size:.75rem;">بدهی که از قبل از استفاده از این برنامه داری رو اینجا بزن.</div>
     </div>
     <div class="btn-row"><button class="btn" id="save-supplier">ذخیره</button></div>
-  `);
+  `, {dirtyCheck:true});
   document.getElementById('save-supplier').addEventListener('click', async (e)=>{
     await withSubmitGuard(e.currentTarget, async ()=>{
       const name = document.getElementById('f-name').value.trim();
