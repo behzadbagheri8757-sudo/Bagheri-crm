@@ -6,7 +6,7 @@
 
 (function (global) {
   let chkQuery = '';
-  let chkFilter = 'all'; // all | pending | cleared | dueSoon
+  let chkFilter = 'all'; // all | pending | cleared | dueSoon | overdue
   let chkSort = 'dueAsc'; // dueAsc | dueDesc | amountDesc | newest
 
   let searchHandler = null;
@@ -28,15 +28,27 @@
     return { label: 'در جریان', cls: 'accent-amber', key: 'pending' };
   }
 
+  /* تفاوت روز تقویمی تا سررسید (نسبت به نیمه‌شب امروز به وقت محلی).
+     منفی = معوق، ۰ = امروز، مثبت = آینده، null = تاریخ نامعتبر/نامشخص.
+     همهٔ برچسب‌ها و فیلترها از همین یک تابع استفاده می‌کنند تا با هم ناسازگار نشوند. */
+  function dueDiffDays(ch) {
+    if (!ch || !ch.dueDate) return null;
+    const dueMs = new Date(String(ch.dueDate).slice(0, 10) + 'T00:00:00').getTime();
+    if (!isFinite(dueMs)) return null;
+    const todayMs = new Date(todayISO() + 'T00:00:00').getTime();
+    return Math.round((dueMs - todayMs) / 86400000);
+  }
+
   function isDueSoon(ch) {
     if (ch.status === 'cleared') return false;
-    try {
-      const due = new Date(ch.dueDate);
-      const diffDays = (due - new Date()) / 86400000;
-      return diffDays <= 3;
-    } catch (e) {
-      return false;
-    }
+    const diff = dueDiffDays(ch);
+    return diff !== null && diff >= 0 && diff <= 3;
+  }
+
+  function isOverdue(ch) {
+    if (ch.status === 'cleared') return false;
+    const diff = dueDiffDays(ch);
+    return diff !== null && diff < 0;
   }
 
   function renderCheckListOnly() {
@@ -51,6 +63,7 @@
       return {
         ch, cust, inv, st,
         dueSoon: isDueSoon(ch),
+        overdue: isOverdue(ch),
         partyName: cust ? cust.name : '—',
       };
     });
@@ -68,6 +81,7 @@
     if (chkFilter === 'pending') rows = rows.filter(r => r.st.key === 'pending');
     else if (chkFilter === 'cleared') rows = rows.filter(r => r.st.key === 'cleared');
     else if (chkFilter === 'dueSoon') rows = rows.filter(r => r.dueSoon);
+    else if (chkFilter === 'overdue') rows = rows.filter(r => r.overdue);
 
     if (chkSort === 'dueDesc') rows.sort((a,b) => (b.ch.dueDate || '').localeCompare(a.ch.dueDate || ''));
     else if (chkSort === 'amountDesc') rows.sort((a,b) => (b.ch.amount || 0) - (a.ch.amount || 0));
@@ -93,13 +107,14 @@
       const invLink = ch.invoiceId
         ? ` · <a href="#/invoice?id=${encodeURIComponent(ch.invoiceId)}" class="tx-inline-link">فاکتور #${esc(String(r.inv ? r.inv.number : '—'))}</a>`
         : '';
-      const dueCls = r.dueSoon ? 'accent-rust' : '';
-      const statusCls = r.st.key === 'cleared' ? 'accent-olive' : (r.dueSoon ? 'accent-rust' : 'accent-amber');
+      const dueCls = (r.dueSoon || r.overdue) ? 'accent-rust' : '';
+      const statusCls = r.st.key === 'cleared' ? 'accent-olive' : ((r.dueSoon || r.overdue) ? 'accent-rust' : 'accent-amber');
       return `<div class="ledger-row tx-row" style="cursor:default;align-items:flex-start;">
         <span class="name" style="flex:1;min-width:0;">
           <a href="${partyHref}" class="tx-row-title" style="text-decoration:none;color:inherit;">${esc(r.partyName)}</a>
           <span class="sub">${ch.checkNumber ? 'ش ' + esc(ch.checkNumber) + ' · ' : ''}سررسید <span class="${dueCls}">${faDate(ch.dueDate)}</span>${invLink}</span>
           ${r.dueSoon && r.st.key === 'pending' ? '<span class="sub accent-rust">سررسید نزدیک</span>' : ''}
+          ${r.overdue && r.st.key === 'pending' ? '<span class="sub accent-rust">سررسید گذشته</span>' : ''}
         </span>
         <span class="filler"></span>
         <span class="amount tx-row-amount">
@@ -141,6 +156,7 @@
         ${chip('pending','در جریان')}
         ${chip('cleared','وصول‌شده')}
         ${chip('dueSoon','سررسید نزدیک')}
+        ${chip('overdue','چک سررسیدگذشته')}
       </div>
       <div class="tx-toolbar">
         <label class="tx-toolbar-label" for="check-sort">مرتب‌سازی</label>
@@ -228,7 +244,11 @@
     if (nav) nav.style.display = '';
 
     chkQuery = '';
-    chkFilter = 'all';
+    var validChkFilters = ['all', 'pending', 'cleared', 'dueSoon', 'overdue'];
+    var incomingFilter = params && params.filter;
+    chkFilter = (incomingFilter && validChkFilters.indexOf(incomingFilter) !== -1)
+      ? incomingFilter
+      : 'all';
     chkSort = 'dueAsc';
     drawChecksPage(root);
 

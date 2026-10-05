@@ -135,27 +135,117 @@
 
   function faDigits(n) { return String(n).replace(/[0-9]/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'[d]; }); }
 
+  /* ---------- Filters (Watches page) ----------
+     همه‌ی فیلترها فقط «نمایش» را محدود می‌کنند؛ هیچ Watch ای ساخته/تغییر داده نمی‌شود.
+       attention : هشدارهای فعال با شدت «زیاد» (همان سطح ذخیره‌شده؛ بازمحاسبه نمی‌شود)
+       unvisited : هشدارهای فعالِ مشتری‌ای که هنوز هیچ ویزیتی برایش ثبت نشده
+       check_due : هشدارهای فعالِ مشتری‌ای که چک وصول‌نشده‌ی معوق یا تا ۳ روز آینده دارد
+                   (همان تعریف صفحه‌ی چک‌ها: فقط status==='cleared' تسویه است)
+       followup  : خودِ موردهایی که فروشنده «بعداً پیگیری می‌کنم» زده — این‌ها status فعال
+                   ندارند و در فهرست عادی نیستند، پس فهرستشان جداست و ردیف‌هایشان به
+                   صفحه‌ی مشتری می‌رود (جزئیات هشدار فقط برای هشدار فعال کار می‌کند). */
+  var WATCH_FILTERS = [
+    { id: 'all',       label: 'همه' },
+    { id: 'attention', label: 'نیازمند توجه' },
+    { id: 'unvisited', label: 'ندیده‌شده' },
+    { id: 'check_due', label: 'چک سررسید' },
+    { id: 'followup',  label: 'پیگیری باز' }
+  ];
+  var WATCH_FILTER_HINTS = {
+    all: 'هر مورد یک نشانه است، نه لزوماً یک مشکل قطعی',
+    attention: 'هشدارهایی که شدتشان «زیاد» است',
+    unvisited: 'مشتریانی که هنوز ویزیت نشده‌اند',
+    check_due: 'مشتریانی که چک معوق یا نزدیک سررسید دارند',
+    followup: 'مواردی که قرار شد بعداً پیگیری کنی'
+  };
+  var watchFilter = 'all';
+
+  function isActiveCustomer(cid) {
+    if (typeof data === 'undefined' || !Array.isArray(data.customers)) return false;
+    var c = data.customers.find(function (x) { return x && x.id === cid; });
+    return !!c && c.active !== false;
+  }
+
+  /* مشتری‌هایی که چک وصول‌نشده‌ی معوق/تا ۳ روز آینده دارند (نیمه‌شب محلی، مثل صفحه‌ی چک‌ها). */
+  function customerIdsWithCheckDue() {
+    var ids = Object.create(null);
+    if (typeof data === 'undefined' || !Array.isArray(data.checks)) return ids;
+    var todayMs = new Date(todayISO() + 'T00:00:00').getTime();
+    data.checks.forEach(function (ch) {
+      if (!ch || ch.status === 'cleared' || !ch.dueDate || !ch.customerId) return;
+      var dueMs = new Date(String(ch.dueDate).slice(0, 10) + 'T00:00:00').getTime();
+      if (!isFinite(dueMs)) return;
+      if (Math.round((dueMs - todayMs) / 86400000) <= 3) ids[ch.customerId] = true;
+    });
+    return ids;
+  }
+
+  function customerIdsNeverVisited() {
+    var ids = Object.create(null);
+    if (typeof data === 'undefined' || !Array.isArray(data.customers)) return ids;
+    data.customers.forEach(function (c) {
+      if (c && !(Array.isArray(c.visits) && c.visits.length)) ids[c.id] = true;
+    });
+    return ids;
+  }
+
+  function buildFilterSets(occs) {
+    var dueIds = customerIdsWithCheckDue();
+    var unvisitedIds = customerIdsNeverVisited();
+    var followUps = [];
+    if (typeof getPendingWatchFollowUps === 'function') {
+      try {
+        followUps = (getPendingWatchFollowUps() || []).filter(function (o) { return o && isActiveCustomer(o.customerId); });
+      } catch (e) { followUps = []; }
+    }
+    return {
+      all: occs,
+      attention: occs.filter(function (o) { return o.level === 'high'; }),
+      unvisited: occs.filter(function (o) { return !!unvisitedIds[o.customerId]; }),
+      check_due: occs.filter(function (o) { return !!dueIds[o.customerId]; }),
+      followup: followUps
+    };
+  }
+
+  function filtersHtml(sets) {
+    return '<div class="bp-watch-filters" id="watch-filters" role="group" aria-label="فیلتر هشدارها">' +
+      WATCH_FILTERS.map(function (f) {
+        var n = sets[f.id].length;
+        var on = watchFilter === f.id;
+        return '<button type="button" class="chip bp-watch-chip' + (on ? ' active' : '') + (n === 0 && !on ? ' is-zero' : '') + '"' +
+          ' data-watch-filter="' + f.id + '" aria-pressed="' + (on ? 'true' : 'false') + '">' +
+          '<span class="bp-watch-chip-label">' + f.label + '</span>' +
+          '<span class="bp-watch-chip-count">' + faDigits(n) + '</span>' +
+        '</button>';
+      }).join('') +
+    '</div>';
+  }
+
   function renderWatchList(root) {
     if (!root) return;
     var occs = [];
     if (typeof getActiveWatchOccurrences === 'function') {
       try { occs = getActiveWatchOccurrences() || []; } catch (e) { occs = []; }
     }
-    if (!occs.length) {
+    var sets = buildFilterSets(occs);
+    if (!sets.all.length && !sets.followup.length) {
       root.innerHTML =
         '<div class="watch-page-head"><div><h2 class="section-title">هشدارهای زودهنگام</h2><div class="watch-page-hint">مواردی که فعلاً نیاز به بررسی دارند</div></div></div>' +
         '<div class="empty watch-empty">هشدار فعالی نیست</div>';
       return;
     }
 
+    var isFollowUp = watchFilter === 'followup';
+    var shown = sets[watchFilter] || sets.all;
+
     var groups = Object.create(null), order = [];
-    occs.slice().sort(function (a, b) {
+    shown.slice().sort(function (a, b) {
       var an = customerNameById(a.customerId), bn = customerNameById(b.customerId);
       var cmp = an.localeCompare(bn, 'fa');
       return cmp || String(a.id || '').localeCompare(String(b.id || ''));
     }).forEach(function (o) {
       var key = String(o.customerId || '');
-      if (!groups[key]) { groups[key] = { name: customerNameById(o.customerId), items: [] }; order.push(key); }
+      if (!groups[key]) { groups[key] = { cid: o.customerId, name: customerNameById(o.customerId), items: [] }; order.push(key); }
       groups[key].items.push(o);
     });
 
@@ -166,14 +256,17 @@
         var catLabel = categoryLabel(o.watchCategory);
         var sentence = humanSentence(o);
         var reviewed = !!o.reason;
-        return '<div class="watch-list-row tx-row" data-watch-id="' + esc(o.id) + '" role="link" tabindex="0">' +
+        var target = isFollowUp
+          ? ' data-watch-customer="' + esc(o.customerId) + '"'
+          : ' data-watch-id="' + esc(o.id) + '"';
+        return '<div class="watch-list-row tx-row"' + target + ' role="link" tabindex="0">' +
           '<div class="watch-list-main">' +
             '<div class="watch-list-title tx-row-title">' + esc(prodName || catLabel) + '</div>' +
             (sentence ? '<div class="watch-list-text">' + esc(sentence) + '</div>' : '') +
           '</div>' +
           '<div class="watch-list-meta">' +
             '<span class="watch-severity-badge watch-severity-' + esc(o.level || 'low') + '">' + esc(levelLabel(o.level)) + '</span>' +
-            (reviewed ? '<span class="watch-reviewed-badge is-reviewed">علت ثبت شده</span>' : '') +
+            (reviewed && !isFollowUp ? '<span class="watch-reviewed-badge is-reviewed">علت ثبت شده</span>' : '') +
           '</div>' +
         '</div>';
       }).join('');
@@ -183,25 +276,51 @@
       '</section>';
     }).join('');
 
+    if (!shown.length) {
+      html = '<div class="empty watch-empty">' + (watchFilter === 'all' ? 'هشدار فعالی نیست' : 'موردی با این فیلتر پیدا نشد') + '</div>';
+    }
+
+    var prevBar = root.querySelector('#watch-filters');
+    var prevScroll = prevBar ? prevBar.scrollLeft : 0;
+
     root.innerHTML =
-      '<div class="watch-page-head"><div><h2 class="section-title">هشدارهای زودهنگام</h2><div class="watch-page-hint">هر مورد یک نشانه است، نه لزوماً یک مشکل قطعی</div></div><span class="watch-total-count">' + faDigits(occs.length) + '</span></div>' +
+      '<div class="watch-page-head"><div><h2 class="section-title">هشدارهای زودهنگام</h2><div class="watch-page-hint">' + esc(WATCH_FILTER_HINTS[watchFilter] || WATCH_FILTER_HINTS.all) + '</div></div><span class="watch-total-count">' + faDigits(shown.length) + '</span></div>' +
+      filtersHtml(sets) +
       html;
+
+    var bar = root.querySelector('#watch-filters');
+    if (bar) {
+      if (prevScroll) bar.scrollLeft = prevScroll;
+      // چیپ فعال همیشه در دید باشد (مثلاً با ورود از لینک ?filter=followup)
+      var activeChip = bar.querySelector('.chip.active');
+      if (activeChip && !prevScroll && typeof activeChip.scrollIntoView === 'function') {
+        try { activeChip.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (eS) {}
+      }
+    }
+
+    function go(el) {
+      var chipEl = el.closest('[data-watch-filter]');
+      if (chipEl) {
+        var next = chipEl.getAttribute('data-watch-filter');
+        if (next && next !== watchFilter) { watchFilter = next; renderWatchList(root); }
+        return true;
+      }
+      var row = el.closest('[data-watch-id]');
+      if (row) { navigateToWatch(row.getAttribute('data-watch-id')); return true; }
+      var crow = el.closest('[data-watch-customer]');
+      if (crow) { AppRouter.navigate('/customer', { id: crow.getAttribute('data-watch-customer') }); return true; }
+      return false;
+    }
 
     if (listClickHandler) root.removeEventListener('click', listClickHandler);
     listClickHandler = function (e) {
-      var row = e.target.closest('[data-watch-id]');
-      if (!row) return;
-      e.preventDefault();
-      navigateToWatch(row.getAttribute('data-watch-id'));
+      if (go(e.target)) e.preventDefault();
     };
     root.addEventListener('click', listClickHandler);
     if (listKeydownHandler) root.removeEventListener('keydown', listKeydownHandler);
     listKeydownHandler = function (e) {
       if (e.key !== 'Enter' && e.key !== ' ') return;
-      var row = e.target.closest('[data-watch-id]');
-      if (!row) return;
-      e.preventDefault();
-      navigateToWatch(row.getAttribute('data-watch-id'));
+      if (go(e.target)) e.preventDefault();
     };
     root.addEventListener('keydown', listKeydownHandler);
   }
@@ -210,6 +329,9 @@
     if (!root) return function () {};
     listRootEl = root;
     var cancelled = false;
+
+    var incomingWatchFilter = params && params.filter;
+    watchFilter = WATCH_FILTERS.some(function (f) { return f.id === incomingWatchFilter; }) ? incomingWatchFilter : 'all';
 
     var nav = document.getElementById('nav');
     if (nav) nav.style.display = '';

@@ -299,6 +299,8 @@
     return level === 'critical' ? 'بحرانی' : level === 'high' ? 'زیاد' : level === 'medium' ? 'متوسط' : 'کم';
   }
 
+  var POSITIVE_SIGNAL_CATEGORIES = ['PURCHASE_GROWTH'];
+
   var CONFIRMED_TITLES = {
     PURCHASE_DECLINE_MILD: 'خرید کمتر شده',
     PURCHASE_DECLINE_SEVERE: 'خرید به‌طور محسوسی کمتر شده',
@@ -508,9 +510,15 @@
     var confirmedHtml = '';
     if (activeConfirmed.length) {
       var crows = activeConfirmed.map(function (sg) {
+        /* فقط سیگنال‌هایی که واقعاً خبر خوب‌اند سبز می‌شوند. type==='opportunity'
+           به‌تنهایی کافی نیست: «مدت زیادی ویزیت نشده» و (در حالت بازطبقه‌بندی)
+           «کالای کلیدی خریده نشده/افت سبد» هم opportunity هستند ولی خبر خوب نیستند. */
+        var isGood = sg.type === 'opportunity' && POSITIVE_SIGNAL_CATEGORIES.indexOf(sg.category) !== -1;
+        var cls = isGood ? 'watch-level-opportunity' : levelClass(sg.severity);
+        var lbl = isGood ? 'فرصت' : levelLabel(sg.severity);
         return '<div class="watch-confirmed-row">' +
           '<span class="bp-conf-text">' + (sg.productName ? '<strong>' + esc(sg.productName) + '</strong> — ' : '') + esc(sg.reason || '') + '</span>' +
-          '<span class="watch-level-label ' + levelClass(sg.severity) + '">' + esc(levelLabel(sg.severity)) + '</span>' +
+          '<span class="watch-level-label ' + cls + '">' + esc(lbl) + '</span>' +
           '</div>';
       }).join('');
       confirmedHtml = '<div class="card wide watch-confirmed-card">' +
@@ -769,23 +777,34 @@
        (the same functions power the Dashboard Action Queue). */
     let unifiedSummaryHtml = '';
     let recommendedAction = null;
+    let customerRiskLevel = null;
+    let customerHealthLabel = 'وضعیت عادی';
     {
       let priority = null, action = null;
       try { if (typeof calculateCustomerPriority === 'function') priority = calculateCustomerPriority(c.id, { ctx: ctx }); } catch (eP) { priority = null; }
       try { if (typeof calculateCustomerAction === 'function') action = calculateCustomerAction(c.id, priority, { ctx: ctx }); } catch (eA) { action = null; }
       recommendedAction = action && action.actionType !== 'no_action' ? action : null;
       const riskLevel = priority ? priority.riskLevel : null;
+      customerRiskLevel = riskLevel;
+      customerHealthLabel = riskLevel === 'critical' ? 'نیاز به رسیدگی فوری' : riskLevel === 'high' ? 'نیاز به توجه' : riskLevel === 'medium' ? 'قابل بررسی' : 'وضعیت عادی';
       const storyText = (priority && priority.customerStory && priority.customerStory.summary) ? priority.customerStory.summary : '';
       if (storyText) {
         unifiedSummaryHtml =
           '<div class="cust-summary ' + (riskLevel ? 'radar-risk-' + esc(riskLevel) : '') + '">' +
-          '<div class="cust-summary-story">' + esc(storyText) + '</div>' +
+          '<div class="cust-summary-label">خلاصه وضعیت</div><div class="cust-summary-story">' + esc(storyText) + '</div>' +
           '</div>';
       }
     }
 
     // P0 (what matters now) + follow-ups waiting for this customer — presentation of existing Truth.
     const watchData = loadWatchData(c.id, ctx);
+    var attRow = null;
+    try {
+      if (ctx && typeof ctx.receivableAttention === 'function') {
+        var attData = ctx.receivableAttention();
+        attRow = (attData.byCustomerId && attData.byCustomerId[c.id]) ? attData.byCustomerId[c.id] : null;
+      }
+    } catch (eAtt) { attRow = null; }
     const focus = customerFocusHtml(c.id, ctx, watchData);
     const followUpTopHtml = pendingFollowUpHtml(c.id);
 
@@ -1134,13 +1153,26 @@
       (c.address ? '<div>آدرس: ' + esc(c.address) + '</div>' : '') +
       (c.note ? '<div>یادداشت: ' + esc(c.note) + '</div>' : '') +
       '</div>' +
+      '<div class="bp-customer-health"><span class="bp-customer-health-label">وضعیت مشتری</span><span class="bp-customer-health-value ' + (customerRiskLevel ? 'radar-risk-' + esc(customerRiskLevel) : '') + '">' + esc(customerHealthLabel) + '</span></div>' +
       '<div class="customer-balance-block">' +
       '<div class="label">مانده حساب</div>' +
       '<div class="value ' +
       color +
       ' customer-balance-value">' +
       balanceLine +
-      '</div></div></div>' +
+      '</div></div>' +
+      (attRow
+        ? '<div class="bp-customer-attention">' +
+            '<span class="bp-attention-icon" aria-hidden="true">⚠️</span>' +
+            '<span>نیازمند پیگیری — ' +
+              toman(attRow.balance) + ' ت' +
+              (attRow.refKind === 'no_payment_history'
+                ? '، ' + toman(attRow.daysSince) + ' روز از آخرین فاکتور، بدون پرداخت'
+                : '، ' + toman(attRow.daysSince) + ' روز از آخرین پرداخت') +
+            '</span>' +
+          '</div>'
+        : '') +
+      '</div>' +
       unifiedSummaryHtml +
       focus.html +
       followUpTopHtml +
@@ -1157,13 +1189,14 @@
       '<button type="button" class="btn secondary" id="act-pay">ثبت پرداخت</button>' +
       '<button type="button" class="btn secondary" id="act-visit">ثبت ویزیت</button>' +
       '</div>' +
+      '<details class="bp-customer-secondary-actions"><summary>سایر عملیات</summary>' +
       '<div class="btn-row cust-actions-secondary" style="margin-bottom:16px;">' +
       '<button type="button" class="btn small secondary" id="act-check">ثبت چک</button>' +
       '<button type="button" class="btn small secondary" id="act-edit">ویرایش مشتری</button>' +
       '<button type="button" class="btn small secondary" id="act-location">اختصاص موقعیت</button>' +
       '<button type="button" class="btn small secondary" id="act-print-statement">صورت‌حساب</button>' +
       '<button type="button" class="btn small secondary" id="act-toggle-active">' + (c.active === false ? 'فعال‌سازی مشتری' : 'غیرفعال‌سازی مشتری') + '</button>' +
-      '</div>' +
+      '</div></details>' +
       '<div class="cards" style="margin-bottom:14px;">' +
       '<div class="card"><div class="label">مجموع خرید (فاکتورها)</div><div class="value">' +
       toman(t.invTotal) +
@@ -1287,6 +1320,112 @@
     bindWatchFollowUps(root, id);
   }
 
+
+  /* Central quick view for the Customers list. Presentation-only: it reuses
+     the frozen Priority/Watch/Balance outputs and existing action APIs. */
+  function openCustomerQuickView(cid) {
+    var c = (data.customers || []).find(function (x) { return x && x.id === cid; });
+    if (!c) return;
+    var ctx = typeof createComputationContext === 'function'
+      ? createComputationContext({ data: data })
+      : { aggregatePairMapCache: Object.create(null) };
+    var totals = customerTotals(cid, ctx) || { balance: 0 };
+    var priority = null;
+    try { priority = typeof calculateCustomerPriority === 'function' ? calculateCustomerPriority(cid, { ctx: ctx }) : null; } catch (e) { priority = null; }
+    var story = priority && priority.customerStory && priority.customerStory.summary ? priority.customerStory.summary : '';
+    var riskLevel = priority ? priority.riskLevel : null;
+    var health = riskLevel === 'critical' ? 'نیاز به رسیدگی فوری' : riskLevel === 'high' ? 'نیاز به توجه' : riskLevel === 'medium' ? 'قابل بررسی' : 'وضعیت عادی';
+    var watchData = loadWatchData(cid, ctx);
+    var focus = customerFocusHtml(cid, ctx, watchData).html || '';
+    // Quick View is deliberately non-destructive: no occurrence opens from here.
+    focus = focus
+      .replace(/\sdata-watch-occ="[^"]*"/g, '')
+      .replace(/\srole="button"/g, '')
+      .replace(/\stabindex="0"/g, '')
+      .replace(/\sclass="bp-topic is-tap"/g, ' class="bp-topic"')
+      .replace(/<span class="bp-topic-chev"[^>]*>.*?<\/span>/g, '');
+
+    var overlay = document.createElement('div');
+    overlay.className = 'bp-qv-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.innerHTML =
+      '<div class="bp-qv-card" role="document">' +
+        '<button type="button" class="bp-qv-close" aria-label="بستن">×</button>' +
+        '<div class="bp-qv-head">' +
+          '<div class="bp-qv-name">' + esc(c.name || 'مشتری') + '</div>' +
+          (c.ownerName ? '<div class="bp-qv-meta">' + esc(c.ownerName) + '</div>' : '') +
+          (c.phone ? '<div class="bp-qv-meta">' + esc(c.phone) + '</div>' : '') +
+          '<div class="bp-qv-balance ' + (totals.balance > 0 ? 'is-debt' : '') + '">' + esc(balanceStatusWord(totals.balance)) + (totals.balance !== 0 ? ': ' + toman(Math.abs(totals.balance)) + ' ت' : '') + '</div>' +
+          '<div class="bp-qv-health radar-risk-' + esc(riskLevel || 'normal') + '">' + esc(health) + '</div>' +
+        '</div>' +
+        (story ? '<div class="bp-qv-story"><div class="bp-qv-section-label">خلاصه وضعیت</div><div>' + esc(story) + '</div></div>' : '') +
+        (focus ? '<div class="bp-qv-focus">' + focus + '</div>' : '') +
+        '<div class="bp-qv-actions">' +
+          '<button type="button" class="btn primary" data-action="visit">ثبت ویزیت</button>' +
+          '<button type="button" class="btn secondary" data-action="invoice">ثبت فاکتور</button>' +
+          '<button type="button" class="btn secondary" data-action="payment">ثبت پرداخت</button>' +
+        '</div>' +
+        '<button type="button" class="bp-qv-full">مشاهده پروفایل کامل ›</button>' +
+      '</div>';
+    var modalRoot = document.getElementById('modalRoot');
+    if (!modalRoot) return;
+    modalRoot.innerHTML = '';
+    modalRoot.appendChild(overlay);
+    try { document.body.classList.add('modal-open'); } catch(_e) {}
+
+    var card = overlay.querySelector('.bp-qv-card');
+    var previousFocus = document.activeElement;
+    var closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      overlay.classList.add('is-closing');
+      setTimeout(function () {
+        try { document.body.classList.remove('modal-open'); } catch(_e) {}
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+      }, 180);
+      document.removeEventListener('keydown', onKeydown);
+    }
+    function onKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || e.target.closest('.bp-qv-close')) { e.preventDefault(); close(); return; }
+      var action = e.target.closest('[data-action]');
+      if (action) {
+        e.preventDefault();
+        var type = action.getAttribute('data-action');
+        close();
+        setTimeout(function () {
+          if (type === 'visit' && typeof openAddVisit === 'function') openAddVisit(cid);
+          else if (type === 'invoice' && typeof openAddInvoice === 'function') openAddInvoice(cid);
+          else if (type === 'payment' && typeof openAddTransaction === 'function') openAddTransaction(cid);
+        }, 185);
+        return;
+      }
+      if (e.target.closest('.bp-qv-full') || e.target.closest('.bp-topic')) {
+        e.preventDefault();
+        close();
+        setTimeout(function () { if (typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', { id: cid }); }, 185);
+      }
+    });
+    document.addEventListener('keydown', onKeydown);
+    requestAnimationFrame(function () { overlay.classList.add('is-open'); });
+    var closeBtn = overlay.querySelector('.bp-qv-close');
+    if (closeBtn) closeBtn.focus();
+
+    // Lightweight downward swipe-to-close; no document-level gesture handling.
+    var startY = null;
+    if (card) {
+      card.addEventListener('touchstart', function (e) { if (e.touches && e.touches[0]) startY = e.touches[0].clientY; }, { passive: true });
+      card.addEventListener('touchend', function (e) {
+        if (startY == null || !e.changedTouches || !e.changedTouches[0]) return;
+        if (e.changedTouches[0].clientY - startY > 70) close();
+        startY = null;
+      }, { passive: true });
+    }
+  }
+
   function mount(root, params) {
     let refreshToken = null;
     if (!root) return function () {};
@@ -1326,6 +1465,7 @@
   }
 
   global.CustomerView = { mount: mount, unmount: function () {} };
+  global.openCustomerQuickView = openCustomerQuickView;
   // Test / settings seams for Product Rejection Insight (UI-only)
   global.getProductRejectionThreshold = getProductRejectionThreshold;
   global.setProductRejectionThreshold = setProductRejectionThreshold;

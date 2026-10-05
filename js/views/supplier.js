@@ -277,7 +277,7 @@
             </select>
           </div>
           <div class="btn-row"><button class="btn" id="save-sup-check-edit">ذخیره</button></div>
-        `);
+        `, {dirtyCheck:true});
         document.getElementById('save-sup-check-edit').addEventListener('click', async function () {
           const amount = numVal(document.getElementById('f-amount'));
           if (amount <= 0) { showToast('مبلغ رو وارد کن'); return; }
@@ -491,7 +491,7 @@
       </div>
       <div class="field"><label>توضیح (اختیاری)</label><input id="f-note"></div>
       <div class="btn-row"><button class="btn" id="save-suppay">ثبت</button></div>
-    `);
+    `, {dirtyCheck:true});
 
     const methodEl = document.getElementById('f-method');
     const checkFields = document.getElementById('check-fields');
@@ -545,7 +545,7 @@
         <input id="f-opening" type="text" inputmode="decimal" value="${s.openingBalance || ''}">
       </div>
       <div class="btn-row"><button class="btn" id="save-sup-edit">ذخیره</button></div>
-    `);
+    `, {dirtyCheck:true});
     document.getElementById('save-sup-edit').addEventListener('click', async function (ev) {
       await withSubmitGuard(ev.currentTarget, async () => {
         const name = document.getElementById('f-name').value.trim();

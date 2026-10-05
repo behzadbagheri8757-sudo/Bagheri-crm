@@ -7,7 +7,7 @@
 (function (global) {
   let custQuery = '';
   let custFilter = 'all'; // all | debt | settled | credit
-  let custSortByDebt = false;
+  let custSortBy = 'name'; // name | debt | last_visit | priority
   let locFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
 
   let searchHandler = null;
@@ -82,8 +82,25 @@
       rows = rows.filter(function (x) { return x.c.locationId && (routeIds.indexOf(x.c.locationId) !== -1 || neighIds.indexOf(x.c.locationId) !== -1); });
     }
 
-    if (custSortByDebt) {
-      rows.sort(function (a, b) { return b.t.balance - a.t.balance; });
+    function lastVisitTime(c) {
+      const visits = Array.isArray(c.visits) ? c.visits : [];
+      if (!visits.length) return 0;
+      const v = visits.slice().sort(function (a, b) {
+        return (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || '');
+      })[0];
+      const d = v && v.date ? new Date(v.date + (v.time ? 'T' + v.time : 'T00:00:00')).getTime() : 0;
+      return Number.isFinite(d) ? d : 0;
+    }
+    if (custSortBy === 'debt') {
+      rows.sort(function (a, b) { return b.t.balance - a.t.balance || (a.c.name || '').localeCompare(b.c.name || '', 'fa'); });
+    } else if (custSortBy === 'last_visit') {
+      rows.sort(function (a, b) { return lastVisitTime(b.c) - lastVisitTime(a.c) || (a.c.name || '').localeCompare(b.c.name || '', 'fa'); });
+    } else if (custSortBy === 'priority') {
+      rows.sort(function (a, b) {
+        const ap = priorityMap[a.c.id] ? Number(priorityMap[a.c.id].priorityScore) || 0 : 0;
+        const bp = priorityMap[b.c.id] ? Number(priorityMap[b.c.id].priorityScore) || 0 : 0;
+        return bp - ap || (a.c.name || '').localeCompare(b.c.name || '', 'fa');
+      });
     } else {
       rows.sort(function (a, b) { return (a.c.name || '').localeCompare(b.c.name || '', 'fa'); });
     }
@@ -162,7 +179,9 @@
           '<span class="customer-row-balance-value">' +
           (t.balance !== 0 ? toman(Math.abs(t.balance)) + ' ت' : '') +
           '</span>' +
-          '</span></a>'
+          '</span>' +
+          '<button type="button" class="customer-row-detail-hitarea" data-customer-detail="' + esc(c.id) + '" aria-label="مشاهده جزئیات مشتری" title="مشاهده جزئیات مشتری"></button>' +
+          '</a>'
         );
       })
       .join('');
@@ -253,9 +272,17 @@
     root.innerHTML =
       '<div class="field"><input id="customer-search" placeholder="جستجوی نام، آدرس، تلفن، منطقه و…" value="' + esc(custQuery) + '" autocomplete="off"></div>' +
       '<div class="chip-row" id="customer-chips">' + chip('all','همه') + chip('debt','بدهکار') + chip('settled','تسویه') + chip('credit','بستانکار') + '</div>' +
+      '<div class="bp-customer-secondary-filters">' +
       '<div class="btn-row" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;">' +
-      '<button type="button" class="btn small secondary" id="customer-filter">فیلتر</button>' +
-      '<button type="button" class="btn small secondary" id="sort-debt">' + (custSortByDebt ? '✓ ' : '') + 'مرتب‌سازی بر اساس بدهی</button>' +
+      '<button type="button" class="btn small secondary" id="customer-filter">فیلتر منطقه</button>' +
+      '<label class="bp-sort-label" for="customer-sort">مرتب‌سازی</label>' +
+      '<select class="tx-toolbar-select" id="customer-sort">' +
+      '<option value="priority" ' + (custSortBy === 'priority' ? 'selected' : '') + '>اولویت</option>' +
+      '<option value="last_visit" ' + (custSortBy === 'last_visit' ? 'selected' : '') + '>آخرین ویزیت</option>' +
+      '<option value="debt" ' + (custSortBy === 'debt' ? 'selected' : '') + '>بدهی</option>' +
+      '<option value="name" ' + (custSortBy === 'name' ? 'selected' : '') + '>نام</option>' +
+      '</select>' +
+      '</div>' +
       '</div>' +
       '<div id="customer-filter-indicator" class="customer-filter-indicator" aria-live="polite"></div>' +
       '<div id="customer-list"></div>';
@@ -277,15 +304,25 @@
     const filterBtn = document.getElementById('customer-filter');
     filterBtn.addEventListener('click', renderLocationFilterSheet);
 
-    const sortBtn = document.getElementById('sort-debt');
-    sortHandler = function () { custSortByDebt = !custSortByDebt; sortBtn.textContent = (custSortByDebt ? '✓ ' : '') + 'مرتب‌سازی بر اساس بدهی'; renderCustomerListOnly(); };
-    sortBtn.addEventListener('click', sortHandler);
+    const sortEl = document.getElementById('customer-sort');
+    sortHandler = function (e) { custSortBy = e.target.value; renderCustomerListOnly(); };
+    if (sortEl) sortEl.addEventListener('change', sortHandler);
 
     const list = document.getElementById('customer-list');
     listClickHandler = function (e) {
+      const detailButton = e.target.closest('[data-customer-detail]');
+      if (detailButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateToCustomer(detailButton.getAttribute('data-customer-detail'));
+        return;
+      }
       const row = e.target.closest('[data-open-customer]');
       if (!row) return;
-      if (typeof isSpaShell === 'function' && isSpaShell()) { e.preventDefault(); navigateToCustomer(row.getAttribute('data-open-customer')); }
+      if (typeof isSpaShell === 'function' && isSpaShell()) {
+        e.preventDefault();
+        if (typeof openCustomerQuickView === 'function') openCustomerQuickView(row.getAttribute('data-open-customer'));
+      }
     };
     list.addEventListener('click', listClickHandler);
     updateLocationFilterIndicator();
@@ -307,7 +344,7 @@
 
     custQuery = '';
     custFilter = (params && ['debt', 'settled', 'credit'].indexOf(params.filter) !== -1) ? params.filter : 'all';
-    custSortByDebt = false;
+    custSortBy = 'priority';
     locFilter = { regionId: '', routeId: '', neighborhoodId: '', unassigned: false };
     custCtx = typeof createComputationContext === 'function'
       ? createComputationContext({ data: data })
@@ -345,8 +382,8 @@
       chipHandlers = [];
 
       if (sortHandler) {
-        const sb = document.getElementById('sort-debt');
-        if (sb) sb.removeEventListener('click', sortHandler);
+        const sb = document.getElementById('customer-sort');
+        if (sb) sb.removeEventListener('change', sortHandler);
       }
       sortHandler = null;
 
