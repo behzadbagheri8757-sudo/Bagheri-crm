@@ -37,7 +37,7 @@ const NAV_ITEMS = [
 const BOTTOM_NAV_ITEMS = [
   { id: 'dashboard', href: '#/dashboard', spaPath: '/dashboard', label: 'داشبورد',  iconKey: 'home' },
   { id: 'customers', href: '#/customers', spaPath: '/customers', label: 'مشتریان',  iconKey: 'users' },
-  { id: 'products',  href: '#/products',  spaPath: '/products',  label: 'اجناس',    iconKey: 'cube' },
+  { id: 'reports',   href: '#/reports',   spaPath: '/reports',   label: 'گزارش‌ها', iconKey: 'chartBar' },
   { id: 'invoices',  href: '#/invoices',  spaPath: '/invoices',  label: 'فاکتورها', iconKey: 'invoice' },
   { id: 'more',      href: '#/more',      spaPath: '/more',      label: 'بیشتر',    iconKey: 'more' },
 ];
@@ -46,13 +46,13 @@ const BOTTOM_NAV_ITEMS = [
 const MORE_NAV_ITEMS = [
   { id: 'watches',   href: '#/watches',   label: 'هشدارهای زودهنگام', spaPath: '/watches', iconKey: 'checklist' },
   { id: 'inventory', href: '#/inventory', label: 'انبار', spaPath: '/inventory', iconKey: 'warehouse' },
+  { id: 'products',  href: '#/products',  label: 'اجناس', spaPath: '/products', iconKey: 'cube' },
   { id: 'suppliers', href: '#/suppliers', label: 'تأمین‌کنندگان', spaPath: '/suppliers', iconKey: 'truck' },
   { id: 'payments',  href: '#/payments',  label: 'پرداخت‌ها', spaPath: '/payments', iconKey: 'banknotes' },
   { id: 'checks',    href: '#/checks',    label: 'چک‌ها', spaPath: '/checks', iconKey: 'cheque' },
   { id: 'visits',    href: '#/visits',    label: 'ویزیت مشتریان', spaPath: '/visits', iconKey: 'visit' },
   { id: 'prospects', href: '#/prospects', label: 'ارزیابی مغازه‌ها', spaPath: '/prospects', iconKey: 'buildingStorefront' },
   { id: 'game',      href: '#/game',      label: 'مرکز بازی فروش', spaPath: '/game', iconKey: 'trophy' },
-  { id: 'reports',   href: '#/reports',   label: 'گزارش‌ها', spaPath: '/reports', iconKey: 'chartBar' },
   { id: 'settings',  href: '#/settings',  label: 'تنظیمات و پشتیبان', spaPath: '/settings', iconKey: 'cog' },
 ];
 
