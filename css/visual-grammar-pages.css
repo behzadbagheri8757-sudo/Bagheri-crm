@@ -1430,3 +1430,472 @@ html[data-theme="dark"] .bp-target-strip-bar{
 }
 html[data-theme="dark"] .bp-target-strip-bar::before{opacity:.38;}
 html[data-theme="dark"] .bp-target-strip.has-progress .bp-target-strip-bar span::after{opacity:.55;}
+
+/* ============================================================
+   Reports — management report (redesign)
+   Calm, mobile-first, RTL. Tokens only (light + dark via
+   --vg-* variables). No heavy shadows, no gradients, no
+   decorative colour: colour appears only for growth / decline /
+   warning. Presentation only.
+   ============================================================ */
+.rp-page{display:flex;flex-direction:column;gap:var(--vg-space-group);padding-bottom:8px;direction:rtl;}
+.rp-top{display:flex;flex-direction:column;gap:8px;}
+.rp-body{display:flex;flex-direction:column;gap:var(--vg-space-group);min-width:0;}
+
+/* Segmented period selector (iOS-like) */
+.rp-seg{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:2px;padding:3px;
+  background:var(--vg-color-neutral-soft);border-radius:999px;
+}
+.rp-seg-btn{
+  appearance:none;-webkit-appearance:none;border:0;background:transparent;
+  min-height:36px;padding:0 6px;border-radius:999px;
+  font:inherit;font-size:.84rem;font-weight:var(--vg-weight-label);
+  color:var(--vg-color-text-secondary);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:background-color .18s ease,color .18s ease,box-shadow .18s ease;
+}
+.rp-seg-btn.is-active{
+  background:var(--vg-color-surface);color:var(--vg-color-text);
+  font-weight:var(--vg-weight-title);
+  box-shadow:0 1px 3px rgba(31,41,55,.12);
+}
+html[data-theme="dark"] .rp-seg-btn.is-active{box-shadow:0 1px 3px rgba(0,0,0,.45);}
+.rp-context{font-size:var(--vg-type-meta);color:var(--vg-color-text-muted);padding:0 6px;min-height:1em;}
+
+/* Surfaces */
+.rp-card,.rp-hero{
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+  padding:14px 16px;min-width:0;
+}
+.rp-sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.rp-sec-title{margin:0;font-size:var(--vg-type-section);font-weight:var(--vg-weight-title);color:var(--vg-color-text);}
+.rp-sec-hint{font-size:var(--vg-type-meta);color:var(--vg-color-text-muted);}
+.rp-sec-link{font-size:.76rem;color:var(--vg-color-primary);text-decoration:none;padding:6px 0 6px 4px;}
+.rp-note{margin-top:10px;font-size:var(--vg-type-meta);line-height:1.7;color:var(--vg-color-text-muted);}
+.rp-neg,.is-neg{color:var(--vg-color-danger);}
+
+/* Hero */
+.rp-hero{padding:18px 18px 16px;}
+.rp-hero-label{font-size:.78rem;color:var(--vg-color-text-muted);margin-bottom:6px;}
+.rp-hero-value{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.rp-hero-num{font-size:2.15rem;line-height:1.1;font-weight:var(--vg-weight-value);color:var(--vg-color-text);letter-spacing:-.01em;font-variant-numeric:tabular-nums;}
+.rp-hero-unit{font-size:.82rem;color:var(--vg-color-text-muted);}
+.rp-delta{margin-top:8px;font-size:.8rem;font-weight:var(--vg-weight-label);color:var(--vg-color-text-muted);}
+.rp-delta.is-up{color:var(--vg-color-success);}
+.rp-delta.is-down{color:var(--vg-color-danger);}
+.rp-hero-sub{margin-top:8px;font-size:.8rem;color:var(--vg-color-text-secondary);}
+
+/* Trend chart */
+.rp-legend{display:inline-flex;align-items:center;gap:6px;font-size:var(--vg-type-meta);color:var(--vg-color-text-muted);}
+.rp-legend i{display:inline-block;width:14px;height:0;border-top:2px solid var(--vg-color-primary);border-radius:2px;}
+.rp-legend i.rp-legend-prev{border-top:2px dashed var(--vg-color-text-muted);opacity:.7;margin-inline-start:6px;}
+.rp-readout{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px;min-height:1.5em;}
+.rp-readout-title{font-size:.76rem;color:var(--vg-color-text-muted);}
+.rp-readout-val{font-size:.95rem;font-weight:var(--vg-weight-value);color:var(--vg-color-text);}
+.rp-chart{position:relative;height:150px;touch-action:pan-y;direction:ltr;-webkit-tap-highlight-color:transparent;}
+.rp-chart svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible;}
+.rp-grid{stroke:var(--vg-color-divider);stroke-width:1;}
+.rp-grid.is-base{stroke:var(--vg-color-border);}
+.rp-area{fill:url(#rp-fade);stroke:none;}
+/* Apple-style fade under the line: project blue at the line, transparent at the baseline */
+.rp-fade-top{stop-color:var(--vg-color-primary);stop-opacity:.24;}
+.rp-fade-bottom{stop-color:var(--vg-color-primary);stop-opacity:0;}
+.rp-line{fill:none;stroke:var(--vg-color-primary);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;}
+.rp-line-prev{fill:none;stroke:var(--vg-color-text-muted);stroke-width:1.25;stroke-dasharray:4 4;opacity:.65;}
+.rp-ylab{position:absolute;left:0;transform:translateY(-120%);font-size:.6rem;color:var(--vg-color-text-muted);pointer-events:none;direction:rtl;}
+.rp-guide{position:absolute;top:8%;bottom:8%;width:0;border-inline-start:1px solid var(--vg-color-border);transform:translateX(50%);pointer-events:none;}
+.rp-dot{
+  position:absolute;width:10px;height:10px;border-radius:50%;
+  background:var(--vg-color-primary);border:2px solid var(--vg-color-surface);
+  transform:translate(50%,-50%);pointer-events:none;
+}
+.rp-axis{display:flex;justify-content:space-between;direction:rtl;margin-top:8px;font-size:.64rem;color:var(--vg-color-text-muted);}
+
+/* Stats row (3 / 2 / 1 columns) */
+.rp-stats{display:grid;grid-template-columns:repeat(3,1fr);}
+.rp-stats-2{grid-template-columns:repeat(2,1fr);}
+.rp-stats-1{grid-template-columns:1fr;}
+.rp-stat{text-align:center;padding:2px 6px;min-width:0;}
+.rp-stat + .rp-stat{border-inline-start:1px solid var(--vg-color-divider);}
+.rp-stat-val{font-size:1.02rem;font-weight:var(--vg-weight-value);color:var(--vg-color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rp-stat-lab{margin-top:3px;font-size:.68rem;color:var(--vg-color-text-muted);}
+
+/* Rows (lists, links, key-value) */
+.rp-list{margin-top:6px;}
+.rp-row{
+  display:flex;align-items:center;gap:10px;min-height:44px;padding:9px 0;
+  border-top:1px solid var(--vg-color-divider);
+  color:var(--vg-color-text);text-decoration:none;font-size:.86rem;
+  -webkit-tap-highlight-color:transparent;
+}
+.rp-row-flat{justify-content:space-between;}
+.rp-row-flat > span:first-child{min-width:0;}
+.rp-row small{font-size:.66rem;color:var(--vg-color-text-muted);margin-inline-start:4px;}
+.rp-sec-head + .rp-row,.rp-stats + .rp-list .rp-row:first-child{border-top:0;}
+.rp-link:active{opacity:.6;}
+.rp-rank{width:22px;height:22px;border-radius:50%;background:var(--vg-color-neutral-soft);color:var(--vg-color-text-secondary);font-size:.7rem;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.rp-row-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.rp-row-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rp-row-sub{font-size:.68rem;color:var(--vg-color-text-muted);}
+.rp-row-val{flex:0 0 auto;font-weight:var(--vg-weight-title);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.rp-chev{flex:0 0 auto;display:inline-flex;color:var(--vg-color-text-muted);opacity:.7;}
+.rp-sub-title{margin:12px 0 2px;font-size:.72rem;color:var(--vg-color-text-muted);}
+.rp-ok{padding:10px 0 2px;font-size:.78rem;color:var(--vg-color-text-muted);border-top:1px solid var(--vg-color-divider);}
+.rp-badge{flex:0 0 auto;font-size:.72rem;font-weight:var(--vg-weight-label);padding:3px 10px;border-radius:999px;background:var(--vg-color-neutral-soft);color:var(--vg-color-text-secondary);}
+.rp-badge.is-warn{background:var(--vg-color-warning-soft);color:var(--vg-color-warning);}
+.rp-badge.is-danger{background:var(--vg-color-danger-soft);color:var(--vg-color-danger);}
+
+/* Top products — rounded horizontal bars */
+.rp-bars{display:flex;flex-direction:column;gap:18px;padding-top:2px;}
+.rp-bar-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:7px;}
+.rp-bar-name{font-size:.86rem;color:var(--vg-color-text);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rp-bar-amt{flex:0 0 auto;font-size:.8rem;font-weight:var(--vg-weight-title);color:var(--vg-color-text-secondary);font-variant-numeric:tabular-nums;}
+.rp-bar-track{height:12px;border-radius:999px;background:var(--vg-color-neutral-soft);overflow:hidden;}
+.rp-bar-fill{height:100%;border-radius:999px;background:var(--vg-color-primary);transition:width .35s cubic-bezier(.22,1,.36,1);}
+
+/* Collapsible blocks */
+.rp-details{padding:0 16px;}
+.rp-details > summary,.rp-inner > summary{
+  list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-height:48px;-webkit-tap-highlight-color:transparent;
+}
+.rp-details > summary::-webkit-details-marker,.rp-inner > summary::-webkit-details-marker{display:none;}
+.rp-sum-chev{display:inline-flex;color:var(--vg-color-text-muted);transition:transform .2s ease;transform:rotate(-90deg);}
+details[open] > summary .rp-sum-chev{transform:rotate(90deg);}
+.rp-details-body{padding-bottom:10px;}
+.rp-inner{margin-top:6px;border-top:1px solid var(--vg-color-divider);}
+.rp-inner > summary{font-size:.8rem;color:var(--vg-color-primary);min-height:44px;}
+.rp-inner .rp-row:first-of-type{border-top:0;}
+
+@media (max-width:360px){
+  .rp-hero-num{font-size:1.85rem;}
+  .rp-card,.rp-hero{padding-inline:13px;}
+}
+@media (prefers-reduced-motion:reduce){
+  .rp-bar-fill,.rp-sum-chev,.rp-seg-btn{transition:none;}
+}
+
+/* ============================================================
+   Dashboard — shared visual language with Reports (polish only)
+   Presentation only. Scope: #main .dashboard-shell.
+   NOT touched on purpose: .bp-target-strip* (Target Bar), bottom
+   navigation, all markup / data / logic.
+
+   Shared standard (same values as the Reports page):
+     surface   = --vg-color-surface + 1px --vg-color-border + --vg-radius-raised, no shadow
+     divider   = 1px --vg-color-divider between rows / KPI cells
+     section title = --vg-type-section / --vg-weight-title, no leading icon
+     section link  = .76rem, --vg-color-primary
+     KPI group = ONE surface with hairline dividers (value first, label below)
+     semantic colour = --vg-color-danger / success / warning tokens only
+   ============================================================ */
+#main .dashboard-eyebrow{color:var(--vg-color-text-muted);margin-bottom:16px;}
+
+/* Section titles — same size/weight/spacing as Reports; no leading icon */
+#main .dashboard-block-head{margin-bottom:10px;}
+#main .dashboard-shell .dash-section-label{
+  font-size:var(--vg-type-section);font-weight:var(--vg-weight-title);gap:8px;
+}
+#main .dashboard-shell .dash-section-ico{display:none;}
+#main .dashboard-shell .section-action{
+  font-size:.76rem;font-weight:var(--vg-weight-label);color:var(--vg-color-primary);
+  text-decoration:none;padding:6px 0 6px 4px;
+}
+#main .dashboard-shell .dashboard-block-head .section-action{font-size:.76rem;}
+
+/* KPI groups (today snapshot + financial health): three separate cards → one surface */
+#main .dashboard-shell .bp-dashboard-snapshot-grid,
+#main .dashboard-shell .dash-health-surface{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+  box-shadow:none;padding:4px 0;overflow:hidden;
+}
+#main .dashboard-shell .bp-dashboard-snapshot-item,
+#main .dashboard-shell .dash-health-row{
+  align-items:center;justify-content:center;text-align:center;
+  gap:4px;min-height:0;padding:12px 8px;
+  background:transparent;border:0;border-radius:0;box-shadow:none;
+}
+#main .dashboard-shell .bp-dashboard-snapshot-item + .bp-dashboard-snapshot-item,
+#main .dashboard-shell .dash-health-row + .dash-health-row{
+  border-inline-start:1px solid var(--vg-color-divider);
+}
+/* value first, label below (same order as Reports stats) */
+#main .dashboard-shell .bp-dashboard-snapshot-item strong,
+#main .dashboard-shell .dash-health-value{order:-1;font-weight:var(--vg-weight-value);}
+#main .dashboard-shell .dash-health-value{text-align:center;}
+#main .dashboard-shell .dash-health-value.debt{color:var(--vg-color-danger);}
+#main .dashboard-shell .dash-health-link:active{
+  transform:none;background:var(--vg-color-surface-soft);
+}
+
+/* Action queue (primary list) and empty state: rows now sit on a surface like Reports lists */
+#main .dashboard-shell .dashboard-block > .dash-activity{
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+}
+#main .dashboard-shell .dash-action-queue > .action-row:last-child{border-bottom:0;}
+#main .dashboard-shell .action-badge{background:var(--vg-color-neutral-soft);}
+
+/* Recent activity cards, quick actions, watch, alert: one border/radius/no-shadow standard */
+#main .dashboard-shell .dash-activity-section,
+#main .dashboard-shell .dash-watch-compact{
+  border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);box-shadow:none;
+}
+#main .dashboard-shell .dash-qa-btn{
+  border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);box-shadow:none;
+}
+#main .dashboard-shell .dash-qa-btn:active{background:var(--vg-color-surface-soft);transform:none;opacity:.7;}
+#main .dashboard-shell .dash-qa-label{color:var(--vg-color-text-secondary);}
+#main .dashboard-shell .bp-dashboard-watch-card,
+#main .dashboard-shell .bp-dashboard-alert{
+  border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+}
+#main .dashboard-shell .bp-dashboard-alert{padding-inline:16px;}
+#main .dashboard-shell .bp-dashboard-watch-list{gap:8px;}
+
+/* ============================================================
+   Customer Detail — shared visual language with Reports/Dashboard
+   Presentation only. Scope: #main.customer-detail-view.
+   Standard surface: --vg-color-surface + 1px --vg-color-border +
+   --vg-radius-raised, no shadow. Related info = ONE grouped surface
+   with hairline dividers instead of many boxes. Watch / Intelligence
+   keep their own labelled surfaces (accent edge preserved).
+   Tokens only; Light/Dark follow the existing token swap.
+   ============================================================ */
+
+/* Section titles: same rhythm as Reports */
+#main.customer-detail-view h3.sub-title{margin:22px 0 10px;}
+
+/* 1 · Header: identity + balance + status + story = one grouped surface */
+#main.customer-detail-view .customer-identity-card{
+  padding:16px;border-radius:var(--vg-radius-raised);box-shadow:none;margin-bottom:var(--vg-space-group);
+}
+#main.customer-detail-view .customer-identity-name{font-size:1.2rem;margin-bottom:4px;overflow-wrap:anywhere;}
+#main.customer-detail-view .customer-identity-meta{font-size:.82rem;line-height:1.7;}
+.cd-meta-row{display:flex;align-items:baseline;gap:10px;padding:2px 0;}
+.cd-meta-k{flex:0 0 78px;font-size:.72rem;color:var(--vg-color-text-muted);}
+.cd-meta-v{min-width:0;flex:1 1 auto;color:var(--vg-color-text);overflow-wrap:anywhere;}
+#main.customer-detail-view .customer-balance-block{
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--vg-color-divider);
+}
+#main.customer-detail-view .customer-balance-value{font-size:1.3rem;font-weight:var(--vg-weight-value);overflow-wrap:anywhere;}
+#main.customer-detail-view .bp-customer-health{
+  margin-top:12px;padding:12px 0 0;border:0;border-top:1px solid var(--vg-color-divider);
+  border-radius:0;background:transparent;
+}
+#main.customer-detail-view .bp-customer-health-label{font-size:.76rem;}
+#main.customer-detail-view .bp-customer-health-value{font-size:.84rem;}
+#main.customer-detail-view .bp-customer-attention{
+  margin-top:12px;border:0;border-radius:12px;background:var(--vg-color-warning-soft);
+}
+html[data-theme="dark"] #main.customer-detail-view .bp-customer-attention{border:0;}
+#main.customer-detail-view .bp-customer-attention .bp-attention-icon{
+  flex:0 0 7px;width:7px;height:7px;margin-top:.62em;border-radius:50%;background:var(--vg-color-warning);font-size:0;
+}
+#main.customer-detail-view .customer-identity-card .cust-summary{
+  margin:12px 0 0;padding:12px 0 0;background:transparent;border:0;
+  border-top:1px solid var(--vg-color-divider);border-radius:0;box-shadow:none;
+}
+#main.customer-detail-view .customer-identity-card .cust-summary-story{font-size:.86rem;line-height:1.8;}
+
+/* 2 · Same surface standard for the remaining standalone blocks */
+#main.customer-detail-view .bp-focus,
+#main.customer-detail-view .bp-glance,
+#main.customer-detail-view .cust-recommended-action,
+#main.customer-detail-view .watch-followup-card,
+#main.customer-detail-view .watch-confirmed-card,
+#main.customer-detail-view .watch-lifecycle-card,
+#main.customer-detail-view .customer-behavior-details > .card,
+#main.customer-detail-view .customer-last-visit-card{
+  border-radius:var(--vg-radius-raised);box-shadow:none;
+}
+#main.customer-detail-view .bp-focus,
+#main.customer-detail-view .bp-glance{border:1px solid var(--vg-color-border);}
+
+/* 3 · Actions: secondary actions disclosure becomes a list row on a surface */
+#main.customer-detail-view .bp-customer-secondary-actions{
+  margin:0 0 var(--vg-space-group);padding:0 14px;
+  background:var(--vg-color-surface);border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+}
+#main.customer-detail-view .bp-customer-secondary-actions summary{padding:0;min-height:46px;display:flex;align-items:center;justify-content:space-between;font-size:.82rem;}
+#main.customer-detail-view .bp-customer-secondary-actions summary::after{float:none;}
+#main.customer-detail-view .bp-customer-secondary-actions .cust-actions-secondary{margin:0;padding-bottom:12px;}
+
+/* 4 · Metric groups (financial summary + behaviour analysis): ONE surface, hairline dividers */
+#main.customer-detail-view .cards.cust-metrics,
+#main.customer-detail-view details > .cards{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:0;overflow:hidden;
+  background:var(--vg-color-divider);
+  border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+  box-shadow:none;margin-bottom:var(--vg-space-group);
+}
+#main.customer-detail-view .cards.cust-metrics > .card,
+#main.customer-detail-view details > .cards > .card{
+  background:var(--vg-color-surface);border:0;border-radius:0;box-shadow:none;
+  padding:12px 14px;min-width:0;
+}
+#main.customer-detail-view .cards.cust-metrics > .card.wide,
+#main.customer-detail-view details > .cards > .card.wide{grid-column:1/-1;}
+#main.customer-detail-view .cards.cust-metrics > .card .label,
+#main.customer-detail-view details > .cards > .card .label{margin-bottom:4px;}
+#main.customer-detail-view .cards.cust-metrics > .card .value,
+#main.customer-detail-view details > .cards > .card .value{font-size:.96rem;overflow-wrap:anywhere;}
+#main.customer-detail-view .cards.cust-metrics > .card:last-child:nth-child(odd),
+#main.customer-detail-view details > .cards > .card:last-child:nth-child(odd){grid-column:1/-1;}
+
+/* 5 · Disclosures (behaviour analysis / all signals / rejected products): iOS-style list rows */
+#main.customer-detail-view .customer-behavior-summary{
+  min-height:46px;padding:0 14px;margin:0;
+  background:var(--vg-color-surface);border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+  font-size:.86rem;
+}
+#main.customer-detail-view details[open] > .customer-behavior-summary{margin-bottom:10px;}
+#main.customer-detail-view .customer-rejection-details,
+#main.customer-detail-view .customer-watch-details,
+#main.customer-detail-view .customer-behavior-details{margin-bottom:var(--vg-space-group);}
+
+/* 6 · Lists (top products, invoices, payments, checks, visits, rejected products): one surface + divided rows */
+#main.customer-detail-view .customer-tx-list,
+#main.customer-detail-view .customer-rejection-list{
+  background:var(--vg-color-surface);border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+  box-shadow:none;padding:2px 14px;margin-bottom:var(--vg-space-group);
+}
+#main.customer-detail-view .customer-tx-list .ledger-row,
+#main.customer-detail-view .customer-rejection-list .ledger-row{min-height:52px;}
+#main.customer-detail-view .watch-occ-row{border-bottom-style:solid;}
+
+/* ============================================================
+   Customers list — shared visual language (controls only)
+   The rows themselves (iOS-style inset list on the white canvas) are
+   already in the target language and are left as they are.
+   Scope: #customer-chips / .cl-* / #customer-list only. Presentation only.
+   ============================================================ */
+/* Status filter: segmented control (same look as the Reports period selector) */
+#main #customer-chips{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:3px;
+  background:var(--vg-color-neutral-soft);border-radius:999px;margin:0 0 12px;overflow:visible;
+}
+#main #customer-chips .chip{
+  display:inline-flex;align-items:center;justify-content:center;width:auto;min-height:34px;margin:0;padding:0 6px;
+  border:0;border-radius:999px;background:transparent;box-shadow:none;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  font-size:.84rem;font-weight:var(--vg-weight-label);color:var(--vg-color-text-secondary);
+}
+#main #customer-chips .chip.active{
+  background:var(--vg-color-surface);color:var(--vg-color-text);
+  font-weight:var(--vg-weight-title);box-shadow:0 1px 3px rgba(31,41,55,.12);
+}
+html[data-theme="dark"] #main #customer-chips .chip.active{box-shadow:0 1px 3px rgba(0,0,0,.45);}
+
+/* Region filter + sort: one quiet row */
+#main .cl-tools{display:flex;align-items:center;flex-wrap:nowrap;gap:8px;margin:0 0 6px;}
+#main .cl-tools .bp-sort-label{margin-inline-start:auto;white-space:nowrap;}
+#main .cl-tools .btn{white-space:nowrap;}
+#main .cl-tools .tx-toolbar-select{min-width:96px;max-width:132px;}
+#main .cl-count{font-size:.72rem;color:var(--vg-color-text-muted);padding:0 4px 4px;min-height:1.2em;}
+
+/* Active-alert glyph uses the shared warning token */
+.customer-row-watch{color:var(--vg-color-warning);}
+
+/* ============================================================
+   Invoices list — shared visual language (controls only)
+   Rows stay as they are (inset iOS list on the white canvas);
+   the redundant «پرداخت‌شده» line is no longer repeated on fully
+   paid rows (it equals the total and the status text already says
+   «تسویه روی فاکتور»). Scope: #invoice-chips / .cl-* only.
+   ============================================================ */
+#main #invoice-chips{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:3px;
+  background:var(--vg-color-neutral-soft);border-radius:999px;margin:0 0 12px;overflow:visible;
+}
+#main #invoice-chips .chip{
+  display:inline-flex;align-items:center;justify-content:center;width:auto;min-height:34px;margin:0;padding:0 6px;
+  border:0;border-radius:999px;background:transparent;box-shadow:none;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  font-size:.84rem;font-weight:var(--vg-weight-label);color:var(--vg-color-text-secondary);
+}
+#main #invoice-chips .chip.active{
+  background:var(--vg-color-surface);color:var(--vg-color-text);
+  font-weight:var(--vg-weight-title);box-shadow:0 1px 3px rgba(31,41,55,.12);
+}
+html[data-theme="dark"] #main #invoice-chips .chip.active{box-shadow:0 1px 3px rgba(0,0,0,.45);}
+#main .cl-tools .tx-toolbar-label{margin-inline-start:auto;white-space:nowrap;}
+#main .cl-tools .cl-count{padding:0;}
+
+/* ============================================================
+   Invoice detail — shared visual language (Reports / Customer Detail)
+   Presentation only. Scope: #main .inv-detail (the tx-* classes are
+   shared with supplier / prospect / settings pages, so nothing here
+   leaks to them). Surface standard: --vg-color-surface + 1px border +
+   --vg-radius-raised, no shadow; related numbers share ONE surface
+   with hairline dividers.
+   ============================================================ */
+#main .inv-detail h3.sub-title{margin:22px 0 10px;}
+
+/* Identity */
+#main .inv-detail .tx-identity.card{
+  padding:16px;border-radius:var(--vg-radius-raised);box-shadow:none;margin-bottom:var(--vg-space-group);
+}
+#main .inv-detail .tx-identity-title{font-size:1.2rem;}
+#main .inv-detail .tx-identity-meta{margin-top:6px;gap:6px;line-height:1.7;}
+
+/* Financial summary: total, paid, remaining = one grouped surface */
+#main .inv-detail .tx-finance.cards{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:0;overflow:hidden;
+  background:var(--vg-color-divider);
+  border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+  box-shadow:none;margin-bottom:var(--vg-space-group);
+}
+#main .inv-detail .tx-finance.cards > .card{
+  background:var(--vg-color-surface);border:0;border-radius:0;box-shadow:none;padding:12px 14px;min-width:0;
+}
+#main .inv-detail .tx-finance.cards > .card.wide{grid-column:1/-1;padding:16px 14px 14px;}
+#main .inv-detail .tx-finance.cards > .card.wide .value{font-size:1.45rem;font-weight:var(--vg-weight-value);}
+#main .inv-detail .tx-finance.cards > .card .value{overflow-wrap:anywhere;}
+
+/* Items / edit history: one surface, divided rows */
+#main .inv-detail .inv-surface{
+  background:var(--vg-color-surface);border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+  box-shadow:none;padding:0 14px;margin-bottom:var(--vg-space-group);
+}
+#main .inv-detail .inv-surface > .ledger-row{padding:12px 0;min-height:52px;}
+#main .inv-detail .inv-surface > .ledger-row + .ledger-row{border-top:1px solid var(--vg-color-divider);}
+#main .inv-detail .inv-surface > .empty{padding:14px 0;}
+
+/* Disclosures (payment & profit / settlement trace / visit link): list rows on a surface */
+#main .inv-detail .tx-details{
+  margin:0 0 10px;padding:0 14px;
+  background:var(--vg-color-surface);border:1px solid var(--vg-color-border);border-radius:var(--vg-radius-raised);
+  box-shadow:none;
+}
+#main .inv-detail .tx-details > summary{
+  list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-height:46px;padding:0;font-size:.86rem;font-weight:var(--vg-weight-title);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+#main .inv-detail .tx-details > summary::-webkit-details-marker{display:none;}
+#main .inv-detail .tx-details > summary::after{
+  content:'';flex:0 0 auto;width:7px;height:7px;margin-inline-end:3px;
+  border-inline-end:2px solid var(--vg-color-text-muted);border-bottom:2px solid var(--vg-color-text-muted);
+  transform:rotate(45deg);transition:transform .2s ease;
+}
+#main .inv-detail .tx-details[open] > summary::after{transform:rotate(-135deg);}
+#main .inv-detail .tx-details > .cards{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:0;overflow:hidden;
+  background:var(--vg-color-divider);border:1px solid var(--vg-color-border);border-radius:12px;box-shadow:none;
+}
+#main .inv-detail .tx-details > .cards > .card{
+  background:var(--vg-color-surface);border:0;border-radius:0;box-shadow:none;padding:11px 12px;min-width:0;
+}
+#main .inv-detail .tx-details > .cards > .card.wide,
+#main .inv-detail .tx-details > .cards > .card:last-child:nth-child(odd){grid-column:1/-1;}
+#main .inv-detail .tx-details > .cards > .card .value{overflow-wrap:anywhere;}
+#main .inv-detail .tx-details > .card{background:transparent;border:0;box-shadow:none;padding:0;}
+@media (prefers-reduced-motion:reduce){#main .inv-detail .tx-details > summary::after{transition:none;}}
