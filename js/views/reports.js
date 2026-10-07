@@ -488,8 +488,8 @@
     const lastRight = (100 - px(n - 1)).toFixed(2);
 
     return (
-      '<section class="rp-card rp-trend" aria-label="روند فروش">' +
-      '<div class="rp-sec-head"><h3 class="rp-sec-title">روند فروش</h3>' +
+      '<section class="rp-card rp-trend" aria-label="روند فروش بر اساس مبلغ فاکتورها">' +
+      '<div class="rp-sec-head"><div><h3 class="rp-sec-title">روند فروش</h3><div class="rp-chart-hint">مبلغ فاکتورها در هر روز</div></div>' +
       (prevLine
         ? '<span class="rp-legend"><i class="rp-legend-cur"></i>الان<i class="rp-legend-prev"></i>' + trend.prevLabel + '</span>'
         : '') +

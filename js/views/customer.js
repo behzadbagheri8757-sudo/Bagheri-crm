@@ -563,6 +563,45 @@
   }
 
   /* Short Level-1 glance for the behavior section. Uses only values customerBehavior() already returns. */
+  /* Presentation-only: compact 8-week customer purchase trend. */
+  function customerTrendChartHtml(cid, ctx, behavior) {
+    try {
+      const invs = (typeof customerInvoices === 'function' ? customerInvoices(cid, ctx) : []) || [];
+      if (!invs.length) return '';
+      const now = new Date(); now.setHours(0,0,0,0);
+      const vals = new Array(8).fill(0);
+      invs.forEach(function (inv) {
+        if (!inv || !inv.date) return;
+        const d = new Date(inv.date + 'T00:00:00'); if (isNaN(d.getTime())) return;
+        d.setHours(0,0,0,0);
+        const days = Math.floor((now - d) / 86400000);
+        if (days < 0 || days >= 56) return;
+        vals[7 - Math.floor(days / 7)] += Number(inv.total) || 0;
+      });
+      if (!vals.some(function (v) { return v > 0; })) return '';
+      const max = Math.max.apply(null, vals) || 1;
+      const pts = vals.map(function (v, i) {
+        const x = i * (100 / (vals.length - 1));
+        const y = 34 - (v / max) * 27;
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      const area = '0,36 ' + pts + ' 100,36';
+      const last = pts.split(' ').pop();
+      const lastParts = last.split(',');
+      const firstHalf = vals.slice(0, 4).reduce(function (s, v) { return s + v; }, 0);
+      const secondHalf = vals.slice(4).reduce(function (s, v) { return s + v; }, 0);
+      let trendText = 'تقریباً ثابت';
+      if (firstHalf === 0 && secondHalf > 0) trendText = 'خرید اخیر بیشتر شده';
+      else if (firstHalf > 0 && secondHalf === 0) trendText = 'خرید اخیر کمتر شده';
+      else if (firstHalf > 0) {
+        const ratio = secondHalf / firstHalf;
+        if (ratio >= 1.15) trendText = 'خرید اخیر بیشتر شده';
+        else if (ratio <= 0.85) trendText = 'خرید اخیر کمتر شده';
+      }
+      return '<div class="customer-trend-card"><div class="customer-trend-head"><div><span class="label">روند خرید</span><span class="customer-trend-period">۸ هفته اخیر</span></div><span class="customer-trend-note">' + esc(trendText) + '</span></div><div class="customer-trend-chart" aria-label="روند خرید بر اساس مبلغ فاکتورها در ۸ هفته اخیر" style="position:relative;"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><polygon points="' + area + '" class="customer-trend-area"></polygon><polyline points="' + pts + '" class="customer-trend-line" vector-effect="non-scaling-stroke"></polyline></svg><i class="customer-trend-dot" style="left:' + parseFloat(lastParts[0]) + '%;top:' + ((parseFloat(lastParts[1]) / 40) * 100) + '%;"></i></div></div>';
+    } catch (e) { return ''; }
+  }
+
   function behaviorGlanceHtml(b, groups) {
     var P = global.BagheriPresent;
     if (!P || !b) return '';
@@ -1068,6 +1107,7 @@
 
       behaviorHtml =
         '<h3 class="sub-title">رفتار خرید و هوش تجاری</h3>' +
+        customerTrendChartHtml(c.id, ctx, b) +
         behaviorGlanceHtml(b, focus.groups) +
         intelligenceWatchHtml(c.id, ctx, watchData) +
         '<details class="customer-behavior-details">' +
