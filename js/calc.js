@@ -1228,6 +1228,39 @@ function customerBehavior(cid, ctx, skipMemo){
     ? (daysSinceLast > avgIntervalDays + 0.5)
     : null;
 
+  /* Limited-history guard inputs (ADDITIVE — avgIntervalDays / behindPattern above
+     keep their legacy meaning for the UI and the Watch layer).
+     Based on DISTINCT purchase days: several invoices on one day are ONE purchase
+     occasion, so they neither count as extra purchase days nor create 0-day gaps.
+     A day counts only if at least one invoice that day has total > 0.
+     These are minimum-caution inputs, not a scientific sufficiency measure. */
+  const _purchaseDays = [];
+  {
+    const _seenDays = Object.create(null);
+    invs.forEach(function(inv){
+      if(!inv || !(inv.total > 0)) return;
+      const d = inv.date ? String(inv.date).slice(0, 10) : '';
+      if(!d || _seenDays[d]) return;
+      if(typeof parseISODateParts === 'function' && !parseISODateParts(d)) return;
+      _seenDays[d] = true;
+      _purchaseDays.push(d);
+    });
+    _purchaseDays.sort();
+  }
+  const purchaseDayCount = _purchaseDays.length;
+  const _distinctIntervals = [];
+  for(let i = 1; i < _purchaseDays.length; i++){
+    const gap = _behaviorDaysDiff(_purchaseDays[i-1], _purchaseDays[i]);
+    if(gap != null && gap > 0) _distinctIntervals.push(gap);
+  }
+  const distinctIntervalCount = _distinctIntervals.length;
+  const avgDistinctIntervalDays = distinctIntervalCount
+    ? _distinctIntervals.reduce((a,b)=>a+b, 0) / distinctIntervalCount
+    : null;
+  const behindPatternDistinct = (avgDistinctIntervalDays != null && daysSinceLast != null)
+    ? (daysSinceLast > avgDistinctIntervalDays + 0.5)
+    : null;
+
   const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
   const d30 = _behaviorISODaysAgo(30);
   const d60 = _behaviorISODaysAgo(60);
@@ -1382,6 +1415,10 @@ function customerBehavior(cid, ctx, skipMemo){
     avgIntervalDays,
     daysSinceLast,
     behindPattern,
+    purchaseDayCount,
+    distinctIntervalCount,
+    avgDistinctIntervalDays,
+    behindPatternDistinct,
     sales30,
     sales90,
     salesPrev30,
