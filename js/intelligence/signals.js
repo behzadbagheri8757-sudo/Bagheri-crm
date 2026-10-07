@@ -180,14 +180,29 @@
   /* ---------------------------------------------------------
      1-3: Purchase decline / growth (based on sales30 vs salesPrev30)
      --------------------------------------------------------- */
+  /* Limited-history guard (minimum caution, NOT a scientific sufficiency rule).
+     With a single distinct purchase day, a sales30-vs-salesPrev30 comparison is
+     not a purchase PATTERN (one old purchase always reads as a 100% drop), so it
+     must not produce PURCHASE_DECLINE_* signals. Checked at generation time,
+     before persistence, so previously stored occurrences cannot bypass it.
+     Payment events (CHECK_BOUNCED / PAYMENT_OVERDUE) use a separate path and are
+     unaffected. The Watch layer (PURCHASE_DECLINE_WATCH) still reports the raw
+     drop as a non-scoring early observation. */
+  var MIN_PURCHASE_DAYS_FOR_DECLINE = 2;
+  /* BEHIND_PATTERN needs at least two distinct-day intervals (3 purchase days);
+     one gap is not an established rhythm. */
+  var MIN_DISTINCT_INTERVALS_FOR_BEHIND = 2;
+
   function _purchaseTrendSignals(cid, b, out) {
     if (!(b.salesPrev30 > 0)) return; // false-positive rule: no signal if no baseline
+    var limitedPurchaseHistory = (typeof b.purchaseDayCount === 'number'
+      && b.purchaseDayCount < MIN_PURCHASE_DAYS_FOR_DECLINE);
 
     const declinePct = _pctChange(b.salesPrev30, b.sales30); // positive => decline
     // growthPct: same baseline guard as decline (salesPrev30 > 0 already enforced above)
     const growthPct = ((b.sales30 - b.salesPrev30) / b.salesPrev30) * 100;
 
-    if (declinePct != null && declinePct >= 30) {
+    if (!limitedPurchaseHistory && declinePct != null && declinePct >= 30) {
       out.push(_mkSignal(cid, 'PURCHASE_DECLINE_SEVERE', {
         type: 'risk',
         severity: 'critical',
@@ -199,7 +214,7 @@
       return; // duplication rule: severe suppresses mild
     }
 
-    if (declinePct != null && declinePct >= 15 && declinePct < 30) {
+    if (!limitedPurchaseHistory && declinePct != null && declinePct >= 15 && declinePct < 30) {
       out.push(_mkSignal(cid, 'PURCHASE_DECLINE_MILD', {
         type: 'risk',
         severity: 'medium',
@@ -226,7 +241,14 @@
      4: BEHIND_PATTERN — reuse existing behavior flag as-is
      --------------------------------------------------------- */
   function _behindPatternSignal(cid, b, out) {
-    if (b.behindPattern !== true) return; // covers false/null/undefined
+    if (typeof b.distinctIntervalCount === 'number') {
+      // Distinct-purchase-day basis: same-day invoices make no 0-day gaps, and a
+      // single gap is not an established pattern.
+      if (b.distinctIntervalCount < MIN_DISTINCT_INTERVALS_FOR_BEHIND) return;
+      if (b.behindPatternDistinct !== true) return;
+    } else if (b.behindPattern !== true) {
+      return; // legacy fallback if the distinct-day fields are absent
+    }
     out.push(_mkSignal(cid, 'BEHIND_PATTERN', {
       type: 'risk',
       severity: 'high',
