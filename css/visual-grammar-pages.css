@@ -190,6 +190,7 @@ main .empty{margin:14px 0;}
 /* Customer list sparkline: intentionally unscoped so it remains visible even
    when the route host does not carry the optional vg-route-customers class. */
 .customer-row-spark{
+  position:relative;
   flex:0 0 46px; width:46px; height:16px; min-width:46px; display:inline-flex; align-items:center;
   color:var(--vg-color-primary); margin-inline-start:8px; direction:ltr;
   overflow:visible;
