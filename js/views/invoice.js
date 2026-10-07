@@ -106,15 +106,15 @@
 
     const hist = (inv.editHistory && inv.editHistory.length) ? `
       <h3 class="sub-title">تاریخچه ویرایش</h3>
-      ${inv.editHistory.slice().reverse().map(function (h) {
+      <div class="inv-surface">${inv.editHistory.slice().reverse().map(function (h) {
         return `<div class="ledger-row" style="display:block;cursor:default;">
           <span class="sub" style="display:block;margin-bottom:4px;">${faDate(String(h.editedAt).slice(0, 10)) + ' ' + String(h.editedAt).slice(11, 16)}</span>
           <span class="name" style="font-weight:400;">جمع قبل: ${toman(h.before && h.before.total)} ت ← جمع بعد: ${toman(h.after && h.after.total)} ت</span>
         </div>`;
-      }).join('')}
+      }).join('')}</div>
     ` : '';
 
-    root.innerHTML = `
+    root.innerHTML = `<div class="inv-detail">
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="#/invoices">← فاکتورها</a>
         ${cust ? `<a class="btn secondary small" href="#/customer?id=${encodeURIComponent(cust.id)}">مشتری</a>` : ''}
@@ -158,7 +158,7 @@
 
       <!-- ITEMS -->
       <h3 class="sub-title">اقلام</h3>
-      <div class="tx-items">${itemRows}</div>
+      <div class="tx-items inv-surface">${itemRows}</div>
 
       <!-- PAYMENT DETAILS (progressive) -->
       <details class="tx-details">
@@ -173,7 +173,7 @@
             <div class="card"><div class="label">مانده قبلی مشتری</div><div class="value" style="font-size:1rem;">${toman(inv.prevBalance)} ت</div></div>
             <div class="card"><div class="label">مانده بعد از فاکتور</div><div class="value" style="font-size:1rem;">${toman(Math.abs(inv.newBalance || 0))} ت ${balanceStatusWord(inv.newBalance || 0)}</div></div>
           ` : ''}
-          <div class="card wide"><div class="label">سود اقلام این فاکتور</div><div class="value accent-amber">${toman(invProfit)} ت</div></div>
+          <div class="card wide"><div class="label">سود اقلام این فاکتور</div><div class="value">${toman(invProfit)} ت</div></div>
         </div>
       </details>
 
@@ -267,8 +267,7 @@
       </details>
 
       ${hist}
-    
-    `;
+    </div>`;
 
     // Action buttons (delegated)
     if (!actionHandlersBound) {

@@ -105,6 +105,10 @@
       rows.sort(function (a, b) { return (a.c.name || '').localeCompare(b.c.name || '', 'fa'); });
     }
 
+    // Presentation only: result count under the filters (reads the already-computed rows).
+    const countEl = document.getElementById('customer-count');
+    if (countEl) countEl.textContent = rows.length ? enToFaDigits(String(rows.length)) + ' مشتری' : '';
+
     if (!rows.length) {
       listEl.innerHTML =
         '<div class="empty">' +
@@ -273,7 +277,7 @@
       '<div class="field"><input id="customer-search" placeholder="جستجوی نام، آدرس، تلفن، منطقه و…" value="' + esc(custQuery) + '" autocomplete="off"></div>' +
       '<div class="chip-row" id="customer-chips">' + chip('all','همه') + chip('debt','بدهکار') + chip('settled','تسویه') + chip('credit','بستانکار') + '</div>' +
       '<div class="bp-customer-secondary-filters">' +
-      '<div class="btn-row" style="margin-bottom:8px;align-items:center;flex-wrap:wrap;">' +
+      '<div class="btn-row cl-tools">' +
       '<button type="button" class="btn small secondary" id="customer-filter">فیلتر منطقه</button>' +
       '<label class="bp-sort-label" for="customer-sort">مرتب‌سازی</label>' +
       '<select class="tx-toolbar-select" id="customer-sort">' +
@@ -285,6 +289,7 @@
       '</div>' +
       '</div>' +
       '<div id="customer-filter-indicator" class="customer-filter-indicator" aria-live="polite"></div>' +
+      '<div id="customer-count" class="cl-count" aria-live="polite"></div>' +
       '<div id="customer-list"></div>';
 
     const searchEl = document.getElementById('customer-search');

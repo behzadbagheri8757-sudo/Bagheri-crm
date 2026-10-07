@@ -9,11 +9,14 @@
    Approved information architecture (5 groups, 10 destinations):
      1. عملیات میدانی       (3): هشدارهای زودهنگام، ویزیت مشتریان، ارزیابی مغازه‌ها
      2. عملکرد فروش          (1): مرکز بازی فروش
-     3. عملکرد مالی          (3): پرداخت‌ها، گزارش‌ها، چک‌ها
-     4. مدیریت و پشتیبانی    (2): انبار، تأمین‌کنندگان
+     3. عملکرد مالی          (2): پرداخت‌ها، چک‌ها
+     4. مدیریت و پشتیبانی    (3): انبار، اجناس، تأمین‌کنندگان
      5. تنظیمات              (1): پشتیبان‌گیری و تنظیمات
 
-   Rhythm: 3 → 1 → 3 → 2 → 1
+   «گزارش‌ها» now lives in the bottom tab bar (replacing «اجناس»);
+   «اجناس» moved here next to «انبار».
+
+   Rhythm: 3 → 1 → 2 → 3 → 1
 */
 'use strict';
 
@@ -37,7 +40,6 @@
       title: 'عملکرد مالی',
       items: [
         { label: 'پرداخت‌ها', href: '#/payments', iconKey: 'banknotes' },
-        { label: 'گزارش‌ها',  href: '#/reports',  iconKey: 'chartBar' },
         { label: 'چک‌ها',     href: '#/checks',   iconKey: 'cheque' },
       ],
     },
@@ -45,6 +47,7 @@
       title: 'مدیریت و پشتیبانی',
       items: [
         { label: 'انبار',         href: '#/inventory', iconKey: 'warehouse' },
+        { label: 'اجناس',         href: '#/products',  iconKey: 'cube' },
         { label: 'تأمین‌کنندگان', href: '#/suppliers', iconKey: 'truck' },
       ],
     },

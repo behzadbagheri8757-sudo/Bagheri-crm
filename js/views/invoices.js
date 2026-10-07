@@ -64,6 +64,10 @@
     else if (invSort === 'amountAsc') rows.sort((a,b)=> (a.inv.total||0)-(b.inv.total||0));
     else rows.sort((a,b)=> (b.inv.date||'').localeCompare(a.inv.date||'') || String(b.inv.number).localeCompare(String(a.inv.number)));
 
+    // Presentation only: result count next to the sort control (reads the already-filtered rows).
+    const countEl = document.getElementById('invoice-count');
+    if (countEl) countEl.textContent = rows.length ? enToFaDigits(String(rows.length)) + ' فاکتور' : '';
+
     if (!rows.length) {
       listEl.innerHTML = `<div class="empty">${(data.invoices||[]).length?'موردی پیدا نشد':'هنوز فاکتوری ثبت نشده. با + فاکتور جدید بزنید.'}</div>`;
     } else {
@@ -81,7 +85,7 @@
           <span class="amount tx-row-amount invoice-row-summary">
             <span class="invoice-row-total"><span class="invoice-row-label">جمع فاکتور</span><span class="tx-row-total">${toman(inv.total)} ت</span></span>
             ${remain > 0.5 ? `<span class="invoice-row-remain"><span class="invoice-row-label">مانده</span>${remainBit}</span>` : ''}
-            ${paid > 0 ? `<span class="invoice-row-paid"><span class="invoice-row-label">پرداخت‌شده</span><span class="tx-row-meta accent-olive">${toman(paid)} ت</span></span>` : ''}
+            ${(paid > 0 && remain > 0.5) ? `<span class="invoice-row-paid"><span class="invoice-row-label">پرداخت‌شده</span><span class="tx-row-meta accent-olive">${toman(paid)} ت</span></span>` : ''}
           </span>
         </a>`;
       }).join('');
@@ -119,7 +123,8 @@
         ${chip('paid','پرداخت‌شده')}
         ${chip('debt','بدهکار')}
       </div>
-      <div class="tx-toolbar">
+      <div class="tx-toolbar cl-tools">
+        <span id="invoice-count" class="cl-count" aria-live="polite"></span>
         <label class="tx-toolbar-label" for="invoice-sort">مرتب‌سازی</label>
         <select id="invoice-sort" class="tx-toolbar-select">
           <option value="newest" ${invSort==='newest'?'selected':''}>جدیدترین</option>

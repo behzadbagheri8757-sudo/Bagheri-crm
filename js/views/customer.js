@@ -1134,6 +1134,11 @@
         '</details>';
     }
 
+    /* Presentation helper: one labelled row of the identity block (label muted, value primary). */
+    function cdMeta(label, value) {
+      return '<div class="cd-meta-row"><span class="cd-meta-k">' + label + '</span><span class="cd-meta-v">' + esc(String(value)) + '</span></div>';
+    }
+
     root.innerHTML =
       '<div class="btn-row" style="margin-bottom:10px;">' +
       '<a class="btn secondary small" href="' +
@@ -1144,14 +1149,14 @@
       esc(c.name) +
       '</div>' +
       '<div class="customer-identity-meta">' +
-      (c.ownerName ? '<div>مسئول فروشگاه: ' + esc(c.ownerName) + '</div>' : '') +
-      (c.phone ? '<div>تلفن: ' + esc(c.phone) + '</div>' : '') +
+      (c.ownerName ? cdMeta('مسئول فروشگاه', c.ownerName) : '') +
+      (c.phone ? cdMeta('تلفن', c.phone) : '') +
       (c.locationId
-        ? '<div>موقعیت: ' + esc(getLocationDisplayString(c.locationId)) + '</div>'
-        : ((c.region ? '<div>منطقه: ' + esc(c.region) + '</div>' : '') +
-           (c.route ? '<div>مسیر: ' + esc(c.route) + '</div>' : ''))) +
-      (c.address ? '<div>آدرس: ' + esc(c.address) + '</div>' : '') +
-      (c.note ? '<div>یادداشت: ' + esc(c.note) + '</div>' : '') +
+        ? cdMeta('موقعیت', getLocationDisplayString(c.locationId))
+        : ((c.region ? cdMeta('منطقه', c.region) : '') +
+           (c.route ? cdMeta('مسیر', c.route) : ''))) +
+      (c.address ? cdMeta('آدرس', c.address) : '') +
+      (c.note ? cdMeta('یادداشت', c.note) : '') +
       '</div>' +
       '<div class="bp-customer-health"><span class="bp-customer-health-label">وضعیت مشتری</span><span class="bp-customer-health-value ' + (customerRiskLevel ? 'radar-risk-' + esc(customerRiskLevel) : '') + '">' + esc(customerHealthLabel) + '</span></div>' +
       '<div class="customer-balance-block">' +
@@ -1163,7 +1168,7 @@
       '</div></div>' +
       (attRow
         ? '<div class="bp-customer-attention">' +
-            '<span class="bp-attention-icon" aria-hidden="true">⚠️</span>' +
+            '<span class="bp-attention-icon" aria-hidden="true"></span>' +
             '<span>نیازمند پیگیری — ' +
               toman(attRow.balance) + ' ت' +
               (attRow.refKind === 'no_payment_history'
@@ -1172,8 +1177,8 @@
             '</span>' +
           '</div>'
         : '') +
-      '</div>' +
       unifiedSummaryHtml +
+      '</div>' +
       focus.html +
       followUpTopHtml +
       (recommendedAction
@@ -1197,7 +1202,8 @@
       '<button type="button" class="btn small secondary" id="act-print-statement">صورت‌حساب</button>' +
       '<button type="button" class="btn small secondary" id="act-toggle-active">' + (c.active === false ? 'فعال‌سازی مشتری' : 'غیرفعال‌سازی مشتری') + '</button>' +
       '</div></details>' +
-      '<div class="cards" style="margin-bottom:14px;">' +
+      '<h3 class="sub-title">خلاصه مالی</h3>' +
+      '<div class="cards cust-metrics">' +
       '<div class="card"><div class="label">مجموع خرید (فاکتورها)</div><div class="value">' +
       toman(t.invTotal) +
       ' ت</div></div>' +
@@ -1213,7 +1219,7 @@
       '<div class="card"><div class="label">تعداد فاکتور</div><div class="value">' +
       invs.length +
       '</div></div>' +
-      '<div class="card"><div class="label">سود مشتری</div><div class="value accent-amber">' +
+      '<div class="card"><div class="label">سود مشتری</div><div class="value">' +
       toman(profit) +
       ' ت</div></div>' +
       '</div>' +
