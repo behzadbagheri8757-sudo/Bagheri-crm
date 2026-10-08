@@ -147,6 +147,56 @@
   }
 
   /* ---------------------------------------------------------
+     Family-level product state (stock / active).
+     The representative SKU (pair.productId) is display/context ONLY; whether a
+     Family is active or out of stock is decided over ALL its members:
+       members = SKUs seen in this customer's history for the Family
+                 + catalog products with analysisGroupId === familyId.
+     A product without a group is its own single-member Family, so its
+     behaviour is identical to the old per-SKU check.
+     No stock is summed; the decision only asks "does any usable member exist".
+     --------------------------------------------------------- */
+  function _familyMemberIds(familyId, memberIds, productId) {
+    var seen = Object.create(null);
+    var out = [];
+    function add(pid) { if (pid != null && pid !== '' && !seen[pid]) { seen[pid] = true; out.push(pid); } }
+    if (memberIds && memberIds.length) { for (var i = 0; i < memberIds.length; i++) add(memberIds[i]); }
+    else add(productId);
+    if (familyId != null && familyId !== '' && typeof data !== 'undefined' && Array.isArray(data.products)) {
+      for (var j = 0; j < data.products.length; j++) {
+        var p = data.products[j];
+        if (p && p.id && p.analysisGroupId && p.analysisGroupId === familyId) add(p.id);
+      }
+    }
+    return out;
+  }
+
+  // Family is active when at least one member is active.
+  function _familyActive(familyId, memberIds, productId, ctx) {
+    var ids = _familyMemberIds(familyId, memberIds, productId);
+    if (!ids.length) return _productActive(productId, ctx);
+    for (var i = 0; i < ids.length; i++) {
+      if (_productActive(ids[i], ctx)) return true;
+    }
+    return false;
+  }
+
+  // Family is out of stock only when every ACTIVE member has a known stock <= 0.
+  // Any active member with positive or unknown (null) stock => not out of stock.
+  function _familyStockOut(familyId, memberIds, productId, ctx) {
+    var ids = _familyMemberIds(familyId, memberIds, productId);
+    var activeCount = 0;
+    for (var i = 0; i < ids.length; i++) {
+      if (!_productActive(ids[i], ctx)) continue;
+      activeCount++;
+      var q = _productStock(ids[i], ctx);
+      if (q == null || q > 0) return false;
+    }
+    if (!activeCount) { var q0 = _productStock(productId, ctx); return (q0 != null && q0 <= 0); }
+    return true;
+  }
+
+  /* ---------------------------------------------------------
      Product Family identity (runtime only — NEVER persisted).
        familyId = product.analysisGroupId || product.id
      analysisGroupId is the single source of truth: same non-null
@@ -796,11 +846,10 @@
     var importance = _computeImportance(pair, historical, customerId, totalRev, totalProfit, custInvs.length, ctx);
     var confidence = _computeConfidence(historical, recent, pair);
     var trend = _trendClass(historical, recent);
-    var stockQty = _productStock(pair.productId, ctx);
-    var stockOut = (stockQty != null && stockQty <= 0);
+    var stockOut = _familyStockOut(pair.familyId, pair.memberProductIds, pair.productId, ctx);
     var productName = _productName(pair.productId, ctx);
 
-    if (!_productActive(pair.productId, ctx)) return null;
+    if (!_familyActive(pair.familyId, pair.memberProductIds, pair.productId, ctx)) return null;
 
     var candidates = [];
 
@@ -1181,6 +1230,10 @@
   // resolved at call time, so script load order does not matter).
   global.resolveFamilyId = resolveFamilyId;
   global.makeFamilyResolver = makeFamilyResolver;
+  // Family-level stock decision, reused by action.js (stock context text).
+  global.familyStockOut = function (familyId, memberIds, productId, ctx) {
+    return _familyStockOut(familyId, memberIds, productId, ctx);
+  };
 
   /* ============================================================
      WATCH / EARLY WARNING LAYER — SKU side (frozen spec §7-9).
@@ -1223,7 +1276,7 @@
       // Confirmed SKU Intelligence (_analyzePair, line ~619). A product the
       // business no longer carries must not generate a Watch — the
       // underlying "delay"/"drop" would never be able to resolve.
-      if (!_productActive(pair.productId, ctx)) continue;
+      if (!_familyActive(pair.familyId, pair.memberProductIds, pair.productId, ctx)) continue;
 
       var historical = _computeBaseline(pair.purchases, null);
       if (historical.purchaseCount < 1) continue;
@@ -1232,8 +1285,7 @@
       // Same stock-context semantics as Confirmed: only used to suppress
       // timing/quantity-style dims below, never a full exclusion (unlike
       // the active gate above).
-      var stockQty = _productStock(pair.productId, ctx);
-      var stockOut = (stockQty != null && stockQty <= 0);
+      var stockOut = _familyStockOut(pair.familyId, pair.memberProductIds, pair.productId, ctx);
 
       var eventRatio = null;
       if (historical.typicalQuantity != null && historical.typicalQuantity > 0 && recent.typicalQuantity != null) {

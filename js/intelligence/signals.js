@@ -195,8 +195,12 @@
 
   function _purchaseTrendSignals(cid, b, out) {
     if (!(b.salesPrev30 > 0)) return; // false-positive rule: no signal if no baseline
-    var limitedPurchaseHistory = (typeof b.purchaseDayCount === 'number'
-      && b.purchaseDayCount < MIN_PURCHASE_DAYS_FOR_DECLINE);
+    // Distinct purchase days from customerBehavior; if that field is ever absent,
+    // fall back to the invoice count (always present) instead of failing open.
+    var purchaseDaysKnown = (typeof b.purchaseDayCount === 'number') ? b.purchaseDayCount
+      : ((typeof b.invoiceCount === 'number') ? b.invoiceCount : null);
+    var limitedPurchaseHistory = (purchaseDaysKnown != null
+      && purchaseDaysKnown < MIN_PURCHASE_DAYS_FOR_DECLINE);
 
     const declinePct = _pctChange(b.salesPrev30, b.sales30); // positive => decline
     // growthPct: same baseline guard as decline (salesPrev30 > 0 already enforced above)
@@ -1034,6 +1038,27 @@
     return false;
   }
 
+  /* Memo signature of a confirmed-signals override: exactly the fields that
+     _isWatchSuppressedByConfirmed reads (status === 'active', a category listed
+     in WATCH_SUPERSESSION_MAP, productId, familyId). Overrides that suppress the
+     same set of watches share a slot; different ones never do. */
+  function _watchOverrideSignature(list) {
+    var relevant = Object.create(null);
+    var mapKeys = Object.keys(WATCH_SUPERSESSION_MAP);
+    for (var i = 0; i < mapKeys.length; i++) {
+      var cats = WATCH_SUPERSESSION_MAP[mapKeys[i]];
+      for (var j = 0; j < cats.length; j++) relevant[cats[j]] = true;
+    }
+    var parts = [];
+    for (var k = 0; k < list.length; k++) {
+      var s = list[k];
+      if (!s || s.status !== 'active' || !relevant[s.category]) continue;
+      parts.push([s.category, s.productId == null ? '' : s.productId, s.familyId == null ? '' : s.familyId]);
+    }
+    parts.sort(function (a, b) { return JSON.stringify(a) < JSON.stringify(b) ? -1 : 1; });
+    return JSON.stringify(parts);
+  }
+
   /* Main Watch entry point (spec 4/5).
      confirmedSignalsOverride: optional — lets a caller that already
      computed extractCustomerSignals(cid) this render cycle (e.g.
@@ -1045,7 +1070,12 @@
       // Keep override and self-computed results in separate memo slots so a
       // prior call cannot silently satisfy a later call with a different
       // input shape.
-      var watchMemoKey = String(cid) + ':' + (Array.isArray(confirmedSignalsOverride) ? 'override' : 'self');
+      // For an array override the slot is keyed by the CONTENT that actually
+      // drives suppression (see _watchOverrideSignature), so [] (raw) and a
+      // real confirmed list can never share a result.
+      var watchMemoKey = String(cid) + ':' + (Array.isArray(confirmedSignalsOverride)
+        ? 'override:' + _watchOverrideSignature(confirmedSignalsOverride)
+        : 'self');
       return ctx.memo('watchObservations', watchMemoKey, function () {
         return extractWatchObservations(cid, confirmedSignalsOverride, ctx, true);
       });

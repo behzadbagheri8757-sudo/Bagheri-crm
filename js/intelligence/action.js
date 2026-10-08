@@ -174,8 +174,14 @@
   }
 
   /* P-07: operational contexts — only from real data; never invent. */
-  function stockContext(productId) {
+  function stockContext(productId, signal) {
     if (productId == null || productId === '' || productId === 'multi') return null;
+    // Family signals: productId is only the display representative, so stock is
+    // decided over the whole Family (any usable member => not out of stock).
+    if (signal && signal.familyId != null && signal.familyId !== '' && typeof familyStockOut === 'function') {
+      var famMembers = (signal.evidence && Array.isArray(signal.evidence.memberProductIds)) ? signal.evidence.memberProductIds : null;
+      return familyStockOut(signal.familyId, famMembers, productId) ? 'موجودی انبار تمام است' : null;
+    }
     if (typeof data === 'undefined' || !Array.isArray(data.products)) return null;
     var p = null;
     for (var i = 0; i < data.products.length; i++) {
@@ -398,7 +404,7 @@
 
     // P-07: append real operational contexts only (short, non-duplicative).
     var contexts = [];
-    var sc = stockContext(winner.productId);
+    var sc = stockContext(winner.productId, winner);
     var vc = visitContext(cid, ctx);
     var fc = feedbackContext(winner);
     if (sc) contexts.push(sc);
