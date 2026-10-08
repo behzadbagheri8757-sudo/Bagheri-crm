@@ -362,6 +362,11 @@
     });
   }
 
+  /* Minimum weighted coverage of the declining products by recent still_stock /
+     no_need visit outcomes for the action to be considered no longer needed.
+     Product contract value (80%); the single place to change it. */
+  const ACTION_ELIGIBILITY_MIN_COVERAGE = 0.80;
+
   /* Action Eligibility (read-only, fail-open).
      Runs AFTER the winner is chosen. Signal / Risk / Priority / persistence are
      never touched; this only decides whether the chosen Candidate Action is still
@@ -369,15 +374,16 @@
 
      Scope: PURCHASE_DECLINE_SEVERE only (every other winner is eligible).
      That signal is customer-level and carries no product, so its "topic" is the
-     existing customerBehavior().decliningProducts list. The action is NOT
-     eligible only when EVERY declining product (resolved to its Family with the
-     existing makeFamilyResolver) has, as its LATEST visit offer, a recent
-     rejected offer with rejectionReason still_stock / no_need, and the customer
-     has not bought that Family on an invoice dated after that visit.
-     Anything not provable (no visits, unresolvable product, other outcome,
-     missing window, any error) => eligible (fail-open).
-     "Recent" reuses the project's existing episode window,
-     PERSISTENCE_PARAMS.windowDays (same window feedback.js uses); no new number. */
+     existing customerBehavior().decliningProducts list, each entry weighted by its
+     earlyQty. An entry is COVERED when its latest visit offer inside the existing
+     episode window (PERSISTENCE_PARAMS.windowDays) is reaction 'rejected' with
+     rejectionReason still_stock / no_need (same product, else same Family via the
+     existing makeFamilyResolver). accepted / deferred / ordered never cover.
+     The action is NOT eligible when coveredWeight / totalWeight >= 80%
+     (ACTION_ELIGIBILITY_MIN_COVERAGE) and the customer has not bought any
+     declining Family on an invoice dated after the visit that was matched to it.
+     Anything not provable (no visits, invalid decliningProducts / earlyQty /
+     dates, unresolvable product, missing window, any error) => eligible (fail-open). */
   function _isActionEligible(winnerSignal, cid, ctx) {
     try {
       if (!winnerSignal || winnerSignal.category !== 'PURCHASE_DECLINE_SEVERE') return true;
@@ -408,18 +414,25 @@
       const isoRe = /^\d{4}-\d{2}-\d{2}$/;
       const invoices = (typeof data !== 'undefined' && Array.isArray(data.invoices)) ? data.invoices : [];
 
+      let totalWeight = 0;
+      let coveredWeight = 0;
       for (let di = 0; di < declining.length; di++) {
-        const pid = declining[di] && declining[di].productId;
-        if (!pid) return true;                       // topic not resolvable
+        const entry = declining[di];
+        const pid = entry && entry.productId;
+        const weight = entry && entry.earlyQty;
+        if (!pid || typeof weight !== 'number' || !isFinite(weight) || !(weight > 0)) return true;   // not reliable
         const topic = famOf(pid);
-        if (topic == null || topic === '') return true;
+        if (topic == null || topic === '') return true;                                              // topic not resolvable
+        totalWeight += weight;
 
-        // latest visit offer for this topic (same product, or same Family)
+        // latest visit offer for this topic (same product, or same Family) inside the window
         let latest = null;
         for (let vi = 0; vi < visits.length; vi++) {
           const visit = visits[vi];
           if (!visit || typeof visit.date !== 'string' || !isoRe.test(visit.date) ||
               !Array.isArray(visit.offeredProducts)) continue;
+          const age = daysAgo(visit.date);
+          if (age == null || !isFinite(age) || age < 0 || age > windowDays) continue;                // not a recent valid visit
           for (let oi = 0; oi < visit.offeredProducts.length; oi++) {
             const op = visit.offeredProducts[oi];
             if (!op || !op.productId || famOf(op.productId) !== topic) continue;
@@ -431,16 +444,9 @@
             }
           }
         }
-        if (!latest) return true;                    // visits never touched this topic
+        if (!latest) continue;                       // no recent related offer => uncovered
 
-        const age = daysAgo(latest.date);
-        if (age == null || !isFinite(age) || age < 0 || age > windowDays) return true;   // not recent
-
-        const op = latest.op;
-        if (op.reaction !== 'rejected' ||
-            (op.rejectionReason !== 'still_stock' && op.rejectionReason !== 'no_need')) return true;
-
-        // bought this Family after that visit => the recorded outcome is superseded
+        // bought this Family after that visit => the recorded outcome is superseded: keep the action
         for (let ii = 0; ii < invoices.length; ii++) {
           const inv = invoices[ii];
           if (!inv || inv.customerId !== cid || typeof inv.date !== 'string' || !(inv.date > latest.date)) continue;
@@ -450,8 +456,15 @@
             if (it && it.productId && it.qty > 0 && famOf(it.productId) === topic) return true;
           }
         }
+
+        const op = latest.op;
+        if (op.reaction === 'rejected' &&
+            (op.rejectionReason === 'still_stock' || op.rejectionReason === 'no_need')) {
+          coveredWeight += weight;
+        }
       }
-      return false;   // every declining product is covered by a recent still_stock / no_need visit outcome
+      // not eligible only when the weighted coverage reaches the contract threshold
+      return !(totalWeight > 0 && (coveredWeight / totalWeight) >= ACTION_ELIGIBILITY_MIN_COVERAGE);
     } catch (e) {
       return true;    // never block an action because of an error
     }
