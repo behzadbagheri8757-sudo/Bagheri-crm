@@ -362,6 +362,101 @@
     });
   }
 
+  /* Action Eligibility (read-only, fail-open).
+     Runs AFTER the winner is chosen. Signal / Risk / Priority / persistence are
+     never touched; this only decides whether the chosen Candidate Action is still
+     worth putting in today's queue.
+
+     Scope: PURCHASE_DECLINE_SEVERE only (every other winner is eligible).
+     That signal is customer-level and carries no product, so its "topic" is the
+     existing customerBehavior().decliningProducts list. The action is NOT
+     eligible only when EVERY declining product (resolved to its Family with the
+     existing makeFamilyResolver) has, as its LATEST visit offer, a recent
+     rejected offer with rejectionReason still_stock / no_need, and the customer
+     has not bought that Family on an invoice dated after that visit.
+     Anything not provable (no visits, unresolvable product, other outcome,
+     missing window, any error) => eligible (fail-open).
+     "Recent" reuses the project's existing episode window,
+     PERSISTENCE_PARAMS.windowDays (same window feedback.js uses); no new number. */
+  function _isActionEligible(winnerSignal, cid, ctx) {
+    try {
+      if (!winnerSignal || winnerSignal.category !== 'PURCHASE_DECLINE_SEVERE') return true;
+      if (typeof customerBehavior !== 'function' || typeof daysAgo !== 'function') return true;
+      if (typeof PERSISTENCE_PARAMS === 'undefined' || !PERSISTENCE_PARAMS ||
+          typeof PERSISTENCE_PARAMS.windowDays !== 'number' ||
+          !isFinite(PERSISTENCE_PARAMS.windowDays) || !(PERSISTENCE_PARAMS.windowDays > 0)) return true;
+      const windowDays = PERSISTENCE_PARAMS.windowDays;
+
+      const behavior = customerBehavior(cid, ctx);
+      const declining = (behavior && Array.isArray(behavior.decliningProducts)) ? behavior.decliningProducts : [];
+      if (!declining.length) return true;
+
+      let customer = null;
+      if (ctx && typeof ctx.customerById === 'function') {
+        customer = ctx.customerById(cid);
+      } else if (typeof data !== 'undefined' && Array.isArray(data.customers)) {
+        for (let i = 0; i < data.customers.length; i++) {
+          if (data.customers[i] && data.customers[i].id === cid) { customer = data.customers[i]; break; }
+        }
+      }
+      const visits = customer && Array.isArray(customer.visits) ? customer.visits : [];
+      if (!visits.length) return true;
+
+      const famOf = (typeof makeFamilyResolver === 'function')
+        ? makeFamilyResolver(ctx)
+        : function (pid) { return pid; };
+      const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+      const invoices = (typeof data !== 'undefined' && Array.isArray(data.invoices)) ? data.invoices : [];
+
+      for (let di = 0; di < declining.length; di++) {
+        const pid = declining[di] && declining[di].productId;
+        if (!pid) return true;                       // topic not resolvable
+        const topic = famOf(pid);
+        if (topic == null || topic === '') return true;
+
+        // latest visit offer for this topic (same product, or same Family)
+        let latest = null;
+        for (let vi = 0; vi < visits.length; vi++) {
+          const visit = visits[vi];
+          if (!visit || typeof visit.date !== 'string' || !isoRe.test(visit.date) ||
+              !Array.isArray(visit.offeredProducts)) continue;
+          for (let oi = 0; oi < visit.offeredProducts.length; oi++) {
+            const op = visit.offeredProducts[oi];
+            if (!op || !op.productId || famOf(op.productId) !== topic) continue;
+            const t = String(visit.time || '');
+            if (!latest || visit.date > latest.date ||
+                (visit.date === latest.date && (t > latest.time ||
+                  (t === latest.time && (vi > latest.vi || (vi === latest.vi && oi > latest.oi)))))) {
+              latest = { date: visit.date, time: t, vi: vi, oi: oi, op: op };
+            }
+          }
+        }
+        if (!latest) return true;                    // visits never touched this topic
+
+        const age = daysAgo(latest.date);
+        if (age == null || !isFinite(age) || age < 0 || age > windowDays) return true;   // not recent
+
+        const op = latest.op;
+        if (op.reaction !== 'rejected' ||
+            (op.rejectionReason !== 'still_stock' && op.rejectionReason !== 'no_need')) return true;
+
+        // bought this Family after that visit => the recorded outcome is superseded
+        for (let ii = 0; ii < invoices.length; ii++) {
+          const inv = invoices[ii];
+          if (!inv || inv.customerId !== cid || typeof inv.date !== 'string' || !(inv.date > latest.date)) continue;
+          const items = Array.isArray(inv.items) ? inv.items : [];
+          for (let ti = 0; ti < items.length; ti++) {
+            const it = items[ti];
+            if (it && it.productId && it.qty > 0 && famOf(it.productId) === topic) return true;
+          }
+        }
+      }
+      return false;   // every declining product is covered by a recent still_stock / no_need visit outcome
+    } catch (e) {
+      return true;    // never block an action because of an error
+    }
+  }
+
   function calculateCustomerAction(cid, precomputedPriority, opts, skipMemo) {
     opts = opts || {};
     var ctx = opts.ctx || null;
@@ -377,7 +472,13 @@
     );
 
     const actionCandidates = _applyCurrentContextFilter(cid, priority.signals, ctx);
-    const winner = _pickActionSignal(actionCandidates);
+    let winner = _pickActionSignal(actionCandidates);
+    // Action Eligibility: the winner is chosen first; if it is no longer needed
+    // given a recent related visit, the existing NO_ACTION path is used. The next
+    // candidate is deliberately NOT promoted, and the signal itself is untouched.
+    if (winner && !_isActionEligible(winner, cid, ctx)) {
+      winner = null;
+    }
 
     if (!winner) {
       return Object.assign({
