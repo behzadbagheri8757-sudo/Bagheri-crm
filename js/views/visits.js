@@ -14,6 +14,44 @@
   let chipHandlers = [];
   let sortHandler = null;
   let fabHandler = null;
+  let listClickHandler = null;
+  let listKeyHandler = null;
+
+  // Display labels for a visit's offeredProducts (same wording as the visit form).
+  const OFFER_REACTION_LABEL = { accepted: 'قبول کرد', rejected: 'رد کرد', deferred: 'بعداً تصمیم می‌گیرد' };
+  const OFFER_REASON_LABEL = {
+    price: 'قیمت', quality: 'کیفیت', competitor: 'رقیب', unavailable: 'موجود نبود',
+    no_need: 'نیاز نداشت', still_stock: 'موجود داشت', other: 'سایر',
+  };
+  const OFFER_STOCK_SOURCE_LABEL = { ours: 'از ما', competitor: 'از رقیب', unknown: 'نمی‌دانم' };
+
+  function offerMeta(op) {
+    const parts = [OFFER_REACTION_LABEL[op.reaction] || ''];
+    if (op.reaction === 'rejected') {
+      if (OFFER_REASON_LABEL[op.rejectionReason]) parts.push(OFFER_REASON_LABEL[op.rejectionReason]);
+      if (op.rejectionReason === 'still_stock' && OFFER_STOCK_SOURCE_LABEL[op.stockSource]) {
+        parts.push(OFFER_STOCK_SOURCE_LABEL[op.stockSource]);
+      }
+    }
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  // Expandable list of the products offered in this visit (display only).
+  function offeredDetailsHtml(v) {
+    const offers = Array.isArray(v.offeredProducts) ? v.offeredProducts.filter(op => op && op.productId) : [];
+    if (!offers.length) return '';
+    return '<details class="row-details"><summary>پیشنهادهای این ویزیت (' + enToFaDigits(String(offers.length)) + ' مورد)</summary>' +
+      '<div class="row-details-list">' +
+        offers.map(op => {
+          const prod = (data.products || []).find(p => p.id === op.productId) || {};
+          return '<div class="row-details-item">' +
+            '<span class="row-details-name">' + esc(prod.name || 'کالا') + '</span>' +
+            '<span class="row-details-meta">' + esc(offerMeta(op)) + '</span>' +
+          '</div>';
+        }).join('') +
+      '</div></details>';
+  }
+
   function navigateToCustomer(cid) {
     AppRouter.navigate('/customer', { id: cid });
   }
@@ -86,19 +124,25 @@
       const v = r.visit;
       const cls = resultClass(v.result);
       const ordered = v.ordered || v.result === VISIT_RESULTS[0];
-      const primaryCtx = v.nextAction || v.reason || v.note || '';
+      // Every present context field gets its own line (nextAction, reason, note).
+      const ctxLines = [v.nextAction, v.reason, v.note].filter(Boolean)
+        .map(t => `<span class="sub tx-row-ctx">${esc(t)}</span>`).join('');
+      const offersHtml = offeredDetailsHtml(v);
       const scoreBit = (typeof v.score === 'number')
         ? ` · امتیاز ${v.score}`
         : '';
-      return `<a class="ledger-row tx-row" href="#/customer?id=${encodeURIComponent(r.customerId)}">
+      // <div> (not <a>) so a <details> can live inside; navigation is delegated
+      // from #visit-list (see drawVisitsPage) and ignores clicks inside the details.
+      return `<div class="ledger-row tx-row${offersHtml ? ' has-row-details' : ''}" data-visit-customer="${esc(r.customerId)}" role="link" tabindex="0">
         <span class="name">
           <span class="tx-row-title">${esc(r.customerName)}</span>
           <span class="sub">${faDate(v.date)}${v.time ? ' ' + esc(v.time) : ''}${r.region ? ' · ' + esc(r.region) : ''}${scoreBit}</span>
           <span class="sub ${cls}">${esc(v.result || 'ویزیت')}</span>
-          ${primaryCtx ? `<span class="sub tx-row-ctx">${esc(primaryCtx)}</span>` : ''}
+          ${ctxLines}
+          ${offersHtml}
         </span>
         <span class="filler"></span>
-      </a>`;
+      </div>`;
     }).join('');
   }
 
@@ -173,6 +217,23 @@
     };
     sortEl.addEventListener('change', sortHandler);
 
+    // Delegated row navigation. Clicks/keys inside the <details> only toggle it.
+    const listEl = document.getElementById('visit-list');
+    listClickHandler = function (e) {
+      if (e.target.closest('.row-details')) return;
+      const row = e.target.closest('[data-visit-customer]');
+      if (!row) return;
+      e.preventDefault();
+      navigateToCustomer(row.getAttribute('data-visit-customer'));
+    };
+    listKeyHandler = function (e) {
+      if (e.key !== 'Enter' || !e.target.matches || !e.target.matches('[data-visit-customer]')) return;
+      e.preventDefault();
+      navigateToCustomer(e.target.getAttribute('data-visit-customer'));
+    };
+    listEl.addEventListener('click', listClickHandler);
+    listEl.addEventListener('keydown', listKeyHandler);
+
     renderVisitListOnly();
   }
 
@@ -218,6 +279,14 @@
         if (so) so.removeEventListener('change', sortHandler);
       }
       sortHandler = null;
+
+      const le = document.getElementById('visit-list');
+      if (le) {
+        if (listClickHandler) le.removeEventListener('click', listClickHandler);
+        if (listKeyHandler) le.removeEventListener('keydown', listKeyHandler);
+      }
+      listClickHandler = null;
+      listKeyHandler = null;
 
       if (fab) {
         fab.style.display = 'none';

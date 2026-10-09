@@ -601,7 +601,28 @@
       const retBtn = canReturn
         ? '<button type="button" class="btn secondary small tx-status-btn" data-return-purchase="' + esc(p.id) + '">برگشت</button>'
         : '';
-      return `<div class="ledger-row tx-row">
+      // Itemised purchases: expandable list of lines (name, qty + unit, unit price, line total).
+      // Display only — reads p.items / data.products, never writes. Legacy single-product
+      // and description-only purchases keep their previous title and have no details.
+      const lineItems = Array.isArray(p.items) ? p.items.filter(it => it) : [];
+      const itemsDetails = lineItems.length
+        ? '<details class="row-details"><summary>مشاهده اقلام</summary><div class="row-details-list">' +
+            lineItems.map(it => {
+              const prod = data.products.find(x => x.id === it.productId) || {};
+              const qty = Number(it.qty) || 0;
+              const unitCost = Number(it.unitCost) || 0;
+              const unit = prod.packageWeight ? 'بسته' : 'واحد';
+              const pkg = prod.packageWeight ? ' (وزن بسته ' + enToFaDigits(String(prod.packageWeight)) + ')' : '';
+              return '<div class="row-details-item">' +
+                '<span class="row-details-name">' + esc(it.name || prod.name || 'کالا') + '</span>' +
+                '<span class="row-details-total">' + toman(qty * unitCost) + ' ت</span>' +
+                '<span class="row-details-meta">' + enToFaDigits(String(qty)) + ' ' + unit + pkg +
+                  ' × ' + toman(unitCost) + ' ت</span>' +
+              '</div>';
+            }).join('') +
+          '</div></details>'
+        : '';
+      return `<div class="ledger-row tx-row${itemsDetails ? ' row-details-wrap' : ''}">
         <span class="name">
           <span class="tx-row-title">${esc(String(itemsHint))}</span>
           <span class="sub">${faDate(p.date)}${ret ? ' · برگشت ' + toman(ret) + ' ت' : ''}</span>
@@ -611,6 +632,7 @@
           <span class="tx-row-total">${toman(net)} ت</span>
           ${retBtn}
         </span>
+        ${itemsDetails}
       </div>`;
     }).join('') : '<div class="empty" style="padding:12px 0;">خریدی ثبت نشده</div>';
 
