@@ -4755,3 +4755,146 @@ input.has-input-clear{padding-inline-end:34px !important}
    box stays >= 41px (74px at <=360) so a 5-digit quantity (~40px) never touches the button. */
 input.has-input-clear.has-input-clear-sm{padding-inline-end:26px !important}
 @media print{.input-clear-btn{display:none !important}}
+
+/* ============================================================
+   Visit form — customer product list (محصولات این مشتری)
+   Touch-first: 52–56px targets, 12px gaps, destructive/back actions
+   visually separated. Uses vg tokens only (light + dark).
+   ============================================================ */
+.visit-card .vp-head{margin:0 0 14px;}
+.visit-card .vp-head .q-title{margin:0 0 4px;}
+.visit-card .vp-sub{font-size:.74rem;line-height:1.6;color:var(--vg-color-text-muted);}
+.visit-card .vp-rows{display:flex;flex-direction:column;gap:10px;margin:0 0 14px;}
+.visit-card .vp-row{display:flex;align-items:stretch;gap:12px;}
+.visit-card .vp-row-main{
+  flex:1 1 auto;min-width:0;min-height:56px;
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;
+  padding:10px 14px;margin:0;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-soft);
+  color:var(--vg-color-text);
+  font:inherit;text-align:start;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:background .15s,border-color .15s;
+}
+.visit-card .vp-row-main:active{background:var(--vg-color-surface-soft);}
+.visit-card .vp-row.is-done .vp-row-main{background:var(--vg-color-surface-soft);}
+.visit-card .vp-row-name{font-size:.9rem;font-weight:var(--vg-weight-title);line-height:1.45;word-break:break-word;}
+.visit-card .vp-row-meta{font-size:.7rem;line-height:1.5;color:var(--vg-color-text-muted);}
+.visit-card .vp-status{
+  display:inline-block;padding:2px 10px;border-radius:var(--vg-radius-pill);
+  font-size:.72rem;font-weight:var(--vg-weight-title);line-height:1.6;
+}
+.visit-card .vp-status.is-success{background:var(--vg-color-success-soft);color:var(--vg-color-success);}
+.visit-card .vp-status.is-warning{background:var(--vg-color-warning-soft);color:var(--vg-color-warning);}
+.visit-card .vp-status.is-danger{background:var(--vg-color-danger-soft);color:var(--vg-color-danger);}
+.visit-card .vp-row-del{
+  flex:0 0 auto;min-width:64px;min-height:56px;padding:0 14px;margin:0;
+  background:transparent;border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-soft);
+  color:var(--vg-color-danger);font:inherit;font-size:.78rem;font-weight:var(--vg-weight-title);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.visit-card .vp-row-del:active{background:var(--vg-color-danger-soft);}
+.visit-card .vp-count{margin:0 0 10px;font-size:.72rem;color:var(--vg-color-text-muted);}
+.visit-card .vp-empty{
+  margin:0 0 14px;padding:16px 14px;text-align:center;
+  font-size:.8rem;line-height:1.7;color:var(--vg-color-text-muted);
+  background:var(--vg-color-surface-soft);border-radius:var(--vg-radius-soft);
+}
+.visit-card .vp-add{
+  display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:52px;margin:0;padding:0 14px;
+  background:var(--vg-color-primary-soft);
+  border:1px dashed var(--vg-color-primary);
+  border-radius:var(--vg-radius-soft);
+  color:var(--vg-color-primary);font:inherit;font-size:.88rem;font-weight:var(--vg-weight-title);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.visit-card .vp-opts{display:grid;gap:12px;margin:0;}
+.visit-card .vp-opts.is-2col{grid-template-columns:1fr 1fr;}
+.visit-card .chip-opt.vp-opt{
+  width:100%;min-height:52px;padding:10px 12px;margin:0;
+  border-radius:var(--vg-radius-soft);
+  font-size:.88rem;font-weight:var(--vg-weight-title);line-height:1.4;text-align:center;
+  white-space:normal;word-break:break-word;
+  -webkit-tap-highlight-color:transparent;
+}
+.visit-card .vp-footer{
+  margin-top:22px;padding-top:12px;
+  border-top:1px solid var(--vg-color-divider);
+  display:flex;justify-content:flex-start;
+}
+.visit-card .vp-back{
+  min-height:46px;min-width:96px;padding:0 18px;margin:0;
+  background:transparent;border:0;border-radius:var(--vg-radius-soft);
+  color:var(--vg-color-text-secondary);font:inherit;font-size:.84rem;font-weight:var(--vg-weight-title);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.visit-card .vp-back:active{background:var(--vg-color-surface-soft);}
+
+/* ============================================================
+   Expandable row details (supplier purchase items / visit offers)
+   <details class="row-details"> inside a ledger row. Tokens only.
+   ============================================================ */
+.ledger-row.has-row-details{align-items:flex-start;}
+/* the name column takes the free width so the expanded list uses the whole row */
+.ledger-row.has-row-details > .name{flex:1 1 0;min-width:0;}
+.ledger-row.has-row-details > .filler{flex:0 0 0;min-width:0;}
+/* Rows whose details is a direct child (supplier purchases): the title/amount stay on
+   the first line and the details takes its own full-width line below. */
+.ledger-row.row-details-wrap{flex-wrap:wrap;}
+.ledger-row.row-details-wrap > .row-details{flex:0 0 100%;order:9;margin-top:0;}
+.row-details{align-self:stretch;width:100%;margin:2px 0 0;padding:0;font-weight:var(--vg-weight-regular);}
+.row-details > summary{
+  list-style:none;display:flex;align-items:center;min-height:36px;padding:4px 0;
+  color:var(--vg-color-primary);font-size:.78rem;font-weight:var(--vg-weight-title);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.row-details > summary::-webkit-details-marker{display:none;}
+.row-details > summary::before{
+  content:'';display:inline-block;flex:none;width:7px;height:7px;margin-inline-end:8px;
+  border-inline-start:1.5px solid currentColor;border-block-end:1.5px solid currentColor;
+  transform:rotate(45deg) translateY(-1px);
+  transition:transform .15s ease;
+}
+.row-details[open] > summary::before{transform:rotate(135deg) translate(-1px,-1px);}
+.row-details-list{display:flex;flex-direction:column;margin:2px 0 4px;}
+.row-details-item{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;row-gap:2px;
+  align-items:baseline;padding:8px 0;
+  border-top:1px solid var(--vg-color-divider);
+}
+.row-details-item > .row-details-name,
+.row-details-item > .row-details-meta{grid-column:1;}
+.row-details-item > .row-details-name:only-child,
+.row-details-item > .row-details-meta:last-child:not(:nth-child(2)){grid-column:1 / -1;}
+.row-details-total{
+  grid-column:2;grid-row:1;
+  font-size:.82rem;font-weight:var(--vg-weight-value);color:var(--vg-color-text);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.row-details-name{
+  font-size:.84rem;font-weight:var(--vg-weight-title);line-height:1.45;
+  color:var(--vg-color-text);white-space:normal;overflow-wrap:anywhere;
+}
+.row-details-meta{
+  font-size:.72rem;font-weight:var(--vg-weight-regular);line-height:1.5;
+  color:var(--vg-color-text-muted);white-space:normal;overflow-wrap:anywhere;
+}
+@media (prefers-reduced-motion:reduce){
+  .row-details > summary::before{transition:none;}
+}
+/* Visits rows are <div data-visit-customer> (so a <details> can live inside);
+   keep the same disclosure chevron and pressed state as navigating <a> rows. */
+.ledger-row[data-visit-customer]::after{
+  content:'';flex:none;width:14px;height:14px;margin-inline-start:2px;opacity:.38;
+  background-color:currentColor;align-self:center;
+  -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
+  mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
+  -webkit-mask-size:contain;mask-size:contain;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+  -webkit-mask-position:center;mask-position:center;
+}
+.ledger-row[data-visit-customer]:active{background:var(--vg-color-surface-soft);border-radius:10px;}
+.ledger-row[data-visit-customer]:focus-visible{outline:2px solid var(--vg-color-primary);outline-offset:-2px;border-radius:10px;}
