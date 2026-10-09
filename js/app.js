@@ -1740,7 +1740,8 @@ function openAddVisit(cid){
     pendingReaction: null,
     pendingRejectionReason: null,
     nextAction: null, // optional; one of VISIT_NEXT_ACTIONS
-    step: 'result', // result | product | reaction | rejectReason | stockSource | another | done
+    pendingFrom: 'list', // where the pending product came from: list | add
+    step: 'result', // result | list | add | reaction | rejectReason | stockSource
   };
   const nextActionEl = document.getElementById('f-next-action');
   if (nextActionEl) {
@@ -1789,10 +1790,109 @@ function openAddVisit(cid){
     return p ? (p.name || '—') : '—';
   }
 
+  /* ── Customer-relevant product list (read-only, from existing customerBehavior output) ──
+     Sources: topProducts (real purchase history) then offeredProductStats (real offers).
+     Order: purchase-history products first (existing order), then offered products by
+     most recent offer, with earlier "deferred" and offer count as tie-breakers.
+     No catalog filler: products with no purchase/offer history never enter the list. Max 10. */
+  const VISIT_PRODUCT_LIST_MAX = 10;
+  const activeById = {};
+  activeProducts.forEach(function (p) { activeById[p.id] = p; });
+  const offerStatById = {};
+  (Array.isArray(visitBehavior.offeredProductStats) ? visitBehavior.offeredProductStats : []).forEach(function (st) {
+    if (st && st.productId) offerStatById[st.productId] = st;
+  });
+  function buildCustomerProductCandidates(){
+    const out = [];
+    const seen = {};
+    function push(pid, bought){
+      if (!pid || seen[pid] || !activeById[pid] || out.length >= VISIT_PRODUCT_LIST_MAX) return;
+      seen[pid] = true;
+      out.push({ id: pid, bought: !!bought });
+    }
+    (Array.isArray(visitBehavior.topProducts) ? visitBehavior.topProducts : []).forEach(function (tp) {
+      push(tp && tp.productId, true);
+    });
+    Object.keys(offerStatById).map(function (k) { return offerStatById[k]; }).sort(function (a, b) {
+      const da = a.lastOfferedDate || '', db = b.lastOfferedDate || '';
+      if (da !== db) return da < db ? 1 : -1;
+      const dd = (b.deferredCount || 0) - (a.deferredCount || 0);
+      if (dd) return dd;
+      return (b.offeredCount || 0) - (a.offeredCount || 0);
+    }).forEach(function (st) { push(st.productId, false); });
+    return out;
+  }
+  const customerProductCandidates = buildCustomerProductCandidates();
+
+  function optBtn(group, value, label, selected){
+    return '<button type="button" class="chip-opt vp-opt' + (selected ? ' selected' : '') + '" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
+  }
+  function currentOffer(pid){
+    return (state.offeredProducts || []).find(function (op) { return op.productId === pid; }) || null;
+  }
+  function offerSummary(op){
+    if (op.reaction === 'accepted') return { text: 'قبول کرد', tone: 'success' };
+    if (op.reaction === 'deferred') return { text: 'بعداً تصمیم می‌گیرد', tone: 'warning' };
+    const rl = REJECTION_REASON_CHIPS.find(function (c) { return c.value === op.rejectionReason; });
+    let t = 'رد کرد' + (rl ? ' · ' + rl.label : '');
+    if (op.rejectionReason === 'still_stock' && op.stockSource) {
+      const sl = STOCK_SOURCE_CHIPS.find(function (c) { return c.value === op.stockSource; });
+      if (sl) t += ' (' + sl.label + ')';
+    }
+    return { text: t, tone: 'danger' };
+  }
+  // One entry per product: re-answering a product replaces its previous entry.
+  function commitOffer(entry){
+    state.offeredProducts = (state.offeredProducts || []).filter(function (op) { return op.productId !== entry.productId; });
+    state.offeredProducts.push(entry);
+  }
+  function backToList(){
+    state.pendingProductId = null;
+    state.pendingReaction = null;
+    state.pendingRejectionReason = null;
+    state.pendingFrom = 'list';
+    state.step = 'list';
+    renderStage();
+  }
+  function candidateMeta(c){
+    const parts = [];
+    if (c.bought) parts.push('در سابقهٔ خرید');
+    const st = offerStatById[c.id];
+    if (st && st.lastOfferedDate) {
+      parts.push('آخرین پیشنهاد ' + ((BP && BP.relDays(st.lastOfferedDate)) || faDate(st.lastOfferedDate)));
+    }
+    if (st && st.deferredCount > 0) parts.push('قبلاً: بعداً تصمیم می‌گیرد');
+    return parts.join(' · ');
+  }
+  function productRowHtml(pid, meta){
+    const op = currentOffer(pid);
+    const sum = op ? offerSummary(op) : null;
+    return '<div class="vp-row' + (op ? ' is-done' : '') + '">' +
+      '<button type="button" class="vp-row-main" data-vp-open="' + esc(pid) + '">' +
+        '<span class="vp-row-name">' + esc(productLabel(pid)) + '</span>' +
+        (sum
+          ? '<span class="vp-status is-' + sum.tone + '">' + esc(sum.text) + '</span>'
+          : (meta ? '<span class="vp-row-meta">' + esc(meta) + '</span>' : '')) +
+      '</button>' +
+      (op ? '<button type="button" class="vp-row-del" data-vp-del="' + esc(pid) + '" aria-label="حذف ' + esc(productLabel(pid)) + '">حذف</button>' : '') +
+    '</div>';
+  }
+  function footerBack(target){
+    return '<div class="vp-footer"><button type="button" class="vp-back visit-stage-back" data-back-step="' + esc(target) + '">بازگشت</button></div>';
+  }
+  function shownProductIds(){
+    const shown = {};
+    customerProductCandidates.forEach(function (c) { shown[c.id] = true; });
+    (state.offeredProducts || []).forEach(function (op) { shown[op.productId] = true; });
+    return shown;
+  }
+
   function renderStage(){
     if (!stage) return;
     let html = '';
     const step = state.step;
+    const pname = esc(productLabel(state.pendingProductId));
+    const cur = state.pendingProductId ? currentOffer(state.pendingProductId) : null;
 
     if (step === 'result') {
       html =
@@ -1802,78 +1902,84 @@ function openAddVisit(cid){
             return chipBtn('result', o.value, o.label);
           }).join('') + '</div>' +
         '</div>';
-    } else if (step === 'product') {
-      const chosen = {};
-      (state.offeredProducts || []).forEach(function (op) { chosen[op.productId] = true; });
-      const avail = activeProducts.filter(function (p) { return !chosen[p.id]; });
+    } else if (step === 'list') {
+      const candIds = {};
+      customerProductCandidates.forEach(function (c) { candIds[c.id] = true; });
+      const extras = (state.offeredProducts || []).filter(function (op) { return !candIds[op.productId]; });
+      const n = (state.offeredProducts || []).length;
       html =
-        '<div class="visit-card visit-card-enter" data-visit-step="product">' +
-          '<div class="q-title">چه محصولی پیشنهاد/بررسی شد؟</div>' +
+        '<div class="visit-card visit-card-enter" data-visit-step="list">' +
+          '<div class="vp-head">' +
+            '<div class="q-title">محصولات این مشتری</div>' +
+            '<div class="vp-sub">مواردی که احتمالاً در این ویزیت ارزش بررسی دارند</div>' +
+          '</div>' +
+          ((customerProductCandidates.length || extras.length)
+            ? '<div class="vp-rows">' +
+                customerProductCandidates.map(function (c) { return productRowHtml(c.id, candidateMeta(c)); }).join('') +
+                extras.map(function (op) { return productRowHtml(op.productId, ''); }).join('') +
+              '</div>'
+            : '<div class="vp-empty">برای این مشتری هنوز سابقهٔ خرید یا پیشنهاد ثبت نشده است.</div>') +
+          (n ? '<div class="vp-count">' + n + ' محصول در این ویزیت ثبت شده</div>' : '') +
+          '<button type="button" class="vp-add" data-vp-add><span class="vp-add-plus" aria-hidden="true">＋</span><span>افزودن محصول</span></button>' +
+          footerBack('result') +
+        '</div>';
+    } else if (step === 'add') {
+      const shown = shownProductIds();
+      const avail = activeProducts.filter(function (p) { return !shown[p.id]; });
+      html =
+        '<div class="visit-card visit-card-enter" data-visit-step="add">' +
+          '<div class="vp-head">' +
+            '<div class="q-title">افزودن محصول</div>' +
+            '<div class="vp-sub">سایر محصولات فعال کاتالوگ</div>' +
+          '</div>' +
           (avail.length
-            ? '<div class="visit-product-grid chip-wrap">' + avail.map(function (p) {
-                return chipBtn('product', p.id, p.name || '—');
+            ? '<div class="vp-rows">' + avail.map(function (p) {
+                return '<div class="vp-row"><button type="button" class="vp-row-main" data-vp-pick="' + esc(p.id) + '">' +
+                  '<span class="vp-row-name">' + esc(p.name || '—') + '</span></button></div>';
               }).join('') + '</div>'
-            : '<div class="empty" style="padding:12px 0;">همه محصولات فعال قبلاً ثبت شدند یا کالایی نیست.</div>' +
-              '<button type="button" class="btn secondary small" data-skip-product>بدون پیشنهاد محصول، ادامه</button>') +
-          '<button type="button" class="btn secondary small visit-stage-back" data-back-step="result">بازگشت</button>' +
+            : '<div class="vp-empty">محصول دیگری برای افزودن نیست.</div>') +
+          footerBack('list') +
         '</div>';
     } else if (step === 'reaction') {
       html =
         '<div class="visit-card visit-card-enter" data-visit-step="reaction">' +
-          '<div class="q-title">واکنش مشتری؟ <span class="sub" style="display:inline;font-weight:400;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
+          '<div class="q-title">واکنش مشتری؟ <span class="sub" style="display:inline;font-weight:400;">(' + pname + ')</span></div>' +
           (function () {
             const hl = visitHints ? visitHints(state.pendingProductId) : [];
             return hl.length ? '<div class="bp-hint">' + BP.hintHtml(hl) + '</div>' : '';
           })() +
-          '<div class="chip-wrap">' + REACTION_CHIPS.map(function (o) {
-            return chipBtn('reaction', o.value, o.label);
+          '<div class="vp-opts">' + REACTION_CHIPS.map(function (o) {
+            return optBtn('reaction', o.value, o.label, cur && cur.reaction === o.value);
           }).join('') + '</div>' +
-          '<button type="button" class="btn secondary small visit-stage-back" data-back-step="product">بازگشت</button>' +
+          footerBack(state.pendingFrom === 'add' ? 'add' : 'list') +
         '</div>';
     } else if (step === 'rejectReason') {
       html =
         '<div class="visit-card visit-card-enter" data-visit-step="rejectReason">' +
-          '<div class="q-title">چرا نخرید؟ <span class="sub" style="display:inline;font-weight:400;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
-          '<div class="chip-wrap">' + REJECTION_REASON_CHIPS.map(function (o) {
-            return chipBtn('rejectReason', o.value, o.label);
+          '<div class="q-title">چرا نخرید؟ <span class="sub" style="display:inline;font-weight:400;">(' + pname + ')</span></div>' +
+          '<div class="vp-opts is-2col">' + REJECTION_REASON_CHIPS.map(function (o) {
+            return optBtn('rejectReason', o.value, o.label, cur && cur.reaction === 'rejected' && cur.rejectionReason === o.value);
           }).join('') + '</div>' +
-          '<button type="button" class="btn secondary small visit-stage-back" data-back-step="reaction">بازگشت</button>' +
+          footerBack('reaction') +
         '</div>';
     } else if (step === 'stockSource') {
       html =
         '<div class="visit-card visit-card-enter" data-visit-step="stockSource">' +
-          '<div class="q-title">این موجودی از کجا بود؟ <span class="sub" style="display:inline;font-weight:400;">(' + esc(productLabel(state.pendingProductId)) + ')</span></div>' +
-          '<div class="chip-wrap">' + STOCK_SOURCE_CHIPS.map(function (o) {
-            return chipBtn('stockSource', o.value, o.label);
+          '<div class="q-title">این موجودی از کجا بود؟ <span class="sub" style="display:inline;font-weight:400;">(' + pname + ')</span></div>' +
+          '<div class="vp-opts">' + STOCK_SOURCE_CHIPS.map(function (o) {
+            return optBtn('stockSource', o.value, o.label, cur && cur.rejectionReason === 'still_stock' && cur.stockSource === o.value);
           }).join('') + '</div>' +
-          '<button type="button" class="btn secondary small visit-stage-back" data-back-step="rejectReason">بازگشت</button>' +
-        '</div>';
-    } else if (step === 'another') {
-      html =
-        '<div class="visit-card visit-card-enter" data-visit-step="another">' +
-          '<div class="q-title">محصول دیگری هم مطرح شد؟</div>' +
-          '<div class="chip-wrap">' +
-            chipBtn('another', 'yes', 'بله') +
-            chipBtn('another', 'no', 'خیر') +
-          '</div>' +
-          '<button type="button" class="btn secondary small visit-stage-back" data-back-step="product">بازگشت</button>' +
-        '</div>';
-    } else if (step === 'done') {
-      const n = validOffered().length;
-      html =
-        '<div class="visit-card visit-card-enter" data-visit-step="done">' +
-          '<div class="q-title">آماده ثبت</div>' +
-          '<div class="empty" style="padding:8px 0;text-align:right;">' +
-            (state.result ? ('نتیجه: ' + esc(state.result) + '<br>') : '') +
-            (n ? (n + ' محصول با واکنش کامل ثبت می‌شود.') : 'بدون محصول پیشنهادی (اختیاری).') +
-            '<br>برای ذخیره روی «ثبت و پایان» بزنید.' +
-          '</div>' +
-          '<button type="button" class="btn secondary small visit-stage-back" data-back-step="another">بازگشت</button>' +
+          footerBack('rejectReason') +
         '</div>';
     }
 
     stage.innerHTML = html;
     bindStageChips();
+  }
+
+  function markDirty(el){
+    const sheetEl = el && el.closest ? el.closest('.sheet') : null;
+    if (sheetEl) sheetEl.dataset.dirty = '1';
   }
 
   function bindStageChips(){
@@ -1884,17 +1990,46 @@ function openAddVisit(cid){
         if (next) { state.step = next; renderStage(); }
       });
     });
-    const skipProductBtn = stage.querySelector('[data-skip-product]');
-    if (skipProductBtn) {
-      skipProductBtn.addEventListener('click', function () {
-        state.step = 'another';
+    stage.querySelectorAll('[data-vp-open]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        markDirty(btn);
+        state.pendingProductId = btn.getAttribute('data-vp-open');
+        state.pendingReaction = null;
+        state.pendingRejectionReason = null;
+        state.pendingFrom = 'list';
+        state.step = 'reaction';
+        renderStage();
+      });
+    });
+    stage.querySelectorAll('[data-vp-pick]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        markDirty(btn);
+        state.pendingProductId = btn.getAttribute('data-vp-pick');
+        state.pendingReaction = null;
+        state.pendingRejectionReason = null;
+        state.pendingFrom = 'add';
+        state.step = 'reaction';
+        renderStage();
+      });
+    });
+    stage.querySelectorAll('[data-vp-del]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        markDirty(btn);
+        const pid = btn.getAttribute('data-vp-del');
+        state.offeredProducts = (state.offeredProducts || []).filter(function (op) { return op.productId !== pid; });
+        renderStage();
+      });
+    });
+    const addBtn = stage.querySelector('[data-vp-add]');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        state.step = 'add';
         renderStage();
       });
     }
     stage.querySelectorAll('.chip-opt').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        const sheetEl = btn.closest('.sheet');
-        if (sheetEl) sheetEl.dataset.dirty = '1';
+        markDirty(btn);
         const group = btn.getAttribute('data-vgroup');
         const value = btn.getAttribute('data-value');
         if (!group || value == null) return;
@@ -1903,14 +2038,7 @@ function openAddVisit(cid){
           state.result = value;
           state.pendingProductId = null;
           state.pendingReaction = null;
-          state.step = 'product';
-          renderStage();
-          return;
-        }
-        if (group === 'product') {
-          state.pendingProductId = value;
-          state.pendingReaction = null;
-          state.step = 'reaction';
+          state.step = 'list';
           renderStage();
           return;
         }
@@ -1923,16 +2051,12 @@ function openAddVisit(cid){
             return;
           }
           if (state.pendingProductId && (value === 'accepted' || value === 'deferred')) {
-            state.offeredProducts.push({
+            commitOffer({
               productId: state.pendingProductId,
               reaction: value,
             });
           }
-          state.pendingProductId = null;
-          state.pendingReaction = null;
-          state.pendingRejectionReason = null;
-          state.step = 'another';
-          renderStage();
+          backToList();
           return;
         }
         if (group === 'rejectReason') {
@@ -1944,17 +2068,13 @@ function openAddVisit(cid){
           }
           if (state.pendingProductId && state.pendingReaction === 'rejected' && value) {
             // Non-still_stock reasons: never attach stockSource
-            state.offeredProducts.push({
+            commitOffer({
               productId: state.pendingProductId,
               reaction: 'rejected',
               rejectionReason: value,
             });
           }
-          state.pendingProductId = null;
-          state.pendingReaction = null;
-          state.pendingRejectionReason = null;
-          state.step = 'another';
-          renderStage();
+          backToList();
           return;
         }
         if (group === 'stockSource') {
@@ -1964,32 +2084,14 @@ function openAddVisit(cid){
             state.pendingRejectionReason === 'still_stock' &&
             (value === 'ours' || value === 'competitor' || value === 'unknown')
           ) {
-            state.offeredProducts.push({
+            commitOffer({
               productId: state.pendingProductId,
               reaction: 'rejected',
               rejectionReason: 'still_stock',
               stockSource: value,
             });
           }
-          state.pendingProductId = null;
-          state.pendingReaction = null;
-          state.pendingRejectionReason = null;
-          state.step = 'another';
-          renderStage();
-          return;
-        }
-        if (group === 'another') {
-          if (value === 'yes') {
-            state.pendingProductId = null;
-            state.pendingReaction = null;
-            state.pendingRejectionReason = null;
-            state.step = 'product';
-            renderStage();
-            return;
-          }
-          state.step = 'done';
-          renderStage();
-          persistVisit(true);
+          backToList();
           return;
         }
       });
