@@ -2269,9 +2269,29 @@ function openInvoiceForm(cid, editInv, opts){
     }
     return fifoCostCache[productId];
   }
+  // Visit → invoice ("ثبت و ایجاد فاکتور"): every product the customer ACCEPTED in that visit
+  // starts as its own invoice line, exactly like picking it by hand (same default price rule
+  // as selectProduct: retail||sell, qty 1, no discount, no buyPrice). Read-only on the visit;
+  // inactive/missing products and duplicates are skipped. Nothing accepted => the usual blank line.
+  function visitAcceptedRows(visitId){
+    const vc = data.customers.find(c=>c.id===cid);
+    const visit = vc && Array.isArray(vc.visits) ? vc.visits.find(v=>v && v.id===visitId) : null;
+    if(!visit || !Array.isArray(visit.offeredProducts)) return [];
+    const seen = Object.create(null);
+    const out = [];
+    visit.offeredProducts.forEach(op=>{
+      if(!op || op.reaction!=='accepted' || !op.productId || seen[op.productId]) return;
+      const prod = invoiceProduct(op.productId);
+      if(!prod || prod.active===false) return;
+      seen[op.productId] = true;
+      out.push({productId:op.productId, qty:1, price:prod.retail||prod.sell||0, discount:0});
+    });
+    return out;
+  }
+  const visitRows = (!editInv && opts && opts.visitId) ? visitAcceptedRows(opts.visitId) : [];
   let rows = editInv
     ? editInv.items.map(it=>({productId:it.productId, qty:it.qty, price:it.price, discount:it.discount||0, buyPrice:it.buyPrice}))
-    : [{productId:'', qty:1, price:0, discount:0}];
+    : (visitRows.length ? visitRows : [{productId:'', qty:1, price:0, discount:0}]);
   const cust = data.customers.find(c=>c.id===cid); // presentation only: Customer Context header
   // Presentation only: one-time per-sheet context map (last offer/reject, stock source,
   // relevant active watch, last purchase). Reads existing facts; never writes or recalculates.
@@ -2433,15 +2453,31 @@ function openInvoiceForm(cid, editInv, opts){
     },0));
   }
 
-  function productDropListHtml(idx, query){
-    const q = (query||'').trim();
-    // Inactive products (active===false) excluded from NEW invoice product selector only.
-    const activeOnly = data.products.filter(p=>p.active!==false);
-    const list = (q ? activeOnly.filter(p=>(p.name||'').includes(q)) : activeOnly).slice(0, 40);
-    if(!list.length) return `<div class="prod-drop-empty">کالایی پیدا نشد</div>`;
-    return list.map(p=>{
-      const hl = productHint(p.id);
-      return `
+  // The customer's most-purchased products (customerBehavior.topProducts, already memoised in
+  // invoiceCtx), active ones only. Read-only; any failure just means "no frequent section".
+  let frequentProductsCache = null;
+  function frequentProducts(){
+    if(frequentProductsCache) return frequentProductsCache;
+    frequentProductsCache = [];
+    try{
+      const beh = (typeof customerBehavior === 'function') ? customerBehavior(cid, invoiceCtx) : null;
+      const top = beh && Array.isArray(beh.topProducts) ? beh.topProducts : [];
+      const seen = Object.create(null);
+      top.forEach(t=>{
+        const pid = t && t.productId;
+        if(!pid || seen[pid]) return;
+        const p = invoiceProduct(pid);
+        if(!p || p.active===false) return;
+        seen[pid] = true;
+        frequentProductsCache.push(p);
+      });
+    }catch(eFreq){ frequentProductsCache = []; }
+    return frequentProductsCache;
+  }
+
+  function productDropItemHtml(idx, p){
+    const hl = productHint(p.id);
+    return `
       <div class="prod-drop-item" data-row="${idx}" data-pid="${esc(p.id)}" role="button" tabindex="0">
         <span class="prod-drop-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></span>
         <span class="prod-drop-main">
@@ -2452,7 +2488,26 @@ function openInvoiceForm(cid, editInv, opts){
         <span class="prod-drop-chevron" aria-hidden="true">›</span>
       </div>
     `;
-    }).join('');
+  }
+  function productDropListHtml(idx, query){
+    const q = (query||'').trim();
+    const matches = p=>!q || (p.name||'').includes(q);
+    // Inactive products (active===false) excluded from NEW invoice product selector only.
+    const activeOnly = data.products.filter(p=>p.active!==false);
+    // Section 1 — this customer's most-purchased products; section 2 — everything else (max 40).
+    const frequent = frequentProducts().filter(matches);
+    const inFrequent = Object.create(null);
+    frequent.forEach(p=>{ inFrequent[p.id] = true; });
+    const others = activeOnly.filter(p=>matches(p) && !inFrequent[p.id]).slice(0, 40);
+    if(!frequent.length && !others.length) return `<div class="prod-drop-empty">کالایی پیدا نشد</div>`;
+    // Headings only when both sections exist; otherwise the list looks exactly as before.
+    if(frequent.length && others.length){
+      return `<div class="prod-drop-section-title">پرخرید این مشتری</div>` +
+        frequent.map(p=>productDropItemHtml(idx, p)).join('') +
+        `<div class="prod-drop-section-title">همه محصولات</div>` +
+        others.map(p=>productDropItemHtml(idx, p)).join('');
+    }
+    return (frequent.length ? frequent : others).map(p=>productDropItemHtml(idx, p)).join('');
   }
   function productDropPanelHtml(idx){
     return `
@@ -2548,6 +2603,8 @@ function openInvoiceForm(cid, editInv, opts){
     const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
     const profitColor = profit<0 ? (isDarkTheme ? '#FF6973' : '#D52B36') : (isDarkTheme ? '#45C99A' : '#0F7A4A');
     const remainCls = newBalance>0 ? 'accent-rust' : 'accent-olive';
+    const totalChipEl = document.getElementById('inv-total-chip-value');
+    if(totalChipEl) totalChipEl.textContent = toman(total) + ' ت';
     const summaryEl = document.getElementById('calc-summary');
     if(summaryEl) summaryEl.innerHTML = `
       <div class="ledger-row inv-sum-tertiary"><span class="name">مانده قبلی مشتری</span><span class="filler"></span><span class="amount">${toman(prevBalance)} ت</span></div>
@@ -2598,6 +2655,10 @@ function openInvoiceForm(cid, editInv, opts){
         </div>
 
         <div class="inv-body">
+          <div class="inv-total-chip" id="inv-total-chip" role="status" aria-live="polite">
+            <span class="inv-total-chip-label">جمع این فاکتور</span>
+            <strong class="inv-total-chip-value" id="inv-total-chip-value"></strong>
+          </div>
           ${editInv?`<div class="inv-edit-notice">با ذخیره‌ی این ویرایش، موجودی انبار و مانده حساب مشتری به‌طور خودکار اصلاح می‌شود.</div>`:''}
 
           <div class="inv-customer-context">
@@ -2726,6 +2787,10 @@ function openInvoiceForm(cid, editInv, opts){
       if(ov) ov.style.zIndex = '80';
       const genericClose = document.getElementById('closeX');
       if(genericClose) genericClose.style.display = 'none';
+      // Presentation-only: the sticky total chip sits just below the fixed header.
+      const invHeaderEl = document.querySelector('.inv-header');
+      const invBodyEl = document.querySelector('.inv-body');
+      if(invHeaderEl && invBodyEl) invBodyEl.style.setProperty('--inv-header-h', invHeaderEl.offsetHeight + 'px');
       const cancelBtn = document.getElementById('inv-cancel');
       if(cancelBtn) cancelBtn.addEventListener('click', async ()=>{
         if(await window.__requestAppExit('invoice-cancel')) closeModal();
@@ -2751,6 +2816,24 @@ function openInvoiceForm(cid, editInv, opts){
       el.addEventListener('click', activate);
       el.addEventListener('keydown', e=>{
         if(e.key==='Enter' || e.key===' '){ e.preventDefault(); activate(); }
+      });
+    });
+    // Collapse: tapping the blank part of the ACTIVE row (not the product box, the qty/price
+    // group, the delete button or the market details) folds it back to its summary line.
+    // Same state change as activating another row; no render. A tap that merely closed the
+    // product picker (see the outside-tap listener below) never collapses the row.
+    document.querySelectorAll('.inv-line').forEach(line=>{
+      line.addEventListener('click', e=>{
+        const idx = parseInt(line.getAttribute('data-row'), 10);
+        if(isNaN(idx) || idx !== activeRowIndex) return;
+        if(!rows[idx] || !rows[idx].productId) return;
+        if(e.target.closest('.inv-line-collapsed, .row-product-search, .prod-drop, .inv-line-qtyrate, .inv-line-del, .inv-line-market-details, input, button, a, label, select, textarea')) return;
+        if(document._invPickerTapPending){ document._invPickerTapPending = false; return; }
+        if(prodDropOpenRow !== null) closeAllProductDrops();
+        const focused = document.activeElement;
+        if(focused && focused !== document.body && typeof focused.blur === 'function') focused.blur();
+        activeRowIndex = null;
+        line.classList.remove('is-active');
       });
     });
     document.querySelectorAll('.row-qty').forEach(el=>el.addEventListener('blur', e=>{
@@ -2991,9 +3074,11 @@ function openInvoiceForm(cid, editInv, opts){
     if(!document._invProdDropOutsideBound){
       document._invProdDropOutsideBound = true;
       document.addEventListener('pointerdown', function(e){
+        document._invPickerTapPending = false;      // every new touch starts clean
         if(e.target.closest('.prod-drop') || e.target.closest('.row-product-search')) return;
         const active = document._invProdDropActive;
         if(!active || active.openRow == null) return;
+        document._invPickerTapPending = true;       // this tap only closes the picker (see row click handler)
         active.close();
       }, true);
     }
