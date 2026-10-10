@@ -1121,6 +1121,16 @@ html[data-theme="dark"] #main.customer-detail-view .watch-level-high{
 .prod-drop-hint .bp-hint-line{font-size:.7rem;line-height:1.6;}
 .prod-drop-item:has(.prod-drop-hint){padding-top:9px;padding-bottom:9px;}
 
+/* Invoice product picker: section headings ("پرخرید این مشتری" / "همه محصولات") */
+.prod-drop-section-title{
+  padding:8px 12px 4px;
+  font-size:.7rem;
+  font-weight:var(--vg-weight-title);
+  line-height:1.5;
+  color:var(--vg-color-text-muted);
+  background:var(--vg-color-surface-soft);
+}
+
 .inv-line-intel{
   margin:4px 14px 0;
   font-size:11.5px;
@@ -1941,3 +1951,197 @@ html[data-theme="dark"] #main #invoice-chips .chip.active{box-shadow:0 1px 3px r
 #main .inv-detail .tx-details > .cards > .card .value{overflow-wrap:anywhere;}
 #main .inv-detail .tx-details > .card{background:transparent;border:0;box-shadow:none;padding:0;}
 @media (prefers-reduced-motion:reduce){#main .inv-detail .tx-details > summary::after{transition:none;}}
+
+/* ============================================================
+   Invoice form — UX polish (presentation only, tokens only)
+   Same surface grammar as Reports (token border, soft shadow,
+   24px section rhythm) while staying a form, not a report.
+   ============================================================ */
+
+/* The 72px top offset moves from padding to an in-flow spacer so the sticky chip's
+   offset is measured from the scrollport edge in every engine (padding on a scroll
+   container is treated differently by sticky in different browsers). */
+.inv-sheet-v2 .inv-body{padding-top:0;}
+.inv-sheet-v2 .inv-body::before{
+  content:"";display:block;height:calc(72px + env(safe-area-inset-top,0px));
+}
+/* Always-visible total: a floating chip just under the fixed header
+   (a separate surface — not part of .inv-header). */
+.inv-total-chip{
+  position:sticky;
+  top:calc(var(--inv-header-h, 56px) + 6px);
+  z-index:4;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin:0 0 16px;padding:9px 18px;
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-pill);
+  box-shadow:var(--vg-shadow-raised);
+}
+.inv-total-chip-label{
+  font-size:var(--vg-type-label);font-weight:var(--vg-weight-label);
+  color:var(--vg-color-text-muted);
+}
+.inv-total-chip-value{
+  font-size:var(--vg-type-primary);font-weight:var(--vg-weight-emphasis);
+  color:var(--vg-color-text);font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+
+/* Rhythm + one heading style for every section */
+.inv-sheet-v2 .inv-section,
+.inv-sheet-v2 .inv-items-section,
+.inv-sheet-v2 .inv-payment-section{margin-bottom:var(--vg-space-section);}
+html .inv-sheet-v2 .inv-section-title,
+html .inv-sheet-v2 .inv-items-card-label{
+  font-size:var(--vg-type-section);font-weight:var(--vg-weight-title);
+  line-height:1.35;color:var(--vg-color-text);
+}
+.inv-sheet-v2 .inv-section-title{margin:0 0 10px;}
+.inv-sheet-v2 .inv-items-card-head{padding:0 2px 10px;}
+.inv-sheet-v2 .inv-date-field{margin-bottom:var(--vg-space-section);}
+.inv-sheet-v2 .inv-customer-context{
+  padding:4px 2px 14px;margin-bottom:14px;
+  border-bottom:1px solid var(--vg-color-divider);
+}
+
+/* One surface standard (token border, group shadow, raised radius) */
+.inv-sheet-v2 .inv-items-card,
+.inv-sheet-v2 .inv-summary-section,
+.inv-sheet-v2 .inv-profit-summary{
+  background:var(--vg-color-surface);
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-raised);
+  box-shadow:var(--vg-shadow-group);
+}
+.inv-sheet-v2 .inv-payment-action,
+.inv-sheet-v2 .inv-discount-block{
+  border:1px solid var(--vg-color-border);
+  border-radius:var(--vg-radius-soft);
+}
+.inv-sheet-v2 .inv-line + .inv-line::before{background:var(--vg-color-divider);}
+
+/* Items: roomier lines, bigger entry boxes (44px HIG height), clearer gaps */
+.inv-sheet-v2 .inv-line-main{padding:14px 16px 6px;}
+.inv-sheet-v2 .inv-line-sub{padding:6px 16px 0;min-height:56px;}
+.inv-sheet-v2 .inv-line-qtyrate{gap:10px;}
+.inv-sheet-v2 .inv-mini-input{
+  width:76px;min-width:76px;height:44px;
+  border-radius:12px;font-size:15px;
+}
+.inv-sheet-v2 .inv-mini-input-price{width:120px;min-width:120px;}
+@media(max-width:360px){
+  .inv-sheet-v2 .inv-mini-input{width:68px;min-width:68px;}
+  .inv-sheet-v2 .inv-mini-input-price{width:104px;min-width:104px;}
+}
+/* The shared floating clear (×) button (ui.js) used to take 22–30px of a 48px box and
+   left ~15px for the digits. Inside the invoice sheet its icon is small (14px) and the
+   fields reserve only what it needs; its tap box (22/30px, positioned by ui.js) is unchanged. */
+body:has(.inv-sheet-v2) .input-clear-btn svg{width:14px;height:14px;}
+html .inv-sheet-v2 input.inv-mini-input.has-input-clear{padding-inline-end:26px!important;}
+.inv-sheet-v2 .inv-line-avg-cost,
+.inv-sheet-v2 .inv-line-intel{margin-inline:16px;}
+.inv-sheet-v2 .inv-line-market-details{margin:6px 16px 14px;}
+/* Active line: one soft tint (state), no extra border/card */
+html .inv-sheet-v2 .inv-line-view-active{background:var(--vg-color-surface-soft);}
+/* quiet affordance: tapping the blank part of an active line folds it back */
+.inv-sheet-v2 .inv-line.is-active:not(.inv-line-empty) .inv-line-sub::after{
+  content:'';flex:none;width:16px;height:16px;margin-inline-start:auto;opacity:.38;
+  background-color:var(--vg-color-text-muted);pointer-events:none;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 15 6-6 6 6'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 15 6-6 6 6'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+/* keep the product name clear of the 44px delete target */
+.inv-sheet-v2 .inv-line-view-active .row-product-search.inv-line-name{padding-left:50px!important;}
+
+/* Delete ×: ~20px visual, full 44×44 tap area (padding is the invisible hit zone) */
+html .inv-sheet-v2 .inv-line-del{
+  left:2px;width:44px;height:44px;min-width:44px;padding:12px;box-sizing:border-box;
+  border-radius:50%;
+  background-color:var(--vg-color-neutral-soft);background-clip:content-box;
+  color:var(--vg-color-text-muted);
+  font-size:.82rem;line-height:20px;text-align:center;opacity:1;
+}
+html .inv-sheet-v2 .inv-line-del:active{
+  background-color:var(--vg-color-danger-soft);color:var(--vg-color-danger);
+}
+
+/* Picker: clearly a layer ABOVE the row (bigger radius + overlay shadow + edge;
+   dark theme: a lighter elevated surface), and the row it belongs to is outlined */
+.prod-drop-panel{
+  border:1px solid var(--vg-color-border);
+  border-radius:20px;
+  box-shadow:var(--vg-shadow-overlay), 0 0 0 1px var(--vg-color-border);
+}
+html[data-theme="dark"] .prod-drop-panel{
+  background:var(--vg-color-neutral-soft);
+  border-color:var(--vg-color-border);
+  box-shadow:var(--vg-shadow-overlay), 0 0 0 1px var(--vg-color-border);
+}
+.inv-sheet-v2 .inv-line:has(.prod-drop.is-open) .inv-line-view-active{
+  box-shadow:inset 0 0 0 1.5px var(--vg-color-primary);
+}
+
+/* Summary: two hero numbers (total, new balance); the rest quiet; one divider between
+   "before payment" and "payment / result". Size + weight only, no new colours. */
+.inv-sheet-v2 .inv-summary-section{padding:16px 16px 14px;}
+.inv-sheet-v2 .inv-summary-section .inv-section-title{margin-bottom:8px;}
+.inv-summary-section #calc-summary .ledger-row{padding:7px 0;}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-sum-tertiary .name,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-sum-tertiary .amount,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-sum-secondary .name,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-sum-secondary .amount,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-discount-row .name,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-discount-row .amount{
+  font-size:var(--vg-type-label);font-weight:var(--vg-weight-label);
+  color:var(--vg-color-text-muted);
+}
+.inv-summary-section #calc-summary .inv-total-row{
+  margin-top:2px;padding-top:8px;border-top:0;
+}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-total-row .name,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-remain-row .name{
+  font-size:var(--vg-type-secondary);font-weight:var(--vg-weight-title);
+}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-total-row .amount,
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-remain-row .amount{
+  font-size:calc(var(--vg-type-primary) * 1.3);font-weight:var(--vg-weight-emphasis);
+}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-sum-secondary{
+  margin-top:8px;padding-top:12px;border-top:1px solid var(--vg-color-border);
+}
+.inv-summary-section #calc-summary .inv-remain-row{
+  margin-top:2px;padding:8px 0 2px;border-top:0;
+}
+/* profit sits as the footer of the same grouped surface */
+.inv-sheet-v2 .inv-summary-section{border-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0;}
+.inv-sheet-v2 .inv-profit-summary{
+  margin-top:0;border-top:1px solid var(--vg-color-divider);
+  border-top-left-radius:0;border-top-right-radius:0;
+}
+
+/* ============================================================
+   Customer detail — identity card spacing + dark-theme separation
+   ============================================================ */
+#main.customer-detail-view .customer-identity-card{padding:18px 16px;}
+#main.customer-detail-view .customer-identity-name{margin-bottom:12px;}
+#main.customer-detail-view .customer-identity-meta{line-height:1.6;}
+#main.customer-detail-view .cd-meta-row{padding:8px 0;gap:12px;}
+#main.customer-detail-view .cd-meta-row + .cd-meta-row{border-top:1px solid var(--vg-color-divider);}
+#main.customer-detail-view .cd-meta-k{flex:0 0 96px;}
+#main.customer-detail-view .customer-balance-block{margin-top:14px;padding-top:14px;}
+#main.customer-detail-view .bp-customer-health{margin-top:14px;padding-top:14px;}
+#main.customer-detail-view .bp-customer-attention{margin-top:14px;}
+html[data-theme="dark"] #main.customer-detail-view .customer-identity-card{
+  border-color:var(--vg-color-border);
+  box-shadow:0 0 0 1px var(--vg-color-border);
+}
+html[data-theme="dark"] #main.customer-detail-view .cd-meta-row + .cd-meta-row{border-top-color:var(--vg-color-border);}
+
+/* Invoice form — small clean-ups found while polishing */
+/* the JS text already reads "میانگین خرید: …"; the CSS label duplicated it */
+.inv-sheet-v2 .inv-line-avg-cost::before{content:none;}
+/* visible focus on the qty / price boxes in both themes (the old ring was dark-on-dark) */
+html .sheet.inv-sheet-host .inv-mini-input:focus{
+  border-color:var(--vg-color-primary);
+  box-shadow:0 0 0 3px var(--vg-color-primary-soft);
+}
