@@ -2122,15 +2122,15 @@ html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-sum-secondary{
 /* ============================================================
    Customer detail — identity card spacing + dark-theme separation
    ============================================================ */
-#main.customer-detail-view .customer-identity-card{padding:18px 16px;}
-#main.customer-detail-view .customer-identity-name{margin-bottom:12px;}
+#main.customer-detail-view .customer-identity-card{padding:20px 18px;}
+#main.customer-detail-view .customer-identity-name{margin-bottom:14px;}
 #main.customer-detail-view .customer-identity-meta{line-height:1.6;}
-#main.customer-detail-view .cd-meta-row{padding:8px 0;gap:12px;}
+#main.customer-detail-view .cd-meta-row{padding:11px 0;gap:12px;}
 #main.customer-detail-view .cd-meta-row + .cd-meta-row{border-top:1px solid var(--vg-color-divider);}
 #main.customer-detail-view .cd-meta-k{flex:0 0 96px;}
-#main.customer-detail-view .customer-balance-block{margin-top:14px;padding-top:14px;}
-#main.customer-detail-view .bp-customer-health{margin-top:14px;padding-top:14px;}
-#main.customer-detail-view .bp-customer-attention{margin-top:14px;}
+#main.customer-detail-view .customer-balance-block{margin-top:16px;padding-top:16px;}
+#main.customer-detail-view .bp-customer-health{margin-top:16px;padding-top:16px;}
+#main.customer-detail-view .bp-customer-attention{margin-top:16px;}
 html[data-theme="dark"] #main.customer-detail-view .customer-identity-card{
   border-color:var(--vg-color-border);
   box-shadow:0 0 0 1px var(--vg-color-border);
