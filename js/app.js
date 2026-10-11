@@ -2383,10 +2383,11 @@ function openInvoiceForm(cid, editInv, opts){
       amount.className = 'inv-line-amount';
       view.append(body, amount);
       line.insertBefore(view, line.querySelector('.inv-line-view-active'));
+      // قبلاً اینجا setActiveRow صدا زده می‌شد که در scope این تابع نیست (ReferenceError)؛
+      // برای آخرین ردیفِ پرشده تپ بی‌اثر می‌ماند تا re-render بعدی. حالا از hook استفاده می‌شود.
       const activate = ()=>{
-        if(idx === activeRowIndex) return;
-        setActiveRow(idx);
-        focusQtyForRow(idx);
+        const lineEl = view.closest('.inv-line');
+        if(lineEl && activateCollapsedRow) activateCollapsedRow(parseInt(lineEl.getAttribute('data-row'), 10));
       };
       view.addEventListener('click', activate);
       view.addEventListener('keydown', e=>{
@@ -2442,6 +2443,10 @@ function openInvoiceForm(cid, editInv, opts){
   // this value, since it has no collapsed summary to fall back to.
   let activeRowIndex = rows.findIndex(r=>!r.productId);
   if(activeRowIndex < 0) activeRowIndex = null;
+  // تاریخ فاکتور در closure نگه داشته می‌شود تا با هر renderSheet() دوباره به «امروز» برنگردد.
+  let invoiceDateStr = editInv ? editInv.date : todayISO();
+  // فعال‌سازی ردیف جمع‌شده؛ renderSheet آن را تنظیم می‌کند (setActiveRow داخل scope همان است).
+  let activateCollapsedRow = null;
   const qtyFocusPrevious = new Map();
   function focusQtyForRow(idx){
     const input = document.querySelector(`.inv-line[data-row="${idx}"] .row-qty`);
@@ -2669,7 +2674,7 @@ function openInvoiceForm(cid, editInv, opts){
             </div>
           </div>
 
-          <div class="field inv-date-field"><label>تاریخ فاکتور</label>${shamsiDateInputHTML('f-date', editInv?editInv.date:todayISO())}</div>
+          <div class="field inv-date-field"><label>تاریخ فاکتور</label>${shamsiDateInputHTML('f-date', invoiceDateStr)}</div>
 
           <div class="inv-section inv-items-section">
             <div class="inv-items-card-head">
@@ -2747,11 +2752,12 @@ function openInvoiceForm(cid, editInv, opts){
               <div class="inv-payment-panel-head"><div><strong>دریافت چک</strong><small>دارم چک دریافت می‌کنم</small></div><button type="button" class="inv-payment-close" data-payment-close="check" aria-label="بستن">×</button></div>
               <label for="f-check">مبلغ چک</label>
               <input id="f-check" type="text" inputmode="decimal" value="${payInputText(checkAmount)}" placeholder="مبلغ چک را وارد کنید">
-              <button type="button" class="inv-payment-confirm" data-payment-confirm="check">ثبت دریافت چک</button>
+              <!-- تاریخ سررسید قبل از دکمهٔ ثبت می‌آید تا کاربر قبل از ثبت به آن برسد -->
               <div class="inv-payment-check-due" id="check-due-wrap" style="display:${checkAmount>0?'block':'none'};">
                 <label for="f-check-due">تاریخ سررسید چک</label>
                 ${shamsiDateInputHTML('f-check-due', checkDue)}
               </div>
+              <button type="button" class="inv-payment-confirm" data-payment-confirm="check">ثبت دریافت چک</button>
             </div>
 
             <div class="inv-discount-block" role="group" aria-label="تخفیف فاکتور">
@@ -2804,14 +2810,15 @@ function openInvoiceForm(cid, editInv, opts){
     // No-Purchase Reason chips (re-bound after every renderSheet rebuild)
     if(typeof bindNoPurchasePrompt === 'function') bindNoPurchasePrompt(cid);
 
+    activateCollapsedRow = function(idx){
+      if(isNaN(idx) || idx === activeRowIndex) return;
+      setActiveRow(idx);
+      focusQtyForRow(idx);
+    };
     document.querySelectorAll('.inv-line-collapsed').forEach(el=>{
       const activate = ()=>{
         const line = el.closest('.inv-line');
-        if(!line) return;
-        const idx = parseInt(line.getAttribute('data-row'), 10);
-        if(idx === activeRowIndex) return;
-        setActiveRow(idx);
-        focusQtyForRow(idx);
+        if(line) activateCollapsedRow(parseInt(line.getAttribute('data-row'), 10));
       };
       el.addEventListener('click', activate);
       el.addEventListener('keydown', e=>{
@@ -3148,8 +3155,15 @@ function openInvoiceForm(cid, editInv, opts){
             setTimeout(()=>input.focus(), 0);
           }
           if(method==='check'){
+            // فیلد پنهان و فیلد دیداری هر دو از یک مقدار پر می‌شوند تا آنچه دیده می‌شود همان ذخیره شود.
+            const desiredDue = pendingPayment.checkDue || checkDue;
             const due = panel.querySelector('#f-check-due');
-            if(due) due.value = pendingPayment.checkDue || checkDue;
+            if(due) due.value = desiredDue;
+            const dueVisible = panel.querySelector('.shamsi-date-field');
+            const jDue = (typeof isoToJalali === 'function') ? isoToJalali(desiredDue) : null;
+            if(dueVisible && jDue) dueVisible.value = enToFaDigits(jDue[0] + '/' + jDue[1] + '/' + jDue[2]);
+            const dueWrap = panel.querySelector('#check-due-wrap');
+            if(dueWrap && input && parseFloat(faToEnDigits(input.value))>0) dueWrap.style.display = 'block';
           }
         }
       });
@@ -3219,6 +3233,14 @@ function openInvoiceForm(cid, editInv, opts){
         updateSummary();
         closeInvPaymentPanels();
       });
+    });
+    // تاریخ فاکتور و تاریخ سررسید چک: هر تغییرِ picker در closure ثبت می‌شود تا re-render آن را گم نکند.
+    const invDateEl = document.getElementById('f-date');
+    if(invDateEl) invDateEl.addEventListener('input', e=>{ invoiceDateStr = e.target.value || todayISO(); });
+    const checkDueEl = document.getElementById('f-check-due');
+    if(checkDueEl) checkDueEl.addEventListener('input', e=>{
+      pendingPayment.checkDue = e.target.value;
+      checkDue = e.target.value || todayISO();
     });
     document.getElementById('f-discount').addEventListener('input', e=>{
       let v = parseFloat(faToEnDigits(e.target.value))||0;
