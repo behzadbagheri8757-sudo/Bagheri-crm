@@ -838,6 +838,40 @@
     return out;
   }
 
+  /**
+   * Read-only: the seller responses recorded for a customer's Watch subjects, for
+   * the Action Engine. Includes CLOSED occurrences (decision markers live on closed
+   * rows, so getActiveWatchOccurrences() can never see them). Returns copies; never
+   * writes. One entry per occurrence that carries a structured reason code.
+   *   held = an unreleased seller decision (still_stock / not_wanted / follow_up_later /
+   *          follow_up_result) on a closed row — the lifecycle keeps it until released.
+   * No scheduled follow-up time exists in the data model (only decidedAt), so none is
+   * returned. 'dismiss' carries no product reason and is not returned.
+   */
+  function getWatchResponsesForCustomer(customerId) {
+    var rows = _allOccurrences();
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r || String(r.customerId) !== String(customerId)) continue;
+      var code = r.reason && r.reason.code ? String(r.reason.code) : '';
+      if (!code || code === 'dismiss') continue;
+      var sup = r.suppression || null;
+      out.push({
+        occurrenceId: r.id,
+        watchCategory: r.watchCategory,
+        productId: _normPid(r.productId),
+        status: r.status,
+        code: code,
+        comment: r.reason && r.reason.comment ? String(r.reason.comment) : '',
+        recordedAt: (r.reason && r.reason.recordedAt) || (sup && sup.decidedAt) || null,
+        held: !!(sup && !sup.releasedAt && r.status !== 'active'),
+        decision: sup ? sup.type : null
+      });
+    }
+    return out;
+  }
+
   function getWatchLifecycleSummary() {
     var rows = getActiveWatchOccurrences();
     var unreviewed = 0;
@@ -1137,6 +1171,7 @@
   global.getActiveWatchOccurrences = getActiveWatchOccurrences;
   global.getWatchLifecycleSummary = getWatchLifecycleSummary;
   global.getPendingWatchFollowUps = getPendingWatchFollowUps;
+  global.getWatchResponsesForCustomer = getWatchResponsesForCustomer;
   global.recordWatchReason = recordWatchReason;
   global.dismissWatchOccurrence = dismissWatchOccurrence;
   global.filterSuppressedWatchObservations = filterSuppressedWatchObservations;
