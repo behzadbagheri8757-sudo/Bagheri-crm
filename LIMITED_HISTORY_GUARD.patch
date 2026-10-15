@@ -1,0 +1,125 @@
+diff -ruN '--exclude=tests' '--exclude=LIMITED_HISTORY_GUARD_REPORT.md' base/js/calc.js proj/js/calc.js
+--- a/js/calc.js	2026-10-04 11:29:39.000000000 +0000
++++ b/js/calc.js	2026-10-07 19:25:06.510091951 +0000
+@@ -1228,6 +1228,39 @@
+     ? (daysSinceLast > avgIntervalDays + 0.5)
+     : null;
+ 
++  /* Limited-history guard inputs (ADDITIVE — avgIntervalDays / behindPattern above
++     keep their legacy meaning for the UI and the Watch layer).
++     Based on DISTINCT purchase days: several invoices on one day are ONE purchase
++     occasion, so they neither count as extra purchase days nor create 0-day gaps.
++     A day counts only if at least one invoice that day has total > 0.
++     These are minimum-caution inputs, not a scientific sufficiency measure. */
++  const _purchaseDays = [];
++  {
++    const _seenDays = Object.create(null);
++    invs.forEach(function(inv){
++      if(!inv || !(inv.total > 0)) return;
++      const d = inv.date ? String(inv.date).slice(0, 10) : '';
++      if(!d || _seenDays[d]) return;
++      if(typeof parseISODateParts === 'function' && !parseISODateParts(d)) return;
++      _seenDays[d] = true;
++      _purchaseDays.push(d);
++    });
++    _purchaseDays.sort();
++  }
++  const purchaseDayCount = _purchaseDays.length;
++  const _distinctIntervals = [];
++  for(let i = 1; i < _purchaseDays.length; i++){
++    const gap = _behaviorDaysDiff(_purchaseDays[i-1], _purchaseDays[i]);
++    if(gap != null && gap > 0) _distinctIntervals.push(gap);
++  }
++  const distinctIntervalCount = _distinctIntervals.length;
++  const avgDistinctIntervalDays = distinctIntervalCount
++    ? _distinctIntervals.reduce((a,b)=>a+b, 0) / distinctIntervalCount
++    : null;
++  const behindPatternDistinct = (avgDistinctIntervalDays != null && daysSinceLast != null)
++    ? (daysSinceLast > avgDistinctIntervalDays + 0.5)
++    : null;
++
+   const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
+   const d30 = _behaviorISODaysAgo(30);
+   const d60 = _behaviorISODaysAgo(60);
+@@ -1382,6 +1415,10 @@
+     avgIntervalDays,
+     daysSinceLast,
+     behindPattern,
++    purchaseDayCount,
++    distinctIntervalCount,
++    avgDistinctIntervalDays,
++    behindPatternDistinct,
+     sales30,
+     sales90,
+     salesPrev30,
+diff -ruN '--exclude=tests' '--exclude=LIMITED_HISTORY_GUARD_REPORT.md' base/js/intelligence/signals.js proj/js/intelligence/signals.js
+--- a/js/intelligence/signals.js	2026-10-04 11:29:39.000000000 +0000
++++ b/js/intelligence/signals.js	2026-10-07 19:25:06.510809542 +0000
+@@ -180,14 +180,29 @@
+   /* ---------------------------------------------------------
+      1-3: Purchase decline / growth (based on sales30 vs salesPrev30)
+      --------------------------------------------------------- */
++  /* Limited-history guard (minimum caution, NOT a scientific sufficiency rule).
++     With a single distinct purchase day, a sales30-vs-salesPrev30 comparison is
++     not a purchase PATTERN (one old purchase always reads as a 100% drop), so it
++     must not produce PURCHASE_DECLINE_* signals. Checked at generation time,
++     before persistence, so previously stored occurrences cannot bypass it.
++     Payment events (CHECK_BOUNCED / PAYMENT_OVERDUE) use a separate path and are
++     unaffected. The Watch layer (PURCHASE_DECLINE_WATCH) still reports the raw
++     drop as a non-scoring early observation. */
++  var MIN_PURCHASE_DAYS_FOR_DECLINE = 2;
++  /* BEHIND_PATTERN needs at least two distinct-day intervals (3 purchase days);
++     one gap is not an established rhythm. */
++  var MIN_DISTINCT_INTERVALS_FOR_BEHIND = 2;
++
+   function _purchaseTrendSignals(cid, b, out) {
+     if (!(b.salesPrev30 > 0)) return; // false-positive rule: no signal if no baseline
++    var limitedPurchaseHistory = (typeof b.purchaseDayCount === 'number'
++      && b.purchaseDayCount < MIN_PURCHASE_DAYS_FOR_DECLINE);
+ 
+     const declinePct = _pctChange(b.salesPrev30, b.sales30); // positive => decline
+     // growthPct: same baseline guard as decline (salesPrev30 > 0 already enforced above)
+     const growthPct = ((b.sales30 - b.salesPrev30) / b.salesPrev30) * 100;
+ 
+-    if (declinePct != null && declinePct >= 30) {
++    if (!limitedPurchaseHistory && declinePct != null && declinePct >= 30) {
+       out.push(_mkSignal(cid, 'PURCHASE_DECLINE_SEVERE', {
+         type: 'risk',
+         severity: 'critical',
+@@ -199,7 +214,7 @@
+       return; // duplication rule: severe suppresses mild
+     }
+ 
+-    if (declinePct != null && declinePct >= 15 && declinePct < 30) {
++    if (!limitedPurchaseHistory && declinePct != null && declinePct >= 15 && declinePct < 30) {
+       out.push(_mkSignal(cid, 'PURCHASE_DECLINE_MILD', {
+         type: 'risk',
+         severity: 'medium',
+@@ -226,7 +241,14 @@
+      4: BEHIND_PATTERN — reuse existing behavior flag as-is
+      --------------------------------------------------------- */
+   function _behindPatternSignal(cid, b, out) {
+-    if (b.behindPattern !== true) return; // covers false/null/undefined
++    if (typeof b.distinctIntervalCount === 'number') {
++      // Distinct-purchase-day basis: same-day invoices make no 0-day gaps, and a
++      // single gap is not an established pattern.
++      if (b.distinctIntervalCount < MIN_DISTINCT_INTERVALS_FOR_BEHIND) return;
++      if (b.behindPatternDistinct !== true) return;
++    } else if (b.behindPattern !== true) {
++      return; // legacy fallback if the distinct-day fields are absent
++    }
+     out.push(_mkSignal(cid, 'BEHIND_PATTERN', {
+       type: 'risk',
+       severity: 'high',
+diff -ruN '--exclude=tests' '--exclude=LIMITED_HISTORY_GUARD_REPORT.md' base/sw.js proj/sw.js
+--- a/sw.js	2026-10-07 19:12:44.000000000 +0000
++++ b/sw.js	2026-10-07 19:25:06.511256017 +0000
+@@ -39,7 +39,7 @@
+    configured, so it is boot-critical, not merely a nice-to-have precache
+    entry. It was already in PRECACHE_URLS; no asset list, route, or business
+    logic otherwise changed.) */
+-const CACHE_NAME = 'baqeri-shell-v83';
++const CACHE_NAME = 'baqeri-shell-v84';
+ 
+ /** App Shell — paths relative to this SW (same directory as index.html). */
+ const PRECACHE_URLS = [
