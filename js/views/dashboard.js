@@ -319,7 +319,7 @@
     if (att.count > 0) bits.push(row('#', att.count, 'مشتری نیازمند پیگیری', money(att.totalBalance), ' data-attention="1"'));
     if (overdueChecks.length > 0) bits.push(row('#/checks?filter=overdue', overdueChecks.length, 'چک سررسیدگذشته'));
     if (dueSoonChecks.length > 0) bits.push(row('#/checks?filter=dueSoon', dueSoonChecks.length, 'چک نزدیک سررسید'));
-    if (followups) bits.push(row('#/watches?filter=followup', followups, 'پیگیری باز'));
+    if (followups) bits.push(row('#/watches?filter=followup', followups, 'پیگیری‌های باز'));
     if (lowStock) bits.push(row('#/inventory', lowStock, 'کالای کم‌موجودی'));
 
     return '<div class="bp-dashboard-alert" role="status">' +
@@ -341,9 +341,8 @@
     if (!att.rows.length) return;
 
     var rowsHtml = att.rows.map(function (r) {
-      var line = r.refKind === 'no_payment_history'
-        ? faDigits(r.daysSince) + ' روز از آخرین فاکتور، بدون پرداخت'
-        : faDigits(r.daysSince) + ' روز از آخرین پرداخت';
+      var line = receivableAttentionDesc(r);   // one wording shared with Customer Detail / Quick View
+      if (r.legacyBalance > 0) line += ' · بدهی قدیمی جدا: ' + money(r.legacyBalance);
       return '<button type="button" class="bp-attention-row" data-attention-cid="' + esc(r.customerId) + '">' +
         '<span class="bp-attention-row-name">' + esc(r.name) + '</span>' +
         '<span class="bp-attention-row-meta">' + money(r.balance) + ' · ' + line + '</span>' +
