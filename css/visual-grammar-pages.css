@@ -2264,3 +2264,43 @@ html .sheet.inv-sheet-host .inv-mini-input:focus{
 .followup-status-future::before{background:var(--vg-color-primary);}
 .followup-status-none{background:var(--vg-color-neutral-soft);color:var(--vg-color-text-muted);}
 .followup-status-none::before{background:var(--vg-color-neutral);}
+
+/* ======================================================================
+   v6 — calm hierarchy polish (iPhone 13 Pro Max target). Presentation only.
+   ====================================================================== */
+
+/* Dashboard — ONLY the «روی برنامه» (on-track) state turns teal. Other states and the global
+   --vg-color-warning are untouched. Dark mode uses the light end of the same teal ramp for text. */
+.bp-target-strip.is-ontrack .bp-target-strip-status{color:#0E7490;}
+.bp-target-strip.is-ontrack .bp-target-strip-bar span{
+  background:linear-gradient(100deg,#0891B2 0%,#22D3EE 50%,#0891B2 100%);
+}
+html[data-theme="dark"] .bp-target-strip.is-ontrack .bp-target-strip-status{color:#22D3EE;}
+
+/* Customers list */
+.customer-row-spark.is-down{color:var(--vg-color-danger);}
+#main .cl-tools .btn.small,
+#main .cl-tools .tx-toolbar-select{
+  min-height:40px;height:40px;box-sizing:border-box;
+  font-weight:600;
+}
+#main .cl-tools .tx-toolbar-select{font-size:16px;}   /* 16px keeps iOS from zooming on focus */
+#main .customer-list-row{min-height:92px;}
+
+/* Customer Detail — identity text stays complete but takes ONE line (full text in the title attribute) */
+#main.customer-detail-view .cd-meta-v{
+  min-width:0;flex:1 1 auto;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#main.customer-detail-view .cd-action-hint{margin:0 0 10px;}
+
+/* Quick View — air between the debt and the health badge; long story is clamped (full text in Detail) */
+.bp-qv-health{margin-top:12px;}
+.bp-qv-story > div:last-child{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;
+}
+
+/* Reports — only the Light-mode contrast of link-style buttons («مشاهده جزئیات») */
+html:not([data-theme="dark"]) .rp-sec-link{
+  color:color-mix(in srgb,var(--vg-color-primary) 78%,#000);
+}
