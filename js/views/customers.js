@@ -60,6 +60,10 @@
       });
       if (!vals.some(function (v) { return v > 0; })) return '';
       const max = Math.max.apply(null, vals) || 1;
+      // Presentation only: «declining» = the last 4 weeks bought less than the 4 weeks before them.
+      const prevSum = vals[0] + vals[1] + vals[2] + vals[3];
+      const lastSum = vals[4] + vals[5] + vals[6] + vals[7];
+      const trendCls = (prevSum > 0 && lastSum < prevSum) ? ' is-down' : '';
       const left = 5, right = 91;
       const pts = vals.map(function (v, i) {
         const x = left + i * ((right - left) / (vals.length - 1));
@@ -70,7 +74,7 @@
       const lastParts = last.split(',');
       const dotLeftPct = parseFloat(lastParts[0]);
       const dotTopPct = (parseFloat(lastParts[1]) / 20) * 100;
-      return '<span class="customer-row-spark" aria-label="روند خرید، ۸ هفته اخیر"><svg viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline></svg><i class="customer-row-spark-dot" style="left:' + dotLeftPct + '%;top:' + dotTopPct + '%;"></i></span>';
+      return '<span class="customer-row-spark' + trendCls + '" aria-label="روند خرید، ۸ هفته اخیر"><svg viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline></svg><i class="customer-row-spark-dot" style="left:' + dotLeftPct + '%;top:' + dotTopPct + '%;"></i></span>';
     } catch (e) { return ''; }
   }
 

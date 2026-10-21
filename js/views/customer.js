@@ -1299,12 +1299,16 @@
 
     /* Presentation helper: one labelled row of the identity block (label muted, value primary). */
     function cdMeta(label, value) {
-      return '<div class="cd-meta-row"><span class="cd-meta-k">' + label + '</span><span class="cd-meta-v">' + esc(String(value)) + '</span></div>';
+      return '<div class="cd-meta-row"><span class="cd-meta-k">' + label + '</span><span class="cd-meta-v" title="' + esc(String(value)) + '">' + esc(String(value)) + '</span></div>';
     }
 
     var recMatchesVisitDetail = !!(recommendedAction && (recommendedAction.actionType === 'visit' || recommendedAction.actionType === 'follow_up'));
     var recMatchesPaymentDetail = !!(recommendedAction && recommendedAction.actionType === 'payment_followup');
-    var showRecommendedCardInDetail = !!recommendedAction && !recMatchesVisitDetail && !recMatchesPaymentDetail;
+    // The recommendation is a one-line hint above the buttons (never a separate box); when it IS one of the
+    // three fixed actions that button is the single primary one, otherwise «ثبت فاکتور» stays primary.
+    var detailHintHtml = recommendedAction
+      ? '<div class="bp-qv-action-hint cd-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' + esc(recommendedAction.action) + '</div>'
+      : '';
 
     // Primary action follows the recommendation (visit / payment); otherwise the usual «invoice».
     function detailBtn(action, label, btnId) {
@@ -1334,7 +1338,7 @@
     var visitDetailsHtml = '<details class="cd-history-details">' +
       '<summary class="customer-behavior-summary">ویزیت‌ها و ارزیابی‌ها (' + visits.length + ')</summary>' +
       '<div class="btn-row" style="margin-bottom:8px;">' +
-        '<button type="button" class="btn small" id="act-visit-section">ثبت ویزیت برای این مشتری</button>' +
+        '<button type="button" class="btn small secondary" id="act-visit-section">ثبت ویزیت برای این مشتری</button>' +
         '<a class="btn small secondary" href="#/visits">همه ویزیت‌ها</a>' +
       '</div><div class="customer-tx-list customer-visit-list">' + visitRows + '</div></details>';
 
@@ -1373,12 +1377,7 @@
       topAlertHtml +
       storyHtml +
 
-      (showRecommendedCardInDetail
-        ? '<div class="cust-recommended-action">' +
-            '<div class="cust-recommended-action-label">اقدام پیشنهادی</div>' +
-            '<button type="button" class="btn cust-recommended-action-btn" id="cust-recommended-action">' +
-            esc(recommendedAction.action) + '</button></div>'
-        : '') +
+      detailHintHtml +
       '<div class="btn-row cust-actions-primary" style="margin-bottom:8px;">' +
         detailBtn('invoice', 'ثبت فاکتور', 'act-invoice') +
         detailBtn('payment', 'ثبت پرداخت', 'act-pay') +
@@ -1394,9 +1393,6 @@
         '</div>' +
       '</details>' +
 
-      focus.html +
-      followUpTopHtml +
-
       '<h3 class="sub-title">خلاصه مالی</h3>' +
       '<div class="cards cust-metrics">' +
         '<div class="cd-metric-cell"><div class="label">مجموع خرید</div><div class="value">' + toman(t.invTotal) + ' ت</div></div>' +
@@ -1407,6 +1403,8 @@
         '<div class="cd-metric-cell"><div class="label">سود مشتری</div><div class="value">' + toman(profit) + ' ت</div></div>' +
       '</div>' +
 
+      focus.html +
+      followUpTopHtml +
       behaviorHtml +
       productRejectionInsightsHtml(c.id, ctx) +
       ackDetailsHtml +
@@ -1453,29 +1451,6 @@
         if (typeof printCustomerStatement === 'function') printCustomerStatement(c.id);
       };
     }
-    const recommendedBtn = document.getElementById('cust-recommended-action');
-    if (recommendedBtn && recommendedAction) {
-      recommendedBtn.onclick = function () {
-        const type = recommendedAction.actionType;
-        if (type === 'visit' || type === 'follow_up') {
-          openAddVisit(c.id);
-        } else if (type === 'check_followup') {
-          openAddCheck(c.id);
-        } else if (type === 'payment_followup') {
-          openAddTransaction(c.id);
-        } else {
-          // For action types without a dedicated existing form (e.g. investigate,
-          // manager_review, call), expose the existing explanation rather than
-          // inventing a new workflow.
-          const target = root.querySelector('.customer-behavior-details');
-          if (target) target.open = true;
-          if (target && typeof target.scrollIntoView === 'function') {
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }
-      };
-    }
-
     const toggleActiveBtn = document.getElementById('act-toggle-active');
     if (toggleActiveBtn) {
       toggleActiveBtn.onclick = async function (ev) {
@@ -1496,22 +1471,6 @@
     bindWatchFollowUps(root, id);
   }
 
-
-  /* Quick View: the recommended action's button follows its type. Forms that exist open directly;
-     types without a dedicated form (investigate, manager_review, call, ...) go to the full profile. */
-  function recommendedActionCta(actionType) {
-    if (actionType === 'visit' || actionType === 'follow_up') return 'ثبت ویزیت';
-    if (actionType === 'payment_followup') return 'ثبت پرداخت';
-    if (actionType === 'check_followup') return 'ثبت چک';
-    return 'مشاهده جزئیات';
-  }
-  function runRecommendedAction(actionType, cid) {
-    var t = actionType;
-    if ((t === 'visit' || t === 'follow_up') && typeof openAddVisit === 'function') { openAddVisit(cid); return; }
-    if (t === 'payment_followup' && typeof openAddTransaction === 'function') { openAddTransaction(cid); return; }
-    if (t === 'check_followup' && typeof openAddCheck === 'function') { openAddCheck(cid); return; }
-    if (typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', { id: cid });
-  }
 
   /* Central quick view for the Customers list. Presentation-only: it reuses
      the frozen Priority/Watch/Balance outputs and existing action APIs. */
@@ -1544,23 +1503,9 @@
     // Only actions without a dedicated fixed button (check, investigate, call, ...) get their own card.
     var recMatchesVisit = !!(recommendedAction && (recommendedAction.actionType === 'visit' || recommendedAction.actionType === 'follow_up'));
     var recMatchesPayment = !!(recommendedAction && recommendedAction.actionType === 'payment_followup');
-    var recommendedCardHtml = '';
-    var recommendedHintHtml = '';
-    if (recommendedAction) {
-      if (recMatchesVisit || recMatchesPayment) {
-        recommendedHintHtml =
-          '<div class="bp-qv-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' +
-          esc(recommendedAction.action) + '</div>';
-      } else {
-        recommendedCardHtml =
-          '<div class="cust-recommended-action" style="margin:12px 0;">' +
-            '<div class="cust-recommended-action-label">اقدام پیشنهادی</div>' +
-            '<div style="font-size:.82rem;line-height:1.7;margin-bottom:8px;">' + esc(recommendedAction.action) + '</div>' +
-            '<button type="button" class="btn cust-recommended-action-btn" data-qv-action="execute">' +
-              esc(recommendedActionCta(recommendedAction.actionType)) + '</button>' +
-          '</div>';
-      }
-    }
+    var recommendedHintHtml = recommendedAction
+      ? '<div class="bp-qv-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' + esc(recommendedAction.action) + '</div>'
+      : '';
 
     // The ONLY alert in Quick View: an active bounced check (always immediate).
     var bouncedAlertHtml = '';
@@ -1599,7 +1544,6 @@
         '</div>' +
         bouncedAlertHtml +
         (story ? '<div class="bp-qv-story"><div class="bp-qv-section-label">خلاصه وضعیت</div><div>' + esc(story) + '</div></div>' : '') +
-        recommendedCardHtml +
         recommendedHintHtml +
         '<div class="bp-qv-actions">' +
           qvBtn('visit', 'ثبت ویزیت') +
@@ -1631,14 +1575,6 @@
     function onKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay || e.target.closest('.bp-qv-close')) { e.preventDefault(); close(); return; }
-      var qvExecute = e.target.closest('[data-qv-action="execute"]');
-      if (qvExecute && recommendedAction) {
-        e.preventDefault();
-        var execType = recommendedAction.actionType;
-        close();
-        setTimeout(function () { runRecommendedAction(execType, cid); }, 185);
-        return;
-      }
       var action = e.target.closest('[data-action]');
       if (action) {
         e.preventDefault();
