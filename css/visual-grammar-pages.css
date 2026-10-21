@@ -2145,3 +2145,122 @@ html .sheet.inv-sheet-host .inv-mini-input:focus{
   border-color:var(--vg-color-primary);
   box-shadow:0 0 0 3px var(--vg-color-primary-soft);
 }
+
+/* ======================================================================
+   v5 — Hierarchy & eye flow (Customer Detail · Quick View · Watch follow-ups)
+   Existing --vg-* tokens only. Presentation only: no logic, no new tokens.
+   ====================================================================== */
+
+/* Customer Detail — ONE top alert (bounced check wins over receivable follow-up) */
+#main.customer-detail-view .cd-top-alert{
+  display:flex;flex-direction:column;gap:4px;
+  margin:0 0 var(--vg-space-group);
+  padding:12px 14px;
+  border-radius:var(--vg-radius-raised);
+  border:1px solid transparent;
+  font-size:.86rem;line-height:1.65;
+}
+#main.customer-detail-view .cd-top-alert-danger{
+  background:var(--vg-color-danger-soft);
+  border-color:var(--vg-color-danger);
+  color:var(--vg-color-text);
+}
+#main.customer-detail-view .cd-top-alert-warning{
+  background:var(--vg-color-warning-soft);
+  border-color:var(--vg-color-warning);
+  color:var(--vg-color-text);
+}
+#main.customer-detail-view .cd-top-alert-title{font-weight:var(--vg-weight-title);}
+#main.customer-detail-view .cd-top-alert-desc{
+  font-size:.8rem;color:var(--vg-color-text-muted);
+}
+
+/* Story: leading edge carries the tone (logical property => correct in RTL) */
+#main.customer-detail-view .cust-summary.cd-story{
+  margin-bottom:var(--vg-space-group);
+  border-inline-start-width:3px;
+  border-inline-start-style:solid;
+}
+#main.customer-detail-view .cust-summary.is-critical{border-inline-start-color:var(--vg-color-danger);}
+#main.customer-detail-view .cust-summary.is-risk{border-inline-start-color:var(--vg-color-warning);}
+#main.customer-detail-view .cust-summary.is-watch{border-inline-start-color:var(--vg-color-warning);}
+#main.customer-detail-view .cust-summary.is-opportunity{border-inline-start-color:var(--vg-color-success);}
+#main.customer-detail-view .cust-summary.is-followup{border-inline-start-color:var(--vg-color-primary);}
+#main.customer-detail-view .cust-summary.is-normal{border-inline-start-color:var(--vg-color-neutral);}
+
+/* Financial summary: cells (not cards) inside ONE surface. The container already draws the hairline
+   dividers via its 1px grid gap (section "Metric groups" above), so cells add NO extra border. */
+#main.customer-detail-view .cards.cust-metrics > .cd-metric-cell{
+  background:var(--vg-color-surface);
+  border:0;border-radius:0;box-shadow:none;
+  padding:12px 14px;min-width:0;
+}
+#main.customer-detail-view .cards.cust-metrics > .cd-metric-cell .label{margin-bottom:4px;}
+#main.customer-detail-view .cards.cust-metrics > .cd-metric-cell .value{
+  font-size:.96rem;font-weight:600;overflow-wrap:anywhere;
+}
+#main.customer-detail-view .cards.cust-metrics > .cd-metric-cell:last-child:nth-child(odd){grid-column:1/-1;}
+
+/* Collapsed decisions + history */
+#main.customer-detail-view .cd-ack-details,
+#main.customer-detail-view .cd-history-details{
+  margin-bottom:var(--vg-space-group);
+}
+#main.customer-detail-view .cd-ack-details[open] > .customer-behavior-summary,
+#main.customer-detail-view .cd-history-details[open] > .customer-behavior-summary{
+  margin-bottom:10px;
+}
+
+/* Quick View — the balance is the first number the eye should find */
+.bp-qv-balance.is-prominent{
+  display:flex;flex-direction:column;gap:2px;
+  margin-top:14px;line-height:1.35;
+}
+.bp-qv-balance.is-prominent .bp-qv-balance-label{
+  font-size:.78rem;font-weight:var(--vg-weight-label);
+  color:var(--vg-color-text-muted);
+}
+.bp-qv-balance.is-prominent .bp-qv-balance-amount{
+  font-size:1.3rem;font-weight:var(--vg-weight-value);
+  color:var(--vg-color-text);
+  font-variant-numeric:tabular-nums;
+}
+.bp-qv-balance.is-prominent.is-debt .bp-qv-balance-amount{color:var(--vg-color-danger);}
+
+/* Quick View — one-line reason above the (already primary) matching button */
+.bp-qv-action-hint{
+  font-size:.78rem;line-height:1.7;
+  color:var(--vg-color-text-secondary);
+  margin:10px 0 0;padding:8px 10px;
+  background:var(--vg-color-primary-soft);
+  border-radius:10px;
+  border-inline-start:3px solid var(--vg-color-primary);
+}
+.bp-qv-action-hint-label{
+  font-weight:var(--vg-weight-title);
+  color:var(--vg-color-text);   /* accent is the leading edge; text stays at full contrast */
+  margin-inline-end:4px;
+}
+
+/* Watch — open follow-up status.
+   Text stays --vg-color-text (measured: the bright danger/warning/primary tokens as TEXT on their own
+   soft background fall below 4.5:1 for .72rem text in Light, e.g. danger 3.3:1); the state colour is
+   carried by the soft background and a leading dot. */
+.followup-status-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 9px;border-radius:var(--vg-radius-pill);
+  font-size:.72rem;font-weight:var(--vg-weight-label);
+  white-space:nowrap;line-height:1.4;
+  color:var(--vg-color-text);
+}
+.followup-status-badge::before{
+  content:"";flex:0 0 auto;width:6px;height:6px;border-radius:50%;
+}
+.followup-status-overdue{background:var(--vg-color-danger-soft);}
+.followup-status-overdue::before{background:var(--vg-color-danger);}
+.followup-status-today{background:var(--vg-color-warning-soft);}
+.followup-status-today::before{background:var(--vg-color-warning);}
+.followup-status-future{background:var(--vg-color-primary-soft);}
+.followup-status-future::before{background:var(--vg-color-primary);}
+.followup-status-none{background:var(--vg-color-neutral-soft);color:var(--vg-color-text-muted);}
+.followup-status-none::before{background:var(--vg-color-neutral);}
