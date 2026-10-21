@@ -39,7 +39,7 @@
    configured, so it is boot-critical, not merely a nice-to-have precache
    entry. It was already in PRECACHE_URLS; no asset list, route, or business
    logic otherwise changed.) */
-const CACHE_NAME = 'baqeri-shell-v84';
+const CACHE_NAME = 'baqeri-shell-v87';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
@@ -100,6 +100,7 @@ const PRECACHE_URLS = [
   './icons/icon-152.png',
   './logo-export.png',
   './fonts/Vazirmatn[wght].woff2',
+  './js/intelligence/ack.js',
   './js/intelligence/persistence.js',
   './js/intelligence/feedback.js',
   './js/intelligence/baseline_manager.js',
