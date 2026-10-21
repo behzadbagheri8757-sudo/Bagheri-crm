@@ -554,6 +554,8 @@
   function reconcileWatchLifecycle(customerId, ctx) {
     return new Promise(function (resolve) {
       function run() {
+        // ACK: expire due ACKs first (also releases their Watch tombstones). Fail-open.
+        try { if (typeof expireAcks === 'function') expireAcks(); } catch (eExp) { /* ignore */ }
         var customerIds = [];
         if (customerId) {
           customerIds = [customerId];
@@ -894,9 +896,33 @@
       atInvoiceSeq: isFinite(seq) ? seq : null,
       atDate: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
       levelAtDecision: rec.level || null,
+      // ACK: optional seller-chosen follow-up date (follow_up_later only); null when not given.
+      followUpDate: null,
       releasedAt: null,
       releasedBy: null
     };
+  }
+
+  // ACK bridge (fail-open). Watch stays the owner of its tombstone; every decision is mirrored
+  // into the unified SellerAck unless the call itself came FROM an ACK (re-entrancy guard).
+  function _mirrorToAck(rec, decision, comment, followUpDate) {
+    try {
+      if (typeof createAck !== 'function') return;
+      if (typeof ackWatchSyncActive === 'function' && ackWatchSyncActive()) return;
+      var pid = _normPid(rec.productId);
+      createAck({
+        customerId: rec.customerId,
+        productId: pid,
+        scope: pid ? 'product' : 'account',
+        decision: decision,
+        source: 'watch',
+        sourceId: rec.id,
+        legacyKey: 'watch:' + rec.id,
+        sourceContext: { watchCategory: rec.watchCategory || null },
+        note: comment || '',
+        followUpDate: followUpDate || null
+      });
+    } catch (eAck) { console.warn('ACK mirror failed (Watch unaffected)', eAck); }
   }
 
   /**
@@ -909,7 +935,7 @@
    *   marker so the same subject does not regenerate (see "Seller decisions").
    * Both entry points (Customer page, Watch page) call this same function.
    */
-  function recordWatchReason(occurrenceId, reasonCode, comment) {
+  function recordWatchReason(occurrenceId, reasonCode, comment, followUpDate) {
     if (!occurrenceId) return null;
     var rec = _mem[occurrenceId];
     if (!rec) return null;
@@ -935,7 +961,9 @@
       rec.lastEvaluatedAt = nowD;
       rec.resolution = { type: 'seller_' + code, resolvedAt: nowD, note: null };
       rec.suppression = _decisionSnapshot(rec, code);
+      if (code === 'follow_up_later' && followUpDate) rec.suppression.followUpDate = String(followUpDate).slice(0, 10);
       _persist(rec);
+      _mirrorToAck(rec, code, text, code === 'follow_up_later' ? followUpDate : null);
       return rec;
     }
     rec.reason = {
@@ -944,6 +972,7 @@
       recordedAt: _nowISO()
     };
     _persist(rec);
+    if (code) _mirrorToAck(rec, code, rec.reason.comment, null);
     return rec;
   }
 
@@ -976,6 +1005,7 @@
     rec.suppression = _decisionSnapshot(rec, 'dismiss');
     // Reason/comment history (if any was recorded earlier) is untouched.
     _persist(rec);
+    _mirrorToAck(rec, 'dismiss', note ? String(note).slice(0, 500) : '', null);
     return rec;
   }
 
@@ -1068,6 +1098,12 @@
     var rec = _mem[occurrenceId];
     if (!rec || !rec.suppression || rec.suppression.releasedAt) return null;
     _releaseSuppression(rec, 'seller_reversal');
+    // ACK: a reversal made on the Watch side reverses the mirrored ACK too (no loop: guard + status check).
+    try {
+      if (typeof ackReverseForWatch === 'function' && !(typeof ackWatchSyncActive === 'function' && ackWatchSyncActive())) {
+        ackReverseForWatch(occurrenceId);
+      }
+    } catch (eRev) { /* best-effort */ }
     return rec;
   }
 

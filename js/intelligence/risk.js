@@ -33,6 +33,8 @@
      for backward compatibility.
    - Pending signals remain in the array for Priority/Action visibility.
 
+   ACK (SellerAck): effectivePoints uses ackRiskDelta INSTEAD of riskModifier when an ACK matched.
+
    P-03 Seller Feedback:
    - effectivePoints = basePoints + riskModifier (if present)
    - effectivePoints floored at 0; total score capped at 100
@@ -70,6 +72,12 @@
     if (s && typeof s.riskModifier === 'number' && isFinite(s.riskModifier)) {
       mod = s.riskModifier;
     }
+    // ACK: when a live SellerAck matched this signal it is the single source of truth and
+    // REPLACES the legacy feedback riskModifier (otherwise one decision would count twice:
+    // feedback -30 AND ack -30). No ACK => unchanged P-03 behaviour.
+    if (s && typeof s.ackRiskDelta === 'number' && isFinite(s.ackRiskDelta)) {
+      mod = s.ackRiskDelta;
+    }
     var effective = base + mod;
     if (effective < 0) effective = 0;
     return effective;
@@ -92,6 +100,16 @@
     const signals = (typeof extractCustomerSignals === 'function')
       ? (extractCustomerSignals(cid, ctx) || [])
       : [];
+
+    // ACK: attach the seller's live decisions to the signals (in place) BEFORE scoring.
+    // Priority and Action receive these same signal objects via risk.signals. Dormant
+    // until the legacy migration flag is set (fallbackToLegacy). Fail-open.
+    try {
+      if (typeof isAckLayerActive === 'function' && isAckLayerActive() &&
+          typeof getActiveAcksForCustomer === 'function' && typeof applyAcksToSignals === 'function') {
+        applyAcksToSignals(signals, getActiveAcksForCustomer(cid));
+      }
+    } catch (eAck) { /* fail-open */ }
 
     const riskSignals = signals.filter(function (s) {
       return s && s.type === 'risk' && _isActiveForRisk(s);

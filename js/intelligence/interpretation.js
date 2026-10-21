@@ -109,6 +109,17 @@
       signals = [];
     }
 
+    // ACK: live seller decisions must shape the story exactly like Risk/Action. Applied to COPIES:
+    // the memoized signal objects are shared with risk.js (which applies ACKs in place), so mutating
+    // them here would double-count ackRiskDelta when the story runs before Risk on the same context.
+    try {
+      if (typeof isAckLayerActive === 'function' && isAckLayerActive() &&
+          typeof getActiveAcksForCustomer === 'function' && typeof applyAcksToSignals === 'function') {
+        signals = signals.map(function (s) { return s ? Object.assign({}, s) : s; });
+        applyAcksToSignals(signals, getActiveAcksForCustomer(customerId));
+      }
+    } catch (eAckS) { /* fail-open */ }
+
     // Prefer priority signals if already computed upstream (same set, avoid double work)
     // Still use extractCustomerSignals as source of truth when available.
 
@@ -120,6 +131,8 @@
       var s = signals[i];
       if (!s) continue;
       if (!_isActive(s)) continue;
+      if (s.ackActionEffect === 'suppress') continue; // ACK: seller decision suppresses this signal
+      if (s.ackReviewed) continue; // V4: reviewed in a visit — not a fresh risk to narrate
       if (s.seasonallySuppressed) continue; // P-06: do not narrate false seasonal declines
       if (s.type === 'risk') risks.push(s);
       else if (s.type === 'opportunity') opportunities.push(s);

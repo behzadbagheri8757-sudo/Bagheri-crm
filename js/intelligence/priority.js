@@ -289,6 +289,28 @@
       W_OPPORTUNITY * opportunityComponent +
       W_TIMING * timingComponent;
 
+    // ACK: customer-level aggregate of the DISTINCT live ACKs that actually matched a signal,
+    // bounded to ±15 so several ACKs can never erase an important customer (P6).
+    var ackPriorityDelta = 0;
+    try {
+      var seenAck = Object.create(null);
+      for (var ai = 0; ai < signals.length; ai++) {
+        var sg = signals[ai];
+        if (!sg || !sg.ackIds || !sg.ackIds.length) continue;
+        // count each ACK once per customer, with its exact delta
+        for (var aj = 0; aj < sg.ackIds.length; aj++) {
+          var aid = sg.ackIds[aj];
+          if (seenAck[aid]) continue;
+          seenAck[aid] = true;
+          ackPriorityDelta += (sg.ackPriorityById && typeof sg.ackPriorityById[aid] === 'number') ? sg.ackPriorityById[aid] : 0;
+        }
+      }
+      var capP = (typeof ACK_PARAMS !== 'undefined' && ACK_PARAMS && ACK_PARAMS.priorityCap) || 15;
+      if (ackPriorityDelta > capP) ackPriorityDelta = capP;
+      if (ackPriorityDelta < -capP) ackPriorityDelta = -capP;
+    } catch (eAckP) { ackPriorityDelta = 0; }
+    weighted += ackPriorityDelta;
+
     var priorityScore = Math.round(weighted * 10) / 10;
     if (priorityScore > 100) priorityScore = 100;
     if (priorityScore < 0) priorityScore = 0;
@@ -326,6 +348,7 @@
         economic: economicComponent,
         opportunity: opportunityComponent,
         timing: timingComponent,
+        ackPriorityDelta: ackPriorityDelta,
         weights: {
           risk: W_RISK,
           economic: W_ECONOMIC,

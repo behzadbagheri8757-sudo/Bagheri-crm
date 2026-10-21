@@ -29,7 +29,7 @@
     lsKey: 'bagheri_intelligence_seller_feedback',
     idbName: 'bagheri_intelligence_db',
     idbStore: 'seller_feedback',
-    idbVersion: 3
+    idbVersion: 4
   };
 
   var REASON_MODIFIERS = {
@@ -87,7 +87,7 @@
       var req = indexedDB.open(FEEDBACK_PARAMS.idbName, FEEDBACK_PARAMS.idbVersion);
       req.onupgradeneeded = function (ev) {
         var db = ev.target.result;
-        // Shared bagheri_intelligence_db schema (v3): ensure all Intelligence stores.
+        // Shared bagheri_intelligence_db schema (v4): ensure all Intelligence stores.
         if (!db.objectStoreNames.contains('occurrences')) {
           db.createObjectStore('occurrences', { keyPath: 'key' });
         }
@@ -96,6 +96,13 @@
         }
         if (!db.objectStoreNames.contains('baseline_cache')) {
           db.createObjectStore('baseline_cache', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('seller_acks')) {
+          var _ackSt = db.createObjectStore('seller_acks', { keyPath: 'id' });
+          try {
+            _ackSt.createIndex('by_customer_status', ['customerId', 'status'], { unique: false });
+            _ackSt.createIndex('by_expiry', 'expiresAt', { unique: false });
+          } catch (_ackIdxErr) { /* ignore */ }
         }
       };
       req.onsuccess = function (ev) {
@@ -166,6 +173,23 @@
     _mem.push(rec);
     _saveLS();
     _idbPut(rec);
+    // ACK: mirror into the unified SellerAck AFTER the legacy write. Legacy write is never
+    // rolled back and a failure here never reaches the caller (fail-open).
+    try {
+      if (typeof createAck === 'function' && typeof ackNormalizeDecision === 'function' && ackNormalizeDecision(reasonCode)) {
+        createAck({
+          customerId: customerId,
+          productId: rec.productId,
+          scope: rec.productId ? 'product' : 'account',
+          decision: reasonCode,
+          source: (source === 'visit' || source === 'invoice') ? source : 'invoice',
+          sourceId: null,
+          sourceContext: { signalCategory: signalCategory },
+          note: rec.comment,
+          legacyKey: 'fb:' + rec.id
+        });
+      }
+    } catch (eAck) { console.warn('ACK mirror failed (feedback kept)', eAck); }
     return rec;
   }
 
