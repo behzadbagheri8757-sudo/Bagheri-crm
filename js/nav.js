@@ -1396,6 +1396,12 @@ async function bootSpaShell() {
       await waitForCrmDataLoad();
     }
 
+    // ACK: one-time, idempotent, additive migration of legacy feedback / watch / visit decisions.
+    // Never blocks boot; fails open (dormant ACK layer == pre-ACK behaviour).
+    try {
+      if (typeof migrateLegacyAcknowledgments === 'function') migrateLegacyAcknowledgments();
+    } catch (ackBootErr) { console.warn('ACK migration skipped', ackBootErr); }
+
     if (typeof loadProspectData === 'function') {
       try {
         await loadProspectData();

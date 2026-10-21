@@ -80,7 +80,7 @@ var RECEIVABLE_ATTENTION_DEFAULTS = {
         var memoKey = amountFloor + '|' + daysFloor;
 
         return memo('receivableAttention', memoKey, function () {
-          var out = { count: 0, totalBalance: 0, rows: [], byCustomerId: {} };
+          var out = { count: 0, totalBalance: 0, rows: [], byCustomerId: {}, legacyByCustomerId: {} };
           var customers = Array.isArray(source.customers) ? source.customers : [];
 
           for (var i = 0; i < customers.length; i++) {
@@ -93,8 +93,38 @@ var RECEIVABLE_ATTENTION_DEFAULTS = {
                 ? customerTotals(c.id, ctx)
                 : null;
             } catch (e) { t = null; }
-            if (!t || !(t.balance >= amountFloor)) continue;
+            if (!t || !(t.balance > 0)) continue;
 
+            // ---- Payment follow-up (single logic for dashboard + customer page) ----
+            // The follow-up period belongs to the LATEST invoice:
+            //   start  = invoice.dueDate (if the seller set one) else invoice.date
+            //   grace  = 0 days when dueDate is set (appears ON the chosen date),
+            //            daysFloor (10) days when only the invoice date is known
+            //   amount = what is still unpaid on THAT invoice only (FIFO remainder, capped by the balance)
+            // Debt left on earlier invoices / opening balance is kept, shown separately as
+            // legacyBalance, and never changes the count or amount of the new period.
+            var cycle = null;
+            try { cycle = _paymentCycle(c.id, ctx, t); } catch (eCy) { cycle = null; }
+            if (cycle) {
+              if (cycle.legacyBalance > 0) out.legacyByCustomerId[c.id] = { amount: cycle.legacyBalance, oldestDate: cycle.legacyOldestDate };
+              if (!cycle.invoice || !(cycle.remaining >= amountFloor)) continue;
+              var startDate = cycle.dueDate || cycle.invoice.date;
+              var graceDays = cycle.dueDate ? 0 : daysFloor;
+              var dsc = (typeof daysAgo === 'function') ? daysAgo(startDate) : null;
+              if (dsc == null || !isFinite(dsc) || dsc < graceDays) continue;   // not due yet => no follow-up
+              var rowC = {
+                customerId: c.id, name: c.name || '', balance: cycle.remaining,
+                refDate: startDate, refKind: cycle.dueDate ? 'invoice_due' : 'invoice_date',
+                daysSince: Math.round(dsc), invoiceId: cycle.invoice.id,
+                legacyBalance: cycle.legacyBalance || 0, totalBalance: t.balance
+              };
+              out.rows.push(rowC);
+              out.byCustomerId[c.id] = rowC;
+              continue;
+            }
+
+            // ---- fallback (allocation unavailable): previous behaviour ----
+            if (!(t.balance >= amountFloor)) continue;
             var lastDate = null;
             var refKind = 'payment';
 
@@ -154,6 +184,34 @@ var RECEIVABLE_ATTENTION_DEFAULTS = {
     };
 
     return ctx;
+  }
+
+  // Payment cycle of a customer = latest invoice + its own unpaid remainder; everything older is "legacy".
+  function _paymentCycle(cid, ctx, totals) {
+    if (typeof customerFifoAllocation !== 'function') return null;
+    var invs = (ctx.customerInvoices(cid) || []).filter(function (i) { return i && i.date; });
+    var alloc = customerFifoAllocation(cid);
+    if (!alloc || !alloc.invRemain) return null;
+    var latest = null;
+    for (var i = 0; i < invs.length; i++) {
+      var inv = invs[i];
+      if (!latest || String(inv.date) > String(latest.date) ||
+          (String(inv.date) === String(latest.date) && (Number(inv.number) || 0) > (Number(latest.number) || 0))) latest = inv;
+    }
+    var balance = totals && totals.balance > 0 ? totals.balance : 0;
+    var rem = latest ? Math.max(0, Number(alloc.invRemain[latest.id]) || 0) : 0;
+    rem = Math.min(rem, balance);                       // returns / credits can settle more than the FIFO sees
+    var legacy = 0, oldest = null;
+    for (var j = 0; j < invs.length; j++) {
+      if (latest && invs[j].id === latest.id) continue;
+      var r = Math.max(0, Number(alloc.invRemain[invs[j].id]) || 0);
+      if (r > 0.5) { legacy += r; if (!oldest || String(invs[j].date) < String(oldest)) oldest = String(invs[j].date); }
+    }
+    var opening = Math.max(0, Number(alloc.openingRemaining) || 0);
+    if (opening > 0.5) legacy += opening;
+    legacy = Math.min(legacy, Math.max(0, balance - rem));   // never show more legacy than the real balance
+    var due = (latest && typeof latest.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(latest.dueDate)) ? latest.dueDate : null;
+    return { invoice: latest, remaining: rem, dueDate: due, legacyBalance: legacy, legacyOldestDate: oldest };
   }
 
   global.createComputationContext = createComputationContext;

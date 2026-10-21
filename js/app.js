@@ -1681,7 +1681,7 @@ function openAddVisit(cid){
       '</div>';
   }
   const followUpReminderHtml = visitFollowUps.length
-    ? '<div class="visit-watch-followups"><div class="bp-pre-label">پیگیری‌های منتظر</div>' +
+    ? '<div class="visit-watch-followups"><div class="bp-pre-label">پیگیری‌های باز</div>' +
       visitFollowUps.slice(0, 2).map(function (o) {
         const sentence = BP ? BP.watchSentence(o) : (o.generatedReason || '');
         return '<div class="visit-watch-followup-item">' +
@@ -2137,6 +2137,34 @@ function openAddVisit(cid){
       showToast('ذخیره نشد');
       return false;
     }
+    // ACK: every rejected offer becomes a product SellerAck, and every visit leaves one account-level
+    // "visit_reviewed" ACK (7 days). Only after a successful save; fail-open — never affects the visit.
+    if (typeof createAck === 'function') {
+      try {
+        (Array.isArray(visit.offeredProducts) ? visit.offeredProducts : []).forEach(function (op) {
+          if (!op || op.reaction !== 'rejected' || !op.rejectionReason) return;
+          createAck({
+            customerId: cid,
+            productId: op.productId,
+            decision: op.rejectionReason,
+            stockSource: op.stockSource || null,
+            source: 'visit',
+            sourceId: visit.id,
+            sourceContext: { visitDate: visit.date, visitTime: visit.time, stockSource: op.stockSource || null },
+            legacyKey: 'visit:' + visit.id + ':' + op.productId
+          });
+        });
+        createAck({
+          customerId: cid,
+          scope: 'account',
+          decision: 'visit_reviewed',
+          source: 'visit',
+          sourceId: visit.id,
+          sourceContext: { visitDate: visit.date, visitTime: visit.time },
+          legacyKey: 'visitrev:' + visit.id
+        });
+      } catch (eAck) { console.warn('ACK from visit failed (visit kept)', eAck); }
+    }
     if (typeof gameOnCustomerVisit === 'function') {
       try {
         await gameOnCustomerVisit(cid, visit.id, visit.date);
@@ -2445,6 +2473,8 @@ function openInvoiceForm(cid, editInv, opts){
   if(activeRowIndex < 0) activeRowIndex = null;
   // تاریخ فاکتور در closure نگه داشته می‌شود تا با هر renderSheet() دوباره به «امروز» برنگردد.
   let invoiceDateStr = editInv ? editInv.date : todayISO();
+  // Optional payment due date (sellers may leave it empty: follow-up then counts from the invoice date).
+  let invoiceDueStr = (editInv && editInv.dueDate) ? String(editInv.dueDate).slice(0,10) : '';
   // فعال‌سازی ردیف جمع‌شده؛ renderSheet آن را تنظیم می‌کند (setActiveRow داخل scope همان است).
   let activateCollapsedRow = null;
   const qtyFocusPrevious = new Map();
@@ -2675,6 +2705,10 @@ function openInvoiceForm(cid, editInv, opts){
           </div>
 
           <div class="field inv-date-field"><label>تاریخ فاکتور</label>${shamsiDateInputHTML('f-date', invoiceDateStr)}</div>
+          <div class="field inv-due-field">
+            <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="f-due-toggle" ${invoiceDueStr?'checked':''}> سررسید پرداخت دارد (اختیاری)</label>
+            <div id="f-due-wrap" style="${invoiceDueStr?'':'display:none;'}margin-top:6px;">${shamsiDateInputHTML('f-due-date', invoiceDueStr || invoiceDateStr)}</div>
+          </div>
 
           <div class="inv-section inv-items-section">
             <div class="inv-items-card-head">
@@ -3237,6 +3271,11 @@ function openInvoiceForm(cid, editInv, opts){
     // تاریخ فاکتور و تاریخ سررسید چک: هر تغییرِ picker در closure ثبت می‌شود تا re-render آن را گم نکند.
     const invDateEl = document.getElementById('f-date');
     if(invDateEl) invDateEl.addEventListener('input', e=>{ invoiceDateStr = e.target.value || todayISO(); });
+    const dueToggleEl = document.getElementById('f-due-toggle');
+    if(dueToggleEl) dueToggleEl.addEventListener('change', ()=>{
+      const w = document.getElementById('f-due-wrap');
+      if(w) w.style.display = dueToggleEl.checked ? '' : 'none';
+    });
     const checkDueEl = document.getElementById('f-check-due');
     if(checkDueEl) checkDueEl.addEventListener('input', e=>{
       pendingPayment.checkDue = e.target.value;
@@ -3265,6 +3304,16 @@ function openInvoiceForm(cid, editInv, opts){
       if(btn.disabled) return; // جلوگیری از ثبت دوباره با کلیک سریع/پی‌درپی
       btn.disabled = true;
       const date = document.getElementById('f-date').value || todayISO();
+      // Optional due date: only when the toggle is on. A due date before the invoice date is rejected.
+      let invDueDate = '';
+      {
+        const dt = document.getElementById('f-due-toggle');
+        const dv = document.getElementById('f-due-date');
+        if(dt && dt.checked && dv && dv.value){
+          invDueDate = String(dv.value).slice(0,10);
+          if(invDueDate < date){ showToast('سررسید نمی‌تواند قبل از تاریخ فاکتور باشد'); btn.disabled = false; return; }
+        }
+      }
 
       // اعتبارسنجی: ردیف‌های خالیِ draft (بدون جنس انتخاب‌شده) اگر حداقل یک ردیف
       // معتبر دیگر وجود داشته باشد، نباید مانع ثبت فاکتور شوند؛ اما ردیفی که
@@ -3383,6 +3432,7 @@ function openInvoiceForm(cid, editInv, opts){
         revertInvoicePayments(editInv);
 
         // ۲) به‌روزرسانی خود فاکتور با مقادیر جدید (همون id و شماره فاکتور حفظ می‌مونه)
+        if(invDueDate) editInv.dueDate = invDueDate; else delete editInv.dueDate;
         editInv.date = date; editInv.items = items; editInv.total = total; editInv.discount = discount; editInv.discountType = discountType;
         editInv.prevBalance = prevBalance; editInv.cashPaid = cashPaid; editInv.cardPaid = cardPaid;
         editInv.transferPaid = transferPaid; editInv.checkPaid = checkAmount; editInv.newBalance = newBalance;
@@ -3420,13 +3470,14 @@ function openInvoiceForm(cid, editInv, opts){
           btn.disabled = false;
           return;
         }
+        try{ if(typeof reconcileAcksAfterInvoice === 'function') reconcileAcksAfterInvoice(cid, items); }catch(eAck){ console.warn('reconcileAcksAfterInvoice failed', eAck); }
         closeModal(); openInvoiceDetail(editInv.id, cid); render();
         showToast('فاکتور ویرایش شد؛ موجودی و حساب مشتری اصلاح شد');
         return;
       }
 
       const newInv = {
-        id:uid(), number:null, customerId:cid, date, items, total, discount, discountType,
+        id:uid(), number:null, customerId:cid, date, ...(invDueDate ? {dueDate: invDueDate} : {}), items, total, discount, discountType,
         prevBalance, cashPaid, cardPaid, transferPaid, checkPaid:checkAmount, newBalance,
         ...(opts.visitId ? {visitId: opts.visitId} : {}),
       };
@@ -3454,6 +3505,8 @@ function openInvoiceForm(cid, editInv, opts){
         btn.disabled = false;
         return;
       }
+      // ACK: a purchase ends the premise of suppress/defer decisions on the purchased families.
+      try{ if(typeof reconcileAcksAfterInvoice === 'function') reconcileAcksAfterInvoice(cid, items); }catch(eAck){ console.warn('reconcileAcksAfterInvoice failed', eAck); }
       // Game Center hooks — CREATE only (edit path returns earlier). Never rolls back CRM.
       if (typeof gameOnInvoice === 'function') {
         try {

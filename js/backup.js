@@ -177,12 +177,13 @@ async function restoreProspectScoutBundle(bundle){
    Runtime DBs stay separate; one user-facing backup file.
    ============================================================ */
 const INTELLIGENCE_DB_NAME = 'bagheri_intelligence_db';
-const INTELLIGENCE_DB_VERSION = 3;
-const INTELLIGENCE_STORES = ['occurrences', 'seller_feedback', 'baseline_cache'];
+const INTELLIGENCE_DB_VERSION = 4;
+const INTELLIGENCE_STORES = ['occurrences', 'seller_feedback', 'baseline_cache', 'seller_acks'];
 const INTELLIGENCE_LS_KEYS = {
   occurrences: 'bagheri_intelligence_occurrences',
   seller_feedback: 'bagheri_intelligence_seller_feedback',
-  baseline_cache: 'bagheri_intelligence_baseline_cache'
+  baseline_cache: 'bagheri_intelligence_baseline_cache',
+  seller_acks: 'bagheri_seller_acks_v1'
 };
 
 function openIntelligenceDbForBackup(){
@@ -199,6 +200,10 @@ function openIntelligenceDbForBackup(){
         }
         if(!db.objectStoreNames.contains('baseline_cache')){
           db.createObjectStore('baseline_cache', { keyPath: 'key' });
+        }
+        if(!db.objectStoreNames.contains('seller_acks')){
+          const ackSt = db.createObjectStore('seller_acks', { keyPath: 'id' });
+          try{ ackSt.createIndex('by_customer_status', ['customerId','status'], { unique:false }); ackSt.createIndex('by_expiry','expiresAt',{ unique:false }); }catch(e){}
         }
       };
       req.onsuccess = (e)=> resolve(e.target.result);
@@ -228,6 +233,7 @@ async function exportIntelligenceBundle(){
     let occurrences = await intelligenceBackupGetAll(db, 'occurrences');
     let seller_feedback = await intelligenceBackupGetAll(db, 'seller_feedback');
     let baseline_cache = await intelligenceBackupGetAll(db, 'baseline_cache');
+    let seller_acks = await intelligenceBackupGetAll(db, 'seller_acks');
     // localStorage is the synchronous mirror used by the Intelligence modules
     // for immediate state. Prefer it when present so a backup taken immediately
     // after a write cannot capture a stale async IDB mirror.
@@ -236,10 +242,12 @@ async function exportIntelligenceBundle(){
       if(occRaw){ const map=JSON.parse(occRaw); if(map && typeof map==='object' && !Array.isArray(map)) occurrences=Object.keys(map).map(k=>({key:k,dates:Array.isArray(map[k])?map[k]:[]})); }
       const fbRaw=localStorage.getItem(INTELLIGENCE_LS_KEYS.seller_feedback);
       if(fbRaw){ const arr=JSON.parse(fbRaw); if(Array.isArray(arr)) seller_feedback=arr; }
+      const ackRaw=localStorage.getItem(INTELLIGENCE_LS_KEYS.seller_acks);
+      if(ackRaw){ const arr=JSON.parse(ackRaw); if(Array.isArray(arr)) seller_acks=arr; }
       const baseRaw=localStorage.getItem(INTELLIGENCE_LS_KEYS.baseline_cache);
       if(baseRaw){ const map=JSON.parse(baseRaw); if(map && typeof map==='object' && !Array.isArray(map)) baseline_cache=Object.keys(map).map(k=>map[k]).filter(Boolean); }
     }catch(lsErr){ console.warn('exportIntelligenceBundle localStorage mirror read failed',lsErr); }
-    return { dbVersion: INTELLIGENCE_DB_VERSION, occurrences: occurrences || [], seller_feedback: seller_feedback || [], baseline_cache: baseline_cache || [] };
+    return { dbVersion: INTELLIGENCE_DB_VERSION, occurrences: occurrences || [], seller_feedback: seller_feedback || [], baseline_cache: baseline_cache || [], seller_acks: seller_acks || [] };
   }catch(e){
     console.error('exportIntelligenceBundle failed', e);
     return null;
@@ -294,7 +302,8 @@ async function restoreIntelligenceBundle(bundle){
     await runIntelligenceRestoreTx(db, {
       occurrences: Array.isArray(bundle.occurrences) ? bundle.occurrences : [],
       seller_feedback: Array.isArray(bundle.seller_feedback) ? bundle.seller_feedback : [],
-      baseline_cache: Array.isArray(bundle.baseline_cache) ? bundle.baseline_cache : []
+      baseline_cache: Array.isArray(bundle.baseline_cache) ? bundle.baseline_cache : [],
+      seller_acks: Array.isArray(bundle.seller_acks) ? bundle.seller_acks : []
     });
 
     try{
@@ -317,6 +326,8 @@ async function restoreIntelligenceBundle(bundle){
           if(row && row.key != null) baseMap[row.key] = row;
         });
         localStorage.setItem(INTELLIGENCE_LS_KEYS.baseline_cache, JSON.stringify(baseMap));
+        localStorage.setItem(INTELLIGENCE_LS_KEYS.seller_acks, JSON.stringify(Array.isArray(bundle.seller_acks) ? bundle.seller_acks : []));
+        if(typeof replaceAllAcks==='function') replaceAllAcks(Array.isArray(bundle.seller_acks) ? bundle.seller_acks : []);
       }
     }catch(lsErr){
       console.warn('intelligence localStorage mirror refresh failed', lsErr);
@@ -461,6 +472,15 @@ function _normalizeBackupEnvelope(parsed){
     if(Object.prototype.hasOwnProperty.call(intel, 'version')){
       delete intel.version;
     }
+    // Pre-ACK backups (dbVersion 3, no seller_acks): align to the v4 export shape WITHOUT erasing
+    // the ACKs that exist now (owner rule: a v3 restore never wipes seller_acks). The current ACK
+    // rows are carried into the restored state; legacy rows from the backup are then merged in by
+    // the idempotent migrateLegacyAcknowledgments() after the verified commit.
+    if(intel.seller_acks == null){
+      try{ intel.seller_acks = (typeof exportAcks==='function') ? JSON.parse(JSON.stringify(exportAcks())) : []; }
+      catch(_e){ intel.seller_acks = []; }
+    }
+    if(intel.dbVersion == null || Number(intel.dbVersion) === 3) intel.dbVersion = 4;
   }
   return parsed;
 }
@@ -564,7 +584,7 @@ function _validateIntelligenceBundle(bundle, customerIds, productIds, products, 
   const groupIds=new Set((Array.isArray(analysisGroups)?analysisGroups:[]).map(g=>String(g&&g.id)));
   const familyOf=new Map();
   (Array.isArray(products)?products:[]).forEach(p=>{ if(p&&p.id!=null) familyOf.set(String(p.id),(p.analysisGroupId!=null&&p.analysisGroupId!=='')?String(p.analysisGroupId):String(p.id)); });
-  if(bundle.dbVersion != null && Number(bundle.dbVersion) !== 3) return false;
+  if(bundle.dbVersion != null && Number(bundle.dbVersion) !== 3 && Number(bundle.dbVersion) !== 4) return false;
   for(const k of ['occurrences','seller_feedback','baseline_cache']) if(!Array.isArray(bundle[k])) return false;
   const occKeys=new Set();
   for(const row of bundle.occurrences){
@@ -590,6 +610,21 @@ function _validateIntelligenceBundle(bundle, customerIds, productIds, products, 
     if(f.comment != null && typeof f.comment!=='string') return false;
     if(!_isIsoTimestamp(f.createdAt)) return false;
     if(f.source != null && !_INTEL_FEEDBACK_SOURCES.has(String(f.source))) return false;
+  }
+  // seller_acks (v4): optional for older backups; structural validation only
+  // (orphan references are harmless — an ACK only ever matches live signals).
+  if(bundle.seller_acks != null){
+    if(!Array.isArray(bundle.seller_acks)) return false;
+    const ackIds=new Set();
+    const ackDecisions=new Set(['still_stock','no_need','not_wanted','follow_up_later','price','competitor','quality','other','dismiss','unavailable','visit_reviewed']);
+    const ackStatuses=new Set(['active','expired','reversed','superseded']);
+    for(const a of bundle.seller_acks){
+      if(!_isPlainObject(a) || typeof a.id!=='string' || !a.id) return false;
+      if(ackIds.has(a.id)) return false; ackIds.add(a.id);
+      if(typeof a.customerId!=='string' || !a.customerId) return false;
+      if(!ackDecisions.has(String(a.decision)) || !ackStatuses.has(String(a.status))) return false;
+      if(a.scope!=='product' && a.scope!=='account') return false;
+    }
   }
   const baseKeys=new Set();
   for(const b of bundle.baseline_cache){
@@ -859,6 +894,8 @@ async function restoreIntelligenceBundleStrict(bundle){
   localStorage.setItem(INTELLIGENCE_LS_KEYS.occurrences,JSON.stringify(occMap));
   localStorage.setItem(INTELLIGENCE_LS_KEYS.seller_feedback,JSON.stringify(bundle.seller_feedback||[]));
   localStorage.setItem(INTELLIGENCE_LS_KEYS.baseline_cache,JSON.stringify(baseMap));
+  localStorage.setItem(INTELLIGENCE_LS_KEYS.seller_acks,JSON.stringify(bundle.seller_acks||[]));
+  if(typeof replaceAllAcks==='function') replaceAllAcks(bundle.seller_acks||[]);
   return true;
 }
 
@@ -1007,6 +1044,13 @@ async function _restoreParsedBackup(parsed){
     const actual=await _readCurrentSemanticState();
     if(!_semanticStateEqual(actual,expected)) throw new Error('post-commit verification failed');
     await dbDelete(RESTORE_JOURNAL_KEY);
+    // ACK: a backup without ACKs (pre-ACK) is migrated from its legacy feedback/watch/visit
+    // records AFTER the verified commit. Idempotent (legacyKey), additive, never throws.
+    try{
+      if(typeof migrateLegacyAcknowledgments==='function'){
+        migrateLegacyAcknowledgments({force:true});   // idempotent (legacyKey); existing ACKs untouched
+      }
+    }catch(ackErr){ console.warn('post-restore ACK migration failed', ackErr); }
     return true;
   }catch(e){
     console.error('restore commit failed; attempting journaled rollback',e);

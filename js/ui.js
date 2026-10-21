@@ -363,6 +363,31 @@ function balanceStatusWord(balance){
 function balanceStatusText(balance, amountText){
   return balance===0 ? balanceStatusWord(balance) : (balanceStatusWord(balance)+': '+amountText);
 }
+/**
+ * Single source of the customer risk wording (Customer Detail, Quick View, Customers list).
+ * Pure: no data access. Unknown / missing level => empty label (caller supplies its own fallback).
+ * @param {string} level 'critical' | 'high' | 'medium' | 'low'
+ * @returns {{label:string, tone:string}}
+ */
+function getRiskBadge(level){
+  if(level==='critical') return { label:'اقدام فوری', tone:'danger' };
+  if(level==='high')     return { label:'ریسک فروش', tone:'warning' };
+  if(level==='medium')   return { label:'نیاز به بررسی', tone:'warning' };
+  if(level==='low')      return { label:'وضعیت عادی', tone:'neutral' };
+  return { label:'', tone:'' };
+}
+/**
+ * Single source of the «نیازمند پیگیری» description used by Dashboard, Customer Detail and Quick View.
+ * Pure: formats one row of computationContext.receivableAttention().
+ */
+function receivableAttentionDesc(row){
+  if(!row) return '';
+  var n = enToFaDigits(String(Math.max(0, Math.round(Number(row.daysSince) || 0))));
+  if(row.refKind==='invoice_due') return (Number(row.daysSince) > 0) ? (n+' روز از سررسید') : 'سررسید امروز';
+  if(row.refKind==='invoice_date') return n+' روز از فاکتور آخر';
+  if(row.refKind==='no_payment_history') return n+' روز از فاکتور آخر · پرداختی ثبت نشده';
+  return n+' روز از آخرین پرداخت';
+}
 /** Local calendar date as YYYY-MM-DD (not UTC — avoids Iran midnight offset). */
 function todayISO(){
   const d = new Date();

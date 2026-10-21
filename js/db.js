@@ -490,6 +490,8 @@ function normalizeData(parsed){
   d.invoices = (parsed.invoices||[]).map(i=>({
     id:i.id||uid(), number:optNum(i.number), customerId:i.customerId, date:i.date,
     visitId: i.visitId || null,
+    // Optional payment due date (YYYY-MM-DD). Absent => follow-up counts from the invoice date.
+    ...((typeof i.dueDate==='string' && /^\d{4}-\d{2}-\d{2}$/.test(i.dueDate)) ? {dueDate:i.dueDate} : {}),
     items:(i.items||[]).map(it=>({
       productId:it.productId, name:it.name, qty:num(it.qty), price:num(it.price),
       buyPrice:num(it.buyPrice), discount:num(it.discount), weight:num(it.weight),
