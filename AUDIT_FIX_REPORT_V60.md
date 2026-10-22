@@ -40,3 +40,4 @@
   - mounted icon refreshed from cache
   - `fill="currentColor"` normalization works
 - Real iPhone/Safari visual runtime QA was not available in this environment, so no device screenshot PASS is claimed.
+a
