@@ -23,6 +23,26 @@
     };
   }
 
+  // extractCustomerSignals may be memoized and already decorated by Risk's ACK pass.
+  // Work from a clean copy so this view applies the current ACK set exactly once.
+  function _freshSignalCopy(s) {
+    if (!s) return s;
+    var c = Object.assign({}, s);
+    c.ackRiskDelta = undefined;
+    c.ackPriorityDelta = undefined;
+    c.ackIds = undefined;
+    c.ackPriorityById = undefined;
+    c.ackDecision = undefined;
+    c.ackExpiresAt = undefined;
+    c.ackScope = undefined;
+    c.ackActionEffect = undefined;
+    c.ackUrgency = undefined;
+    c.ackActionText = undefined;
+    c.ackActionType = undefined;
+    c.ackReviewed = undefined;
+    return c;
+  }
+
   let currentCustomerId = null;
   let rootEl = null;
   function customersHref() {
@@ -389,7 +409,7 @@
     try {
       if (typeof isAckLayerActive === 'function' && isAckLayerActive() &&
           typeof getActiveAcksForCustomer === 'function' && typeof applyAcksToSignals === 'function') {
-        confirmed = confirmed.map(function (s) { return s ? Object.assign({}, s) : s; });
+        confirmed = confirmed.map(_freshSignalCopy);
         applyAcksToSignals(confirmed, getActiveAcksForCustomer(cid));
       }
     } catch (eAckW) { /* fail-open */ }
@@ -1348,20 +1368,6 @@
 
       '<div class="card customer-identity-card">' +
         '<div class="customer-identity-name">' + esc(c.name) + '</div>' +
-        '<div class="customer-identity-meta">' +
-          (c.ownerName ? cdMeta('مسئول فروشگاه', c.ownerName) : '') +
-          (c.phone ? cdMeta('تلفن', c.phone) : '') +
-          (c.locationId
-            ? cdMeta('موقعیت', getLocationDisplayString(c.locationId))
-            : ((c.region ? cdMeta('منطقه', c.region) : '') +
-               (c.route ? cdMeta('مسیر', c.route) : ''))) +
-          (c.address ? cdMeta('آدرس', c.address) : '') +
-          (c.note ? cdMeta('یادداشت', c.note) : '') +
-        '</div>' +
-        '<div class="bp-customer-health"><span class="bp-customer-health-label">وضعیت مشتری</span>' +
-          '<span class="bp-customer-health-value ' + (customerRiskLevel ? 'radar-risk-' + esc(customerRiskLevel) : '') + '">' +
-            esc(customerHealthLabel) +
-          '</span></div>' +
         '<div class="customer-balance-block">' +
           '<div class="label">مانده حساب</div>' +
           '<div class="value ' + color + ' customer-balance-value">' + balanceLine + '</div>' +
@@ -1372,6 +1378,20 @@
               (legacyDebtRow.oldestDate ? ' — قدیمی‌ترین: ' + faDate(legacyDebtRow.oldestDate) : '') +
             '</div>'
           : '') +
+        '<div class="bp-customer-health"><span class="bp-customer-health-label">وضعیت مشتری</span>' +
+          '<span class="bp-customer-health-value ' + (customerRiskLevel ? 'radar-risk-' + esc(customerRiskLevel) : '') + '">' +
+            esc(customerHealthLabel) +
+          '</span></div>' +
+        '<div class="customer-identity-meta">' +
+          (c.ownerName ? cdMeta('مسئول فروشگاه', c.ownerName) : '') +
+          (c.phone ? cdMeta('تلفن', c.phone) : '') +
+          (c.locationId
+            ? cdMeta('موقعیت', getLocationDisplayString(c.locationId))
+            : ((c.region ? cdMeta('منطقه', c.region) : '') +
+               (c.route ? cdMeta('مسیر', c.route) : ''))) +
+          (c.address ? cdMeta('آدرس', c.address) : '') +
+          (c.note ? cdMeta('یادداشت', c.note) : '') +
+        '</div>' +
       '</div>' +
 
       topAlertHtml +
