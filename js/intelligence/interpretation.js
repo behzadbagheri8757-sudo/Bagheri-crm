@@ -15,6 +15,26 @@
 
   var SEV_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 
+  // extractCustomerSignals is memoized and may already have ACK effects applied by Risk.
+  // Clear only derived ACK annotations on the copy before applying the live ACK set once.
+  function _freshSignalCopy(s) {
+    if (!s) return s;
+    var c = Object.assign({}, s);
+    c.ackRiskDelta = undefined;
+    c.ackPriorityDelta = undefined;
+    c.ackIds = undefined;
+    c.ackPriorityById = undefined;
+    c.ackDecision = undefined;
+    c.ackExpiresAt = undefined;
+    c.ackScope = undefined;
+    c.ackActionEffect = undefined;
+    c.ackUrgency = undefined;
+    c.ackActionText = undefined;
+    c.ackActionType = undefined;
+    c.ackReviewed = undefined;
+    return c;
+  }
+
   function _sevRank(s) {
     if (!s) return 0;
     var r = SEV_RANK[s.severity];
@@ -115,7 +135,7 @@
     try {
       if (typeof isAckLayerActive === 'function' && isAckLayerActive() &&
           typeof getActiveAcksForCustomer === 'function' && typeof applyAcksToSignals === 'function') {
-        signals = signals.map(function (s) { return s ? Object.assign({}, s) : s; });
+        signals = signals.map(_freshSignalCopy);
         applyAcksToSignals(signals, getActiveAcksForCustomer(customerId));
       }
     } catch (eAckS) { /* fail-open */ }

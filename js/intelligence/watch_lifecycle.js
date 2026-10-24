@@ -46,7 +46,7 @@
     { code: 'follow_up_later', label: 'بعداً پیگیری می‌کنم', kind: 'decision' },
     { code: 'price', label: 'قیمت' },
     { code: 'competitor', label: 'خرید از رقیب' },
-    { code: 'no_need', label: 'فعلاً نیاز ندارد' },
+    { code: 'no_need', label: 'فعلاً نیاز ندارد', kind: 'decision' },
     { code: 'quality', label: 'مشکل کیفیت' },
     { code: 'other', label: 'سایر' }
   ];
@@ -929,7 +929,7 @@
    * Record seller reason + optional note.
    * - Plain reasons (price, competitor, ...): data capture only; status stays
    *   'active' (unchanged V1 behavior).
-   * - Decision reasons (still_stock, not_wanted, follow_up_later): the
+   * - Decision reasons (still_stock, not_wanted, follow_up_later, no_need): the
    *   structured code is authoritative; the note is stored beside it in
    *   reason.comment. The occurrence is closed and carries a suppression
    *   marker so the same subject does not regenerate (see "Seller decisions").
@@ -949,7 +949,7 @@
       // Preserve the existing safe fallback for unknown reason codes.
       code = 'other';
     }
-    if (code === 'still_stock' || code === 'not_wanted' || code === 'follow_up_later') {
+    if (code === 'still_stock' || code === 'not_wanted' || code === 'follow_up_later' || code === 'no_need') {
       // not_wanted needs a product subject; never guess one for an
       // account-level Watch.
       if (code === 'not_wanted' && _normPid(rec.productId) == null) return null;

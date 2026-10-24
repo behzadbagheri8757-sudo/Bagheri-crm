@@ -877,6 +877,14 @@
       actionTypeOverride = winner.ackActionType || null;
       urgencyOverride = winner.ackUrgency || null;
     }
+    // Account-level follow-up decisions must change the queued action too; the ACK expiry
+    // carries the seller-selected follow-up date when one was supplied.
+    if (winner.ackScope === 'account' && winner.ackActionEffect === 'follow_up' && !actionTypeOverride) {
+      var accountFollowUpDate = String(winner.ackExpiresAt || '').slice(0, 10);
+      text = 'پیگیری بعدی' + (accountFollowUpDate ? ' در ' + _fmtDateFa(accountFollowUpDate) : '');
+      actionTypeOverride = 'follow_up';
+      urgencyOverride = 'low';
+    }
     // Ordinary visit ("visit_reviewed" ACK): ordinary, non-immediate alerts read as already reviewed and
     // drop to low urgency for the ACK's life. The signal stays in the queue (priority only dips).
     // Never for IMMEDIATE categories, never when a product ACK already worded this action.
