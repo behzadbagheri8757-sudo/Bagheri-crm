@@ -1558,22 +1558,63 @@ window.BagheriPresent = (function () {
       return '<span class="bp-hint-line is-' + esc(l.tone || 'muted') + '">' + esc(l.t) + '</span>';
     }).join('');
   }
+  function productPurchaseCycle(cid, pid, precomputed) {
+    var buys = {};
+    var raw = [];
+    if (precomputed) {
+      buys = precomputed.buys || {};
+      raw = precomputed.metrics || [];
+    } else {
+      try { buys = lastPurchaseMap(cid) || {}; } catch (e) { buys = {}; }
+      try { if (typeof _extractSkuRawMetrics === 'function') raw = _extractSkuRawMetrics(cid) || []; } catch (e2) { raw = []; }
+    }
+    var lastDate = buys[pid] || null;
+    var metric = raw.find(function (m) { return m && (m.productId === pid || (Array.isArray(m.memberProductIds) && m.memberProductIds.indexOf(pid) >= 0)); }) || null;
+    var count = metric ? Number(metric.purchaseCount) || 0 : 0;
+    var cycle = metric && Number.isFinite(Number(metric.typicalCycle)) && Number(metric.typicalCycle) > 0 ? Number(metric.typicalCycle) : null;
+    var daysSince = null;
+    if (lastDate && typeof _behaviorDaysDiff === 'function') {
+      var dd = _behaviorDaysDiff(lastDate, todayISO());
+      if (Number.isFinite(dd) && dd >= 0) daysSince = dd;
+    }
+    var stockOut = !!(metric && metric.stockOut);
+    var state = 'no_history';
+    var daysRemaining = null;
+    var daysOverdue = null;
+    if (count === 1) state = 'first_purchase';
+    else if (count === 2) state = 'insufficient';
+    else if (count >= 3 && cycle != null && daysSince != null) {
+      daysRemaining = cycle - daysSince;
+      daysOverdue = Math.max(0, daysSince - cycle);
+      if (daysSince === 0) state = 'today_purchase';
+      else if (stockOut) state = 'stock_out';
+      else if (daysRemaining > 0) state = 'due_soon';
+      else if (daysRemaining === 0) state = 'due_today';
+      else state = 'overdue';
+    } else if (stockOut && count >= 3) state = 'stock_out';
+    return { state: state, daysRemaining: daysRemaining, daysSinceLast: daysSince, typicalCycle: cycle, purchaseCount: count, lastPurchaseDate: lastDate, daysOverdue: daysOverdue, stockOut: stockOut };
+  }
 
   return {
     fa: fa, n0: n0, n1: n1, lvRank: lvRank, pname: pname, qtyText: qtyText,
     watchLabel: watchLabel, watchSentence: watchSentence, watchDetailLines: watchDetailLines,
     detailsHtml: detailsHtml, evidenceLines: evidenceLines, namesText: namesText,
     stockSentence: stockSentence, stockShort: stockShort, reasonLabel: reasonLabel,
-    relDays: relDays, productHints: productHints, hintHtml: hintHtml
+    relDays: relDays, productHints: productHints, hintHtml: hintHtml,
+    lastPurchaseMap: lastPurchaseMap, productPurchaseCycle: productPurchaseCycle
   };
 })();
 
 function openAddVisit(cid){
+  const KIND_CHIPS = [
+    { value: 'normal', label: 'ویزیت عادی' },
+    { value: 'checkin', label: 'سرکشی' },
+    { value: 'closed', label: 'فروشگاه بسته بود' },
+  ];
   const RESULT_CHIPS = [
     { value: VISIT_RESULTS[0], label: 'سفارش گرفته شد' },
     { value: VISIT_RESULTS[1], label: 'سفارش گرفته نشد' },
-    { value: VISIT_RESULTS[2], label: 'بسته بود' },
-    { value: VISIT_RESULTS[3], label: 'سرکشی' },
+    { value: VISIT_RESULTS[3], label: 'فقط سرکشی' },
   ];
   const REACTION_CHIPS = [
     { value: 'accepted', label: 'قبول کرد' },
@@ -1600,11 +1641,23 @@ function openAddVisit(cid){
   });
 
   const visitCustomer = (data.customers || []).find(function (x) { return x && x.id === cid; }) || null;
+  const visitCtx = typeof createComputationContext === 'function'
+    ? createComputationContext({ data: data })
+    : null;
+  const BP = window.BagheriPresent || null;
   let visitBehavior = {};
   try {
-    if (typeof customerBehavior === 'function') visitBehavior = customerBehavior(cid) || {};
+    if (typeof customerBehavior === 'function') visitBehavior = customerBehavior(cid, visitCtx) || {};
   } catch (eVisitContext) { visitBehavior = {}; }
-  const BP = window.BagheriPresent || null;
+  let visitSkuMetrics = [];
+  let visitLastPurchases = {};
+  try {
+    if (typeof _extractSkuRawMetrics === 'function') visitSkuMetrics = _extractSkuRawMetrics(cid, visitCtx) || [];
+  } catch (eVisitMetrics) { visitSkuMetrics = []; }
+  try {
+    if (BP && typeof BP.lastPurchaseMap === 'function') visitLastPurchases = BP.lastPurchaseMap(cid) || {};
+  } catch (eVisitPurchases) { visitLastPurchases = {}; }
+  const visitPurchasePrecomputed = { metrics: visitSkuMetrics, buys: visitLastPurchases };
   let visitWatches = [];
   let visitFollowUps = [];
   try {
@@ -1614,7 +1667,7 @@ function openAddVisit(cid){
   let visitStory = '';
   try {
     if (typeof buildCustomerStory === 'function') {
-      const st = buildCustomerStory(cid);
+      const st = buildCustomerStory(cid, visitCtx);
       visitStory = (st && st.summary) ? st.summary : '';
     }
   } catch (eVisitStory) { visitStory = ''; }
@@ -1709,9 +1762,35 @@ function openAddVisit(cid){
       (lastInvoiceText ? '<div class="visit-precontext-grid"><span>آخرین خرید: ' + esc(lastInvoiceText) + '</span></div>' : '') +
     '</div>';
   const visitHints = BP ? BP.productHints(cid) : null;
+  const visitPurchaseCycleMap = new Map();
+  try {
+    activeProducts.forEach(function (p) {
+      if (BP && typeof BP.productPurchaseCycle === 'function') visitPurchaseCycleMap.set(p.id, BP.productPurchaseCycle(cid, p.id, visitPurchasePrecomputed));
+    });
+  } catch (eVisitCycle) { /* purchase-cycle badges are non-critical presentation */ }
 
-  function chipBtn(group, value, label){
-    return '<button type="button" class="chip-opt" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
+  function purchaseCycleBadge(pid){
+    const m = visitPurchaseCycleMap.get(pid);
+    if (!m) return '';
+    let text = '', tone = 'muted';
+    if (m.stockOut) { text = 'موجودی تمام'; tone = 'muted'; }
+    else if (m.purchaseCount === 0) text = 'سابقه ندارد';
+    else if (m.purchaseCount === 1) { text = 'خرید اول' + (m.daysSinceLast != null ? ' · ' + BP.n0(m.daysSinceLast) + ' روز پیش' : ''); tone = 'primary'; }
+    else if (m.purchaseCount === 2) text = 'سابقهٔ کم';
+    else if (m.purchaseCount >= 3 && m.typicalCycle != null && m.daysSinceLast != null) {
+      if (m.daysSinceLast === 0) { text = 'امروز خرید'; tone = 'success'; }
+      else if (m.stockOut) { text = 'موجودی تمام'; tone = 'muted'; }
+      else if (m.daysRemaining >= 2) { text = BP.n0(m.daysRemaining) + ' روز مانده'; tone = 'primary'; }
+      else if (m.daysRemaining === 1) { text = 'فردا موعد'; tone = 'warning'; }
+      else if (m.daysRemaining === 0) { text = 'امروز موعد خرید'; tone = 'warning'; }
+      else { text = BP.n0(m.daysOverdue) + ' روز از موعد گذشته'; tone = m.daysOverdue > 3 ? 'danger' : 'warning'; }
+    }
+    if (!text) return '';
+    return '<span class="vp-purchase-cycle is-' + tone + '"><span class="vp-purchase-dot"></span><span>' + esc(text) + '</span></span>';
+  }
+
+  function chipBtn(group, value, label, selected){
+    return '<button type="button" class="chip-opt' + (selected ? ' selected' : '') + '" aria-pressed="' + (selected ? 'true' : 'false') + '" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
   }
 
   openSheet(
@@ -1722,26 +1801,33 @@ function openAddVisit(cid){
       '<div class="field" style="flex:1;"><label>ساعت</label><input id="f-time" type="time" value="' + nowHHMM() + '"></div>' +
     '</div>' +
     '<div id="visit-card-stage" class="visit-card-stage" aria-live="polite"></div>' +
-    '<div class="field bp-next-field" style="margin-top:12px;"><label for="f-next-action">اقدام بعدی (اختیاری)</label>' +
+    '<div class="field bp-next-field" id="visit-next-action-wrap" style="display:none;margin-top:12px;"><label for="f-next-action">اقدام بعدی (اختیاری)</label>' +
       '<select id="f-next-action"><option value="">بدون اقدام</option>' +
       VISIT_NEXT_ACTIONS.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('') +
       '</select></div>' +
-    '<div class="field" style="margin-top:12px;"><label>یادداشت کوتاه (اختیاری)</label><input id="f-visit-note" placeholder="اختیاری" autocomplete="off"></div>' +
-    '<div class="btn-row visit-save-actions" style="margin-top:8px;">' +
+    '<div class="field" id="visit-note-wrap" style="display:none;margin-top:12px;"><label>یادداشت کوتاه (اختیاری)</label><input id="f-visit-note" placeholder="اختیاری" autocomplete="off"></div>' +
+    '<div class="field" id="closed-next-date-wrap" style="display:none;margin-top:12px;"><label>ویزیت بعدی</label><div id="closed-next-date-options" class="chip-wrap">' +
+      '<button type="button" class="chip-opt" data-next-days="1">فردا</button><button type="button" class="chip-opt" data-next-days="2">۲ روز دیگر</button><button type="button" class="chip-opt" data-next-days="3">۳ روز دیگر</button><button type="button" class="chip-opt" data-next-days="7">هفتهٔ بعد</button><button type="button" class="chip-opt" data-next-custom>تاریخ دلخواه</button></div>' +
+      '<div id="closed-next-custom" style="display:none;margin-top:8px;">' + shamsiDateInputHTML('f-next-visit-date', '') + '</div></div>' +
+    '<div class="btn-row visit-save-actions" id="visit-save-actions" style="display:none;margin-top:8px;">' +
       '<button type="button" class="btn" id="save-visit">ثبت و پایان</button>' +
-      '<button type="button" class="btn secondary" id="save-visit-invoice">ثبت و ایجاد فاکتور</button>' +
+      '<button type="button" class="btn secondary" id="save-visit-invoice" style="display:none;">ثبت و ایجاد فاکتور</button>' +
     '</div>'
   , {dirtyCheck:true});
 
   const state = {
+    kind: null,
     result: null,
-    offeredProducts: [], // complete only
+    offeredProducts: [],
     pendingProductId: null,
     pendingReaction: null,
     pendingRejectionReason: null,
-    nextAction: null, // optional; one of VISIT_NEXT_ACTIONS
-    pendingFrom: 'list', // where the pending product came from: list | add
-    step: 'result', // result | list | add | reaction | rejectReason | stockSource
+    nextAction: null,
+    nextVisitDate: null,
+    note: '',
+    userChangedResult: false,
+    pendingFrom: 'list',
+    step: 'kind'
   };
   const nextActionEl = document.getElementById('f-next-action');
   if (nextActionEl) {
@@ -1753,6 +1839,44 @@ function openAddVisit(cid){
     });
   }
   const stage = document.getElementById('visit-card-stage');
+  function updateVisitStageControls(){
+    const late = state.step === 'outcome' || state.step === 'closedFinish';
+    const nextWrap = document.getElementById('visit-next-action-wrap');
+    const noteWrap = document.getElementById('visit-note-wrap');
+    const saveActions = document.getElementById('visit-save-actions');
+    const saveInvoice = document.getElementById('save-visit-invoice');
+    if (nextWrap) nextWrap.style.display = late && state.step === 'outcome' ? '' : 'none';
+    if (noteWrap) noteWrap.style.display = late ? '' : 'none';
+    if (saveActions) saveActions.style.display = late ? '' : 'none';
+    if (saveInvoice) saveInvoice.style.display = state.step === 'outcome' && state.result === VISIT_RESULTS[0] && (state.offeredProducts || []).some(function (op) { return op && op.reaction === 'accepted'; }) ? '' : 'none';
+    const closedNext = document.getElementById('closed-next-date-wrap');
+    if (closedNext) closedNext.style.display = state.step === 'closedFinish' ? '' : 'none';
+  }
+  const nextDateOptions = document.getElementById('closed-next-date-options');
+  if (nextDateOptions) nextDateOptions.addEventListener('click', function (e) {
+    const btn = e.target.closest('button'); if (!btn) return;
+    const days = Number(btn.getAttribute('data-next-days'));
+    if (days > 0) {
+      const d = new Date(); d.setDate(d.getDate() + days);
+      state.nextVisitDate = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      const custom = document.getElementById('closed-next-custom'); if (custom) custom.style.display = 'none';
+    } else if (btn.hasAttribute('data-next-custom')) {
+      // A previous relative choice must not survive a switch to a custom date.
+      state.nextVisitDate = null;
+      const custom = document.getElementById('closed-next-custom'); if (custom) custom.style.display = '';
+      const customInput = document.getElementById('f-next-visit-date');
+      if (customInput) customInput.value = '';
+      const customField = customInput && customInput.closest('[data-shamsi-root]') && customInput.closest('[data-shamsi-root]').querySelector('[data-shamsi-field]');
+      if (customField) customField.value = '';
+    }
+    nextDateOptions.querySelectorAll('button').forEach(function (b) { b.classList.toggle('selected', b === btn); });
+  });
+  const customNextDate = document.getElementById('f-next-visit-date');
+  if (customNextDate) {
+    const syncCustomNextDate = function () { state.nextVisitDate = customNextDate.value || null; };
+    customNextDate.addEventListener('input', syncCustomNextDate);
+    customNextDate.addEventListener('change', syncCustomNextDate);
+  }
 
   function validOffered(){
     return (state.offeredProducts || []).filter(function (op) {
@@ -1825,7 +1949,7 @@ function openAddVisit(cid){
   const customerProductCandidates = buildCustomerProductCandidates();
 
   function optBtn(group, value, label, selected){
-    return '<button type="button" class="chip-opt vp-opt' + (selected ? ' selected' : '') + '" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
+    return '<button type="button" class="chip-opt vp-opt' + (selected ? ' selected' : '') + '" aria-pressed="' + (selected ? 'true' : 'false') + '" data-vgroup="' + esc(group) + '" data-value="' + esc(value) + '">' + esc(label) + '</button>';
   }
   function currentOffer(pid){
     return (state.offeredProducts || []).find(function (op) { return op.productId === pid; }) || null;
@@ -1867,12 +1991,14 @@ function openAddVisit(cid){
   function productRowHtml(pid, meta){
     const op = currentOffer(pid);
     const sum = op ? offerSummary(op) : null;
+    const cycleBadge = !op ? purchaseCycleBadge(pid) : '';
+    const rowClass = 'vp-row-main' + (cycleBadge ? ' has-cycle' : '');
     return '<div class="vp-row' + (op ? ' is-done' : '') + '">' +
-      '<button type="button" class="vp-row-main" data-vp-open="' + esc(pid) + '">' +
+      '<button type="button" class="' + rowClass + '" data-vp-open="' + esc(pid) + '">' +
         '<span class="vp-row-name">' + esc(productLabel(pid)) + '</span>' +
         (sum
           ? '<span class="vp-status is-' + sum.tone + '">' + esc(sum.text) + '</span>'
-          : (meta ? '<span class="vp-row-meta">' + esc(meta) + '</span>' : '')) +
+          : cycleBadge + (meta ? '<span class="vp-row-meta">' + esc(meta) + '</span>' : '')) +
       '</button>' +
       (op ? '<button type="button" class="vp-row-del" data-vp-del="' + esc(pid) + '" aria-label="حذف ' + esc(productLabel(pid)) + '">حذف</button>' : '') +
     '</div>';
@@ -1894,14 +2020,16 @@ function openAddVisit(cid){
     const pname = esc(productLabel(state.pendingProductId));
     const cur = state.pendingProductId ? currentOffer(state.pendingProductId) : null;
 
-    if (step === 'result') {
-      html =
-        '<div class="visit-card visit-card-enter" data-visit-step="result">' +
-          '<div class="q-title">نتیجه ویزیت؟</div>' +
-          '<div class="chip-wrap">' + RESULT_CHIPS.map(function (o) {
-            return chipBtn('result', o.value, o.label);
-          }).join('') + '</div>' +
-        '</div>';
+    if (step === 'kind') {
+      html = '<div class="visit-card visit-card-enter" data-visit-step="kind"><div class="q-title">نوع ویزیت</div><div class="chip-wrap">' + KIND_CHIPS.map(function (o) { return chipBtn('kind', o.value, o.label); }).join('') + '</div></div>';
+    } else if (step === 'outcome') {
+      const accepted = (state.offeredProducts || []).some(function (op) { return op && op.reaction === 'accepted'; });
+      const noProducts = !(state.offeredProducts || []).length;
+      if (!state.userChangedResult) state.result = state.kind === 'checkin' && noProducts ? VISIT_RESULTS[3] : (accepted ? VISIT_RESULTS[0] : VISIT_RESULTS[1]);
+      const allowed = RESULT_CHIPS.filter(function (o) { return o.value !== VISIT_RESULTS[3] || (state.kind === 'checkin' && noProducts); });
+      html = '<div class="visit-card visit-card-enter" data-visit-step="outcome"><div class="q-title">نتیجهٔ ویزیت</div><div class="vp-opts vp-outcome-opts" role="group" aria-label="نتیجهٔ ویزیت">' + allowed.map(function (o) { return optBtn('result', o.value, o.label, state.result === o.value); }).join('') + '</div>' + footerBack('list') + '</div>';
+    } else if (step === 'closedFinish') {
+      html = '<div class="visit-card visit-card-enter" data-visit-step="closedFinish"><div class="q-title">فروشگاه بسته بود</div><div class="vp-sub">زمان ویزیت بعدی را مشخص کنید؛ محصول یا فاکتوری ثبت نمی‌شود.</div>' + footerBack('kind') + '</div>';
     } else if (step === 'list') {
       const candIds = {};
       customerProductCandidates.forEach(function (c) { candIds[c.id] = true; });
@@ -1920,8 +2048,9 @@ function openAddVisit(cid){
               '</div>'
             : '<div class="vp-empty">برای این مشتری هنوز سابقهٔ خرید یا پیشنهاد ثبت نشده است.</div>') +
           (n ? '<div class="vp-count">' + n + ' محصول در این ویزیت ثبت شده</div>' : '') +
-          '<button type="button" class="vp-add" data-vp-add><span class="vp-add-plus" aria-hidden="true">＋</span><span>افزودن محصول</span></button>' +
-          footerBack('result') +
+          '<button type="button" class="vp-add" data-vp-add><span class="vp-add-plus" aria-hidden="true">＋</span><span>افزودن محصول دیگر</span></button>' +
+          '<button type="button" class="vp-add" data-vp-outcome style="margin-top:8px;">ادامه و ثبت نتیجه</button>' +
+          footerBack('kind') +
         '</div>';
     } else if (step === 'add') {
       const shown = shownProductIds();
@@ -1975,6 +2104,7 @@ function openAddVisit(cid){
 
     stage.innerHTML = html;
     bindStageChips();
+    updateVisitStageControls();
   }
 
   function markDirty(el){
@@ -2020,6 +2150,15 @@ function openAddVisit(cid){
         renderStage();
       });
     });
+    const outcomeBtn = stage.querySelector('[data-vp-outcome]');
+    if (outcomeBtn) outcomeBtn.addEventListener('click', function () {
+      if (!state.userChangedResult) {
+        const accepted = (state.offeredProducts || []).some(function (op) { return op && op.reaction === 'accepted'; });
+        const noProducts = !(state.offeredProducts || []).length;
+        state.result = state.kind === 'checkin' && noProducts ? VISIT_RESULTS[3] : (accepted ? VISIT_RESULTS[0] : VISIT_RESULTS[1]);
+      }
+      state.step = 'outcome'; renderStage();
+    });
     const addBtn = stage.querySelector('[data-vp-add]');
     if (addBtn) {
       addBtn.addEventListener('click', function () {
@@ -2034,11 +2173,27 @@ function openAddVisit(cid){
         const value = btn.getAttribute('data-value');
         if (!group || value == null) return;
 
-        if (group === 'result') {
-          state.result = value;
+        if (group === 'kind') {
+          state.kind = value;
+          state.userChangedResult = false;
           state.pendingProductId = null;
           state.pendingReaction = null;
-          state.step = 'list';
+          if (value === 'closed') {
+            state.result = VISIT_RESULTS[2];
+            state.offeredProducts = [];
+            state.nextAction = null;
+            state.nextVisitDate = null;
+            state.step = 'closedFinish';
+          } else {
+            state.result = null;
+            state.step = 'list';
+          }
+          renderStage();
+          return;
+        }
+        if (group === 'result') {
+          state.result = value;
+          state.userChangedResult = true;
           renderStage();
           return;
         }
@@ -2099,15 +2254,22 @@ function openAddVisit(cid){
   }
 
   async function persistVisit(auto){
+    if (state.kind === 'closed') {
+      const customWrap = document.getElementById('closed-next-custom');
+      const customSelected = !!(customWrap && customWrap.style.display !== 'none');
+      if (customSelected && !(state.nextVisitDate && parseISODateParts(state.nextVisitDate))) {
+        showToast('تاریخ ویزیت بعدی را انتخاب کنید');
+        return false;
+      }
+    }
     const c = data.customers.find(function (x) { return x.id === cid; });
     if (!c) {
       showToast('مشتری پیدا نشد');
       return false;
     }
-    if (!state.result) {
-      showToast('نتیجه ویزیت را انتخاب کنید');
-      return false;
-    }
+    if (!state.kind) { showToast('نوع ویزیت را انتخاب کنید'); return false; }
+    if (state.kind !== 'closed' && !state.result) { showToast('نتیجه ویزیت را انتخاب کنید'); return false; }
+    if (state.kind === 'closed') state.result = VISIT_RESULTS[2];
     const dateEl = document.getElementById('f-date');
     const timeEl = document.getElementById('f-time');
     const noteEl = document.getElementById('f-visit-note');
@@ -2121,11 +2283,13 @@ function openAddVisit(cid){
       id: uid(),
       date: date,
       time: time,
+      kind: state.kind || 'normal',
       result: state.result,
       ordered: state.result === VISIT_RESULTS[0],
     };
+    if (state.kind === 'closed' && state.nextVisitDate) visit.nextVisitDate = state.nextVisitDate;
     if (note) visit.note = note;
-    if (state.nextAction && VISIT_NEXT_ACTIONS.indexOf(state.nextAction) >= 0) visit.nextAction = state.nextAction;
+    if (state.kind !== 'closed' && state.nextAction && VISIT_NEXT_ACTIONS.indexOf(state.nextAction) >= 0) visit.nextAction = state.nextAction;
     if (offered.length) visit.offeredProducts = offered;
 
     c.visits = c.visits || [];
@@ -2154,7 +2318,7 @@ function openAddVisit(cid){
             legacyKey: 'visit:' + visit.id + ':' + op.productId
           });
         });
-        createAck({
+        if (state.kind !== 'closed') createAck({
           customerId: cid,
           scope: 'account',
           decision: 'visit_reviewed',
@@ -2188,6 +2352,7 @@ function openAddVisit(cid){
 
   document.getElementById('save-visit-invoice').addEventListener('click', function (e) {
     withSubmitGuard(e.currentTarget, async function () {
+      if (state.kind === 'closed' || !(state.offeredProducts || []).some(function (op) { return op && op.reaction === 'accepted'; })) return false;
       const saved = await persistVisit(false);
       if (saved && typeof openAddInvoice === 'function') {
         openAddInvoice(cid, {visitId: saved.id});
@@ -2401,15 +2566,15 @@ function openInvoiceForm(cid, editInv, opts){
       body.className = 'inv-line-body';
       const name = document.createElement('span');
       name.className = 'inv-line-name';
-      const meta = document.createElement('div');
-      meta.className = 'inv-line-collapsed-meta';
-      const calc = document.createElement('span');
-      calc.className = 'inv-line-calc';
-      meta.appendChild(calc);
-      body.append(name, meta);
+      body.append(name);
+      const figures = document.createElement('div');
+      figures.className = 'inv-line-figures';
       const amount = document.createElement('span');
       amount.className = 'inv-line-amount';
-      view.append(body, amount);
+      const calc = document.createElement('span');
+      calc.className = 'inv-line-calc';
+      figures.append(amount, calc);
+      view.append(body, figures);
       line.insertBefore(view, line.querySelector('.inv-line-view-active'));
       // قبلاً اینجا setActiveRow صدا زده می‌شد که در scope این تابع نیست (ReferenceError)؛
       // برای آخرین ردیفِ پرشده تپ بی‌اثر می‌ماند تا re-render بعدی. حالا از hook استفاده می‌شود.
@@ -2471,10 +2636,10 @@ function openInvoiceForm(cid, editInv, opts){
   // this value, since it has no collapsed summary to fall back to.
   let activeRowIndex = rows.findIndex(r=>!r.productId);
   if(activeRowIndex < 0) activeRowIndex = null;
-  // تاریخ فاکتور در closure نگه داشته می‌شود تا با هر renderSheet() دوباره به «امروز» برنگردد.
+  // Invoice date and optional due date are kept in this form closure so renderSheet() cannot reset user selections.
   let invoiceDateStr = editInv ? editInv.date : todayISO();
-  // Optional payment due date (sellers may leave it empty: follow-up then counts from the invoice date).
-  let invoiceDueStr = (editInv && editInv.dueDate) ? String(editInv.dueDate).slice(0,10) : '';
+  let invoiceDueEnabled = !!(editInv && editInv.dueDate);
+  let invoiceDueStr = (editInv && editInv.dueDate) ? String(editInv.dueDate).slice(0,10) : invoiceDateStr;
   // فعال‌سازی ردیف جمع‌شده؛ renderSheet آن را تنظیم می‌کند (setActiveRow داخل scope همان است).
   let activateCollapsedRow = null;
   const qtyFocusPrevious = new Map();
@@ -2595,9 +2760,11 @@ function openInvoiceForm(cid, editInv, opts){
         ${prod?`<div class="inv-line-collapsed" role="button" tabindex="0" aria-label="ویرایش ${label}">
           <div class="inv-line-body">
             <span class="inv-line-name">${label}</span>
-            <div class="inv-line-collapsed-meta"><span class="inv-line-calc">${enToFaDigits(fmtQtyDisplay(r.qty||0))} × ${toman(r.price||0)} ت</span></div>
           </div>
-          <span class="inv-line-amount">${toman(lineAmt)} ت</span>
+          <div class="inv-line-figures">
+            <span class="inv-line-amount">${toman(lineAmt)} ت</span>
+            <span class="inv-line-calc">${enToFaDigits(fmtQtyDisplay(r.qty||0))} × ${toman(r.price||0)} ت</span>
+          </div>
         </div>`:''}
         <div class="inv-line-view-active">${activeHtml}</div>
       </div>`;
@@ -2696,18 +2863,14 @@ function openInvoiceForm(cid, editInv, opts){
           </div>
           ${editInv?`<div class="inv-edit-notice">با ذخیره‌ی این ویرایش، موجودی انبار و مانده حساب مشتری به‌طور خودکار اصلاح می‌شود.</div>`:''}
 
-          <div class="inv-customer-context">
-            <div class="inv-customer-info">
-              <div class="inv-customer-kicker">مشتری</div>
-              <div class="inv-customer-name">${custDisplay}</div>
-              ${cust&&cust.phone?`<div class="inv-customer-meta">${esc(cust.phone)}</div>`:''}
+          <div class="inv-section inv-customer-section">
+            <h2 class="inv-section-title">مشخصات مشتری</h2>
+            <div class="inv-customer-context">
+              <div class="inv-customer-info">
+                <div class="inv-customer-name">${custDisplay}</div>
+                ${cust&&cust.phone?`<div class="inv-customer-meta">${esc(cust.phone)}</div>`:''}
+              </div>
             </div>
-          </div>
-
-          <div class="field inv-date-field"><label>تاریخ فاکتور</label>${shamsiDateInputHTML('f-date', invoiceDateStr)}</div>
-          <div class="field inv-due-field">
-            <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="f-due-toggle" ${invoiceDueStr?'checked':''}> سررسید پرداخت دارد (اختیاری)</label>
-            <div id="f-due-wrap" style="${invoiceDueStr?'':'display:none;'}margin-top:6px;">${shamsiDateInputHTML('f-due-date', invoiceDueStr || invoiceDateStr)}</div>
           </div>
 
           <div class="inv-section inv-items-section">
@@ -2721,6 +2884,28 @@ function openInvoiceForm(cid, editInv, opts){
           </div>
 
           ${nprHtmlInv}
+
+          <div class="inv-section inv-details-section">
+            <h2 class="inv-section-title">مشخصات فاکتور</h2>
+            <div class="inv-rows">
+              <div class="inv-row inv-row-date">
+                <span class="inv-row-label">تاریخ فاکتور</span>
+                ${shamsiDateInputHTML('f-date', invoiceDateStr)}
+              </div>
+              <div class="inv-row">
+                <label class="inv-row-label" for="f-due-toggle">سررسید پرداخت <small>(اختیاری)</small></label>
+                <input type="checkbox" class="inv-switch" id="f-due-toggle" role="switch" ${invoiceDueEnabled?'checked':''}>
+              </div>
+              <div class="inv-row inv-row-date" id="f-due-wrap" style="${invoiceDueEnabled?'':'display:none;'}">
+                <span class="inv-row-label">تاریخ سررسید</span>
+                ${shamsiDateInputHTML('f-due-date', invoiceDueStr)}
+              </div>
+              <div class="inv-row">
+                <span class="inv-row-label">شماره فاکتور</span>
+                <span class="inv-row-value">${editInv ? ('#' + esc(String(editInv.number||'—'))) : 'خودکار'}</span>
+              </div>
+            </div>
+          </div>
 
           <div class="inv-section inv-payment-section">
             <div class="inv-payment-heading">
@@ -3273,9 +3458,16 @@ function openInvoiceForm(cid, editInv, opts){
     if(invDateEl) invDateEl.addEventListener('input', e=>{ invoiceDateStr = e.target.value || todayISO(); });
     const dueToggleEl = document.getElementById('f-due-toggle');
     if(dueToggleEl) dueToggleEl.addEventListener('change', ()=>{
+      invoiceDueEnabled = !!dueToggleEl.checked;
       const w = document.getElementById('f-due-wrap');
-      if(w) w.style.display = dueToggleEl.checked ? '' : 'none';
+      if(w) w.style.display = invoiceDueEnabled ? '' : 'none';
     });
+    const dueDateEl = document.getElementById('f-due-date');
+    if(dueDateEl) {
+      const syncDueDate = e => { invoiceDueStr = String(e.target.value || '').slice(0,10); };
+      dueDateEl.addEventListener('input', syncDueDate);
+      dueDateEl.addEventListener('change', syncDueDate);
+    }
     const checkDueEl = document.getElementById('f-check-due');
     if(checkDueEl) checkDueEl.addEventListener('input', e=>{
       pendingPayment.checkDue = e.target.value;
@@ -3304,15 +3496,12 @@ function openInvoiceForm(cid, editInv, opts){
       if(btn.disabled) return; // جلوگیری از ثبت دوباره با کلیک سریع/پی‌درپی
       btn.disabled = true;
       const date = document.getElementById('f-date').value || todayISO();
-      // Optional due date: only when the toggle is on. A due date before the invoice date is rejected.
+      // Optional due date: use the closure state updated by the toggle and date picker listeners.
+      // A due date before the invoice date is rejected; a disabled toggle never persists dueDate.
       let invDueDate = '';
-      {
-        const dt = document.getElementById('f-due-toggle');
-        const dv = document.getElementById('f-due-date');
-        if(dt && dt.checked && dv && dv.value){
-          invDueDate = String(dv.value).slice(0,10);
-          if(invDueDate < date){ showToast('سررسید نمی‌تواند قبل از تاریخ فاکتور باشد'); btn.disabled = false; return; }
-        }
+      if(invoiceDueEnabled && invoiceDueStr){
+        invDueDate = String(invoiceDueStr).slice(0,10);
+        if(invDueDate < date){ showToast('سررسید نمی‌تواند قبل از تاریخ فاکتور باشد'); btn.disabled = false; return; }
       }
 
       // اعتبارسنجی: ردیف‌های خالیِ draft (بدون جنس انتخاب‌شده) اگر حداقل یک ردیف
