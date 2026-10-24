@@ -21,6 +21,34 @@ input[placeholder*="جستجو"]{
   border-radius:var(--vg-radius-control);
 }
 
+/* Native checkbox/radio controls must not inherit text-field geometry. */
+.field input[type="checkbox"],
+.field input[type="radio"]{
+  width:auto;
+  min-width:0;
+  min-height:0;
+  padding:0;
+  border:0;
+  box-shadow:none;
+  accent-color:var(--vg-color-primary);
+}
+
+.field-inline-check{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:44px;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.field-inline-check input[type="checkbox"]{
+  width:20px;
+  height:20px;
+  margin:0;
+  flex:none;
+  accent-color:var(--vg-color-primary);
+}
+
 /* ---------- Circle geometry ---------- */
 /* Applies to icon-only actions and containers */
 .close-x,

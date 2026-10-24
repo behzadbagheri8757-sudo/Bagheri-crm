@@ -1776,15 +1776,10 @@ button.inv-header-save.btn{
 .inv-customer-context{
   display:flex;
   align-items:center;
-  padding:8px 2px 12px;
-  margin-bottom:4px;
-  border-bottom:1px solid rgba(15,23,42,.06);
-}
-.inv-customer-kicker{
-  font-size:.68rem;
-  font-weight:600;
-  color:#98A2B3;
-  margin-bottom:2px;
+  min-height:56px;
+  padding:12px 16px;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
 }
 .inv-customer-info{
   min-width:0;
@@ -1805,22 +1800,126 @@ button.inv-header-save.btn{
   margin-top:2px;
   line-height:1.3;
 }
-.inv-date-field label{
-  font-size:.72rem;
-  font-weight:600;
-  color:var(--vg-color-text-muted);
-  margin-bottom:6px;
+/* Invoice details: inset-grouped rows, label at the start, value at the end.
+   Date rows lay the existing .shamsi-date field over the whole row so the entire
+   row opens the picker (the picker is bound to the field, not to the label). */
+.inv-rows{
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  overflow:hidden;
 }
-.inv-date-field{
-  margin-bottom:16px;
+.inv-row{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  min-height:52px;
+  padding:0 16px;
+}
+.inv-row + .inv-row{
+  border-top:1px solid var(--vg-color-divider);
+}
+.inv-row-label{
+  margin:0;
+  font-size:var(--vg-type-secondary);
+  font-weight:var(--vg-weight-regular);
+  color:var(--vg-color-text);
+}
+.inv-row-label small{
+  margin-inline-start:6px;
+  font-size:var(--vg-type-label);
+  color:var(--vg-color-text-muted);
+}
+.inv-row-value{
+  font-size:var(--vg-type-secondary);
+  color:var(--vg-color-text-muted);
+  font-variant-numeric:tabular-nums;
+}
+.inv-row-date .shamsi-date{
+  position:absolute;
+  inset:0;
+}
+.inv-row-date::after{
+  content:"";
+  position:absolute;
+  inset-inline-end:16px;
+  top:50%;
+  width:16px;
+  height:16px;
+  margin-top:-8px;
+  background-color:var(--vg-color-text-muted);
+  opacity:.55;
+  pointer-events:none;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 6-6 6 6 6'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 6-6 6 6 6'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+html .inv-sheet-v2 .inv-row-date input.shamsi-date-field{
+  width:100%;
+  height:100%;
+  min-height:0;
+  box-sizing:border-box;
+  padding:0 16px;
+  padding-inline-end:44px;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  background:transparent;
+  color:var(--vg-color-primary);
+  font:inherit;
+  font-size:var(--vg-type-secondary);
+  text-align:end;
+  cursor:pointer;
+}
+html .inv-sheet-v2 .inv-row-date input.shamsi-date-field:focus-visible{
+  outline:0;
+  box-shadow:inset 0 0 0 2px var(--vg-color-primary-soft);
+}
+/* iOS-style switch (native checkbox underneath, so label/keyboard/a11y keep working) */
+.inv-switch{
+  -webkit-appearance:none;
+  appearance:none;
+  position:relative;
+  flex:none;
+  width:51px;
+  height:31px;
+  margin:0;
+  border-radius:999px;
+  background:rgba(120,120,128,.32);
+  cursor:pointer;
+  transition:background-color .2s ease;
+}
+.inv-switch::before{
+  content:"";
+  position:absolute;
+  top:2px;
+  inset-inline-start:2px;
+  width:27px;
+  height:27px;
+  border-radius:50%;
+  background:#fff;
+  box-shadow:0 2px 4px rgba(0,0,0,.22);
+  transition:inset-inline-start .2s ease;
+}
+.inv-switch:checked{
+  background:var(--vg-color-success);
+}
+.inv-switch:checked::before{
+  inset-inline-start:22px;
+}
+.inv-switch:focus-visible{
+  outline:2px solid var(--vg-color-primary);
+  outline-offset:2px;
+}
+@media (prefers-reduced-motion:reduce){
+  .inv-switch,
+  .inv-switch::before{transition:none;}
 }
 .inv-items-card{
   background:var(--vg-color-surface);
-  border:1px solid rgba(15,23,42,.07);
-  border-radius:16px;
-  box-shadow:0 6px 22px rgba(15,23,42,.05);
+  border-radius:var(--vg-radius-soft);
   overflow:hidden;
-  padding:0 0 4px;
+  padding:0;
 }
 /* Title now sits above the card surface (More-page pattern) — see markup
    in js/app.js renderSheet(), where .inv-items-card-head was moved out of
@@ -1865,7 +1964,7 @@ button.inv-header-save.btn{
 }
 .inv-line-collapsed{
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   justify-content:space-between;
   gap:14px;
   min-height:56px;
@@ -1883,8 +1982,7 @@ button.inv-header-save.btn{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
-  justify-content:center;
-  gap:2px;
+  justify-content:flex-start;
   text-align:right;
 }
 .inv-line-collapsed .inv-line-name{
@@ -1906,9 +2004,15 @@ button.inv-header-save.btn{
   font-weight:600!important;
   line-height:1.35;
 }
-.inv-line-collapsed-meta{
-  width:100%;
-  text-align:right;
+/* Zoho-style figures column: line total on top, "qty × unit price" beneath it,
+   both aligned to the end edge (left in RTL). */
+.inv-line-figures{
+  flex:0 0 auto;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+  text-align:left;
 }
 .inv-line-calc{
   font-size:12.5px;
@@ -1922,7 +2026,7 @@ button.inv-header-save.btn{
   min-width:0;
   text-align:left;
   font-size:16px;
-  line-height:1.2;
+  line-height:1.35;
   font-weight:700;
   color:var(--vg-color-text);
   font-variant-numeric:tabular-nums;
@@ -2133,9 +2237,7 @@ button.inv-header-save.btn{
   margin-top:10px;
   padding:13px 16px;
   background:var(--vg-color-surface);
-  border:1px solid rgba(15,23,42,.07);
-  border-radius:16px;
-  box-shadow:0 4px 16px rgba(15,23,42,.04);
+  border-radius:var(--vg-radius-soft);
   font-size:.82rem;
   color:#475467;
 }
@@ -2273,10 +2375,12 @@ button.inv-header-save.btn{
   display:flex;
   align-items:center;
   justify-content:flex-start;
-  gap:8px;
+  gap:10px;
   width:100%;
+  min-height:52px;
   margin:0;
-  padding:12px 16px 14px;
+  padding:12px 16px;
+  box-shadow:inset 0 1px 0 var(--vg-color-divider);
   border:0!important;
   border-radius:0!important;
   background:transparent!important;
@@ -2290,12 +2394,14 @@ button.inv-header-save.btn{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  width:22px;
-  height:22px;
+  width:24px;
+  height:24px;
   border-radius:50%;
-  background:var(--vg-color-primary-soft);
-  color:var(--vg-color-icon);
-  font-size:.95rem;
+  background:var(--vg-color-primary);
+  color:#fff;
+  font-size:1.05rem;
+  font-weight:500;
+  line-height:1;
 }
 .inv-payment-heading{
   display:flex;
@@ -2313,14 +2419,20 @@ button.inv-header-save.btn{
 .inv-payment-actions{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:8px;
+  gap:0;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  overflow:hidden;
+}
+.inv-payment-action + .inv-payment-action{
+  border-inline-start:1px solid var(--vg-color-divider);
 }
 .inv-payment-action{
-  min-height:52px;
+  min-height:60px;
   padding:8px 6px;
-  border:1px solid rgba(15,23,42,.08);
-  border-radius:16px;
-  background:var(--vg-color-surface);
+  border:0;
+  border-radius:0;
+  background:transparent;
   color:var(--vg-color-text);
   display:flex;
   flex-direction:column;
@@ -2331,10 +2443,8 @@ button.inv-header-save.btn{
   font-size:.72rem;
   font-weight:600;
   cursor:pointer;
-  box-shadow:0 2px 8px rgba(15,23,42,.03);
 }
 .inv-payment-action.is-active{
-  border-color:#0070D2;
   background:var(--vg-color-primary-soft);
   color:var(--vg-color-primary);
 }
@@ -2473,10 +2583,9 @@ button.inv-header-save.btn{
   align-items:center;
   gap:10px;
   margin:14px 0 4px;
-  padding:8px 10px;
-  border-radius:14px;
+  padding:8px 12px;
+  border-radius:var(--vg-radius-soft);
   background:var(--vg-color-surface);
-  border:1px solid rgba(15,23,42,.08);
 }
 .inv-discount-label{
   font-size:.76rem;
@@ -2527,9 +2636,7 @@ button.inv-header-save.btn{
   margin-bottom:0;
   padding:14px 16px 12px;
   background:var(--vg-color-surface);
-  border:1px solid rgba(15,23,42,.07);
-  border-radius:16px;
-  box-shadow:0 6px 22px rgba(15,23,42,.05);
+  border-radius:var(--vg-radius-soft);
 }
 .inv-summary-section #calc-summary .ledger-row{
   display:flex;
@@ -4782,6 +4889,18 @@ input.has-input-clear.has-input-clear-sm{padding-inline-end:26px !important}
 .visit-card .vp-row.is-done .vp-row-main{background:var(--vg-color-surface-soft);}
 .visit-card .vp-row-name{font-size:.9rem;font-weight:var(--vg-weight-title);line-height:1.45;word-break:break-word;}
 .visit-card .vp-row-meta{font-size:.7rem;line-height:1.5;color:var(--vg-color-text-muted);}
+.visit-card .vp-purchase-cycle{display:inline-flex;align-items:center;gap:5px;max-width:100%;white-space:nowrap;padding:2px 8px;border-radius:var(--vg-radius-pill);font-size:.7rem;line-height:1.55;font-weight:var(--vg-weight-title);}
+.visit-card .vp-purchase-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex:none;}
+.visit-card .vp-purchase-cycle.is-muted{background:var(--vg-color-surface-soft);color:var(--vg-color-text-muted);}
+.visit-card .vp-purchase-cycle.is-primary{background:var(--vg-color-primary-soft);color:var(--vg-color-primary);}
+.visit-card .vp-purchase-cycle.is-warning{background:var(--vg-color-warning-soft);color:var(--vg-color-warning);}
+.visit-card .vp-purchase-cycle.is-danger{background:var(--vg-color-danger-soft);color:var(--vg-color-danger);}
+.visit-card .vp-purchase-cycle.is-success{background:var(--vg-color-success-soft);color:var(--vg-color-success);}
+.visit-card .vp-row-main.has-cycle{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:flex-start;}
+.visit-card .vp-row-main.has-cycle .vp-row-name{min-width:0;flex:0 1 auto;}
+.visit-card .vp-row-main.has-cycle .vp-purchase-cycle{flex:0 0 auto;}
+.visit-card .vp-row-main.has-cycle .vp-row-meta{flex:1 0 100%;}
+
 .visit-card .vp-status{
   display:inline-block;padding:2px 10px;border-radius:var(--vg-radius-pill);
   font-size:.72rem;font-weight:var(--vg-weight-title);line-height:1.6;

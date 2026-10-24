@@ -1994,29 +1994,19 @@ html[data-theme="dark"] #main #invoice-chips .chip.active{box-shadow:0 1px 3px r
 html .inv-sheet-v2 .inv-section-title,
 html .inv-sheet-v2 .inv-items-card-label{
   font-size:var(--vg-type-section);font-weight:var(--vg-weight-title);
-  line-height:1.35;color:var(--vg-color-text);
+  line-height:1.35;color:var(--vg-color-text-muted);
 }
 .inv-sheet-v2 .inv-section-title{margin:0 0 10px;}
 .inv-sheet-v2 .inv-items-card-head{padding:0 2px 10px;}
-.inv-sheet-v2 .inv-date-field{margin-bottom:var(--vg-space-section);}
-.inv-sheet-v2 .inv-customer-context{
-  padding:4px 2px 14px;margin-bottom:14px;
-  border-bottom:1px solid var(--vg-color-divider);
-}
 
-/* One surface standard (token border, group shadow, raised radius) */
+/* One surface standard: flat inset-grouped cards (page background separates groups) */
 .inv-sheet-v2 .inv-items-card,
 .inv-sheet-v2 .inv-summary-section,
 .inv-sheet-v2 .inv-profit-summary{
   background:var(--vg-color-surface);
-  border:1px solid var(--vg-color-border);
-  border-radius:var(--vg-radius-raised);
-  box-shadow:var(--vg-shadow-group);
-}
-.inv-sheet-v2 .inv-payment-action,
-.inv-sheet-v2 .inv-discount-block{
-  border:1px solid var(--vg-color-border);
+  border:0;
   border-radius:var(--vg-radius-soft);
+  box-shadow:none;
 }
 .inv-sheet-v2 .inv-line + .inv-line::before{background:var(--vg-color-divider);}
 
@@ -2304,3 +2294,121 @@ html[data-theme="dark"] .bp-target-strip.is-ontrack .bp-target-strip-status{colo
 html:not([data-theme="dark"]) .rp-sec-link{
   color:color-mix(in srgb,var(--vg-color-primary) 78%,#000);
 }
+
+/* ======================================================================
+   v7.6 — Typography calm-down + hierarchy fixes. PRESENTATION ONLY.
+   (1) New-invoice form: one clear hero number, quiet secondary numbers,
+       no weight above 600, qty × unit price under the line total is small.
+   (2) Visit form: the chosen result is unmistakable.
+   (3) Customer detail: eye flow  name → balance → status → contact.
+   Tokens/colours are untouched, so Light and Dark both follow.
+   ====================================================================== */
+
+/* ---------- (1) New invoice form ---------- */
+/* header */
+html .inv-sheet-v2 .inv-header-title-main{font-size:15px;font-weight:600;}
+html .inv-sheet-v2 .inv-header-title-sub{font-size:11px;font-weight:400;}
+html .inv-sheet-v2 button.inv-header-save.btn{font-size:14px;font-weight:600;}
+html .inv-sheet-v2 .inv-header-btn{font-size:14px;font-weight:500;}
+
+/* customer block: a label-level row, not a headline */
+html .inv-sheet-v2 .inv-customer-name{font-size:15px;font-weight:600;}
+html .inv-sheet-v2 .inv-customer-meta{font-size:12px;font-weight:400;}
+
+/* always-visible total chip: informative, not shouting */
+html .inv-sheet-v2 .inv-total-chip{padding:8px 16px;}
+html .inv-sheet-v2 .inv-total-chip-label{font-size:12px;font-weight:500;}
+html .inv-sheet-v2 .inv-total-chip-value{font-size:16px;font-weight:600;}
+
+/* line rows: name (text) < amount (number) ; qty × price = quiet footnote */
+html .inv-sheet-v2 .inv-line-collapsed{gap:12px;padding:12px 16px;}
+html .inv-sheet-v2 .inv-line-collapsed .inv-line-name{font-size:14px!important;font-weight:500!important;line-height:1.5;}
+html .inv-sheet-v2 .inv-line-collapsed .inv-line-amount{font-size:15px;font-weight:600;line-height:1.4;}
+html .inv-sheet-v2 .inv-line-figures{gap:3px;}
+html .inv-sheet-v2 .inv-line-collapsed .inv-line-calc{
+  font-size:11px;font-weight:400;line-height:1.4;
+  color:var(--vg-color-text-muted);opacity:.9;
+  font-variant-numeric:tabular-nums;
+}
+/* active (expanded) line */
+html .inv-sheet-v2 .inv-line-view-active .row-product-search.inv-line-name{font-size:14px!important;font-weight:500!important;}
+html .inv-sheet-v2 .inv-mini-input{font-size:15px;font-weight:500;}
+html .inv-sheet-v2 .inv-line-qtyrate{font-size:12px;}
+html .inv-sheet-v2 .inv-line-avg-cost{font-size:11px;font-weight:400;}
+html .inv-sheet-v2 .inv-line-market-details{font-size:12px;}
+html .inv-sheet-v2 .inv-line-market-details summary{font-weight:500;}
+html .inv-sheet-v2 .inv-line-market-row strong{font-weight:500;}
+html .inv-sheet-v2 .inv-add-line{font-size:14px;font-weight:500;}
+
+/* invoice details rows */
+html .inv-sheet-v2 .inv-row-label{font-size:14px;font-weight:400;}
+html .inv-sheet-v2 .inv-row-value{font-size:13px;}
+
+/* payment */
+html .inv-sheet-v2 .inv-payment-total{font-size:13px;font-weight:600;}
+html .inv-sheet-v2 .inv-payment-action{font-size:12px;font-weight:500;}
+html .inv-sheet-v2 .inv-payment-action-value{font-size:11px;font-weight:600;}
+html .inv-sheet-v2 .inv-payment-panel-head{font-size:14px;font-weight:600;}
+html .inv-sheet-v2 .inv-payment-panel-head small{font-size:11px;font-weight:400;}
+html .inv-sheet-v2 .inv-payment-confirm{font-size:14px;font-weight:600;}
+html .inv-sheet-v2 .inv-discount-label{font-size:12px;font-weight:500;}
+html .inv-sheet-v2 .inv-discount-type-btn{font-size:12.5px;font-weight:500;}
+html .inv-sheet-v2 .inv-discount-block input{font-size:14px;font-weight:500;}
+
+/* summary: ONE hero (new balance); total is the second level; the rest is quiet */
+html .inv-sheet-v2 .inv-summary-section #calc-summary .ledger-row .name{font-weight:400;}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-total-row .name{font-size:14px;font-weight:500;}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-total-row .amount{font-size:15px;font-weight:600;}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-remain-row .name{font-size:14px;font-weight:600;}
+html .inv-sheet-v2 .inv-summary-section #calc-summary .inv-remain-row .amount{font-size:18px;font-weight:600;line-height:1.35;}
+html .inv-sheet-v2 .inv-profit-summary{font-size:12px;}
+html .inv-sheet-v2 .inv-profit-summary .name{font-weight:400;}
+html .inv-sheet-v2 .inv-profit-summary .amount{font-size:14px;font-weight:600;}
+
+/* ---------- (2) Visit form: chosen option must be obvious ---------- */
+.visit-card .vp-opts.vp-outcome-opts{grid-template-columns:1fr;gap:10px;}
+.visit-card .chip-opt.vp-opt{
+  background:var(--vg-color-surface);
+  border:1.5px solid var(--vg-color-border);
+  color:var(--vg-color-text-secondary);
+  font-weight:500;
+}
+.visit-card .chip-opt.vp-opt.selected{
+  background:var(--vg-color-primary);
+  border-color:var(--vg-color-primary);
+  color:#fff;
+  font-weight:600;
+  box-shadow:0 0 0 3px var(--vg-color-primary-soft);
+}
+.visit-card .chip-opt.vp-opt.selected::before{
+  content:"✓";
+  display:inline-block;
+  margin-inline-end:8px;
+  font-weight:600;
+}
+
+/* ---------- (3) Customer detail: eye flow ---------- */
+#main.customer-detail-view .customer-identity-name{
+  font-size:1.1rem;font-weight:600;margin-bottom:0;
+}
+/* balance = the first number the eye lands on */
+#main.customer-detail-view .customer-balance-block{margin-top:12px;padding-top:12px;}
+#main.customer-detail-view .customer-balance-block .label{
+  font-size:.76rem;font-weight:400;color:var(--vg-color-text-muted);margin-bottom:2px;
+}
+#main.customer-detail-view .customer-balance-value{
+  font-size:1.4rem;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums;
+}
+#main.customer-detail-view .bp-customer-legacy-debt{
+  margin:6px 0 0!important;font-size:.78rem;font-weight:400;color:var(--vg-color-text-muted);
+}
+/* status sits right under the balance, contact details come last */
+#main.customer-detail-view .bp-customer-health{margin-top:12px;padding-top:12px;}
+#main.customer-detail-view .bp-customer-health-value{font-weight:600;}
+#main.customer-detail-view .customer-identity-meta{
+  margin-top:12px;padding-top:8px;border-top:1px solid var(--vg-color-divider);
+  font-size:.82rem;
+}
+#main.customer-detail-view .cd-meta-row{padding:8px 0;}
+/* metric values: quiet, so they don't compete with the balance */
+#main.customer-detail-view .cards.cust-metrics > .cd-metric-cell .value{font-size:.92rem;font-weight:500;}

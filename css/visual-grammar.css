@@ -331,10 +331,7 @@ html[data-theme="dark"] .biz-status-secondary,
 html[data-theme="dark"] .cust-summary,
 html[data-theme="dark"] .cust-recommended-action,
 html[data-theme="dark"] .tx-details,
-html[data-theme="dark"] .prospect-daily-target,
-html[data-theme="dark"] .inv-items-card,
-html[data-theme="dark"] .inv-profit-summary,
-html[data-theme="dark"] .inv-summary-section{
+html[data-theme="dark"] .prospect-daily-target{
   background:var(--vg-color-surface);
   color:var(--vg-color-text);
   border-color:var(--vg-color-border);
@@ -370,7 +367,6 @@ html[data-theme="dark"] .dash-watch-compact-chevron,
 html[data-theme="dark"] .inv-section-title,
 html[data-theme="dark"] .inv-section-title-optional,
 html[data-theme="dark"] .inv-customer-meta,
-html[data-theme="dark"] .inv-date-field label,
 html[data-theme="dark"] .inv-items-card-label,
 html[data-theme="dark"] .inv-line-calc,
 html[data-theme="dark"] .inv-line-x,
@@ -477,20 +473,15 @@ html[data-theme="dark"] .inv-line + .inv-line::before{
   background:var(--vg-color-divider);
 }
 html[data-theme="dark"] .inv-payment-action{
-  background:var(--vg-color-surface);
+  background:transparent;
   color:var(--vg-color-text);
-  border-color:var(--vg-color-border);
 }
 html[data-theme="dark"] .inv-payment-action.is-active{
   background:var(--vg-color-primary-soft);
-  border-color:var(--vg-color-primary);
   color:var(--vg-color-primary);
 }
 html[data-theme="dark"] .inv-payment-backdrop{
   background:rgba(0,0,0,.56);
-}
-html[data-theme="dark"] .inv-discount-block{
-  background:var(--vg-color-surface-soft);
 }
 html[data-theme="dark"] .inv-discount-type{
   background:rgba(255,255,255,.07);
@@ -516,9 +507,6 @@ html[data-theme="dark"] .dashboard-eyebrow{
 }
 html[data-theme="dark"] .report-summary-value.debt{
   color:var(--vg-color-danger);
-}
-html[data-theme="dark"] .inv-customer-kicker{
-  color:var(--vg-color-text-muted);
 }
 html[data-theme="dark"] button.app-back{
   background:rgba(255,255,255,.08);
@@ -740,9 +728,6 @@ html[data-theme="dark"] .settings-section,
 html[data-theme="dark"] .gc-panel,
 html[data-theme="dark"] .gc-mission,
 html[data-theme="dark"] .more-group-card,
-html[data-theme="dark"] .inv-items-card,
-html[data-theme="dark"] .inv-profit-summary,
-html[data-theme="dark"] .inv-summary-section,
 html[data-theme="dark"] .biz-status-secondary,
 html[data-theme="dark"] .report-summary,
 html[data-theme="dark"] .report-summary-card,
