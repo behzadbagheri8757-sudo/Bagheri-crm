@@ -6,13 +6,13 @@
 
 :root{
   /* ---------- Color roles ---------- */
-  --vg-color-bg:               #F5F7FA;
+  --vg-color-bg:               #F2F2F7;   /* Apple grouped-background grey */
   --vg-color-surface:          #FFFFFF;
   --vg-color-surface-soft:     #F7F8FA;
   --vg-color-text:             #1F2937;
   --vg-color-text-secondary:   #4B5563;
   --vg-color-text-muted:       #667085;
-  --vg-color-border:           rgba(31,41,55,.075);
+  --vg-color-border:           rgba(31,41,55,.06);
   --vg-color-divider:          rgba(31,41,55,.055);
   --vg-color-primary:          #0070D2;
   --vg-color-primary-soft:     #E8F2FC;
@@ -36,13 +36,13 @@
   /* ---------- Radius scale (Capsule / Circle / Soft / Raised) ---------- */
   --vg-radius-control:         999px;   /* Capsule for inputs, buttons, chips */
   --vg-radius-circle:          50%;     /* Circle for icon-only controls */
-  --vg-radius-soft:            14px;    /* Soft surfaces: cards, panels */
-  --vg-radius-raised:          16px;    /* Raised surfaces: sheets, modals */
+  --vg-radius-soft:            20px;    /* Soft surfaces: cards, panels */
+  --vg-radius-raised:          22px;    /* Raised surfaces: sheets, modals */
   --vg-radius-pill:            999px;   /* Badges and small pills */
 
   /* ---------- Shadow scale ---------- */
-  --vg-shadow-group:           0 2px 10px rgba(31,41,55,.045);
-  --vg-shadow-raised:          0 6px 20px rgba(31,41,55,.075);
+  --vg-shadow-group:           0 1px 2px rgba(20,30,50,.04), 0 8px 24px rgba(20,30,50,.05);
+  --vg-shadow-raised:          0 2px 4px rgba(20,30,50,.04), 0 12px 30px rgba(20,30,50,.07);
   --vg-shadow-overlay:         0 12px 32px rgba(31,41,55,.12);
   --vg-shadow-glass:           0 6px 24px rgba(26,38,52,.12), 0 1px 3px rgba(26,38,52,.08);
 

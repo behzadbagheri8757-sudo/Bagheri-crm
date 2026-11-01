@@ -2412,3 +2412,344 @@ html .inv-sheet-v2 .inv-profit-summary .amount{font-size:14px;font-weight:600;}
 #main.customer-detail-view .cd-meta-row{padding:8px 0;}
 /* metric values: quiet, so they don't compete with the balance */
 #main.customer-detail-view .cards.cust-metrics > .cd-metric-cell .value{font-size:.92rem;font-weight:500;}
+
+
+/* ============================================================
+   SOFT iOS LAYER — project-wide look (2026-10)
+   Geometry, colour and shadow only. Typography (font-size, weight,
+   line-height, letter-spacing) is intentionally NOT touched here.
+   Global base comes from the tokens in visual-grammar.css
+   (grey canvas #F2F2F7, larger radii, soft shadows); this block
+   finishes the surfaces that were explicitly flat, and restyles the
+   Dashboard on its existing markup (no JS involved).
+   ============================================================ */
+
+/* ---------- Surfaces that were explicitly flat → soft shadow ---------- */
+#main .dashboard-shell .dash-health-surface,
+#main .dashboard-shell .dashboard-block > .dash-activity,
+#main .dashboard-shell .bp-dashboard-alert,
+#main .dashboard-shell .bp-dashboard-watch-card,
+#main .dashboard-shell .dash-qa-btn,
+#main .dashboard-shell .dash-activity-section,
+.rp-card,
+.rp-hero,
+#main .inv-detail .inv-surface,
+.gc-mission{
+  box-shadow:var(--vg-shadow-group);
+}
+
+/* ---------- Dashboard rhythm: more whitespace between blocks ---------- */
+#main .dashboard-shell .dashboard-block{margin-bottom:26px;}
+
+/* ---------- Today snapshot → three coloured tiles ---------- */
+#main .dashboard-shell .bp-dashboard-snapshot-grid{
+  gap:10px;padding:0;background:transparent;border:0;box-shadow:none;overflow:visible;
+}
+#main .dashboard-shell .bp-dashboard-snapshot-item{
+  position:relative;
+  padding:18px 8px 16px;
+  border:0;border-radius:22px;overflow:hidden;
+  color:#fff;
+  background:linear-gradient(150deg,#5B9BFA,#3F7DEB);
+  box-shadow:0 12px 22px -12px #3F7DEB;
+}
+#main .dashboard-shell .bp-dashboard-snapshot-item + .bp-dashboard-snapshot-item{border-inline-start:0;}
+#main .dashboard-shell .bp-dashboard-snapshot-item:nth-child(2){
+  background:linear-gradient(150deg,#33BF88,#1C9F6E);box-shadow:0 12px 22px -12px #1C9F6E;
+}
+#main .dashboard-shell .bp-dashboard-snapshot-item:nth-child(3){
+  background:linear-gradient(150deg,#9C7DF6,#7C59E4);box-shadow:0 12px 22px -12px #7C59E4;
+}
+#main .dashboard-shell .bp-dashboard-snapshot-item span,
+#main .dashboard-shell .bp-dashboard-snapshot-item strong,
+#main .dashboard-shell .bp-dashboard-snapshot-item small{color:#fff;}
+#main .dashboard-shell .bp-dashboard-snapshot-item span,
+#main .dashboard-shell .bp-dashboard-snapshot-item small{opacity:.9;}
+#main .dashboard-shell .bp-dashboard-snapshot-item::after{
+  content:'';position:absolute;top:10px;inset-inline-end:10px;
+  width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.34);
+}
+html[data-theme="dark"] #main .dashboard-shell .bp-dashboard-snapshot-item{
+  box-shadow:none;filter:saturate(.92) brightness(.94);
+}
+
+/* ---------- Monthly target: soft card, slim rounded bar, calmer colours ---------- */
+#main .dashboard-shell .bp-target-strip{
+  padding:16px 16px 14px;gap:10px;
+  border:0;border-radius:24px;
+  box-shadow:var(--vg-shadow-group);
+}
+#main .dashboard-shell .bp-target-strip-bar{
+  height:10px;border:0;border-radius:999px;
+  background:var(--vg-color-neutral-soft);
+}
+#main .dashboard-shell .bp-target-strip-bar::before{display:none;}
+#main .dashboard-shell .bp-target-strip.has-progress .bp-target-strip-bar span::after{display:none;}
+#main .dashboard-shell .bp-target-strip .bp-target-strip-bar span{
+  background:linear-gradient(270deg,#4F8DF7,#34C58E);
+}
+#main .dashboard-shell .bp-target-strip.is-behind .bp-target-strip-bar span{
+  background:linear-gradient(270deg,#F7B24F,#EE8A2B);
+}
+#main .dashboard-shell .bp-target-strip.is-ahead .bp-target-strip-bar span,
+#main .dashboard-shell .bp-target-strip.is-done .bp-target-strip-bar span{
+  background:linear-gradient(270deg,#3CCB93,#16A870);
+}
+#main .dashboard-shell .bp-target-strip.is-behind .bp-target-strip-status{color:#9A5B00;}
+html[data-theme="dark"] #main .dashboard-shell .bp-target-strip.is-behind .bp-target-strip-status{color:var(--vg-color-warning);}
+
+/* ---------- Action queue: no side rail, roomier rows, plain text toggle ---------- */
+/* Action rows: the old colour rail is gone; they now get the same disclosure chevron as every other link row. */
+#main .dashboard-shell a.action-row::after{
+  content:'';position:static;inset:auto;top:auto;bottom:auto;
+  flex:none;width:14px;height:14px;margin-inline-start:2px;align-self:center;
+  border-radius:0;opacity:.38;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+#main .dashboard-shell .dash-action-queue{padding:4px 16px 6px;}
+#main .dashboard-shell .dash-action-queue .action-row{padding:16px 2px;gap:12px;}
+#main .dashboard-shell .dash-action-toggle{
+  width:calc(100% + 32px);margin:4px -16px 0;padding:13px 6px;
+  border:0;border-top:1px solid var(--vg-color-divider);border-radius:0;
+  color:var(--vg-color-primary);
+}
+#main .dashboard-shell .dash-action-toggle:active{opacity:.55;}
+
+
+/* ---------- Monthly target: 270° progress ring ---------- */
+#main .dashboard-shell .bp-target-strip{--ring-0:#4F8DF7;--ring-1:#34C58E;}
+#main .dashboard-shell .bp-target-strip.is-behind{--ring-0:#F7B24F;--ring-1:#EE8A2B;}
+#main .dashboard-shell .bp-target-strip.is-ahead,
+#main .dashboard-shell .bp-target-strip.is-done{--ring-0:#3CCB93;--ring-1:#16A870;}
+#main .dashboard-shell .bp-target-strip-body{display:flex;align-items:center;gap:20px;padding:4px 2px 2px;}
+#main .dashboard-shell .bp-target-ring{position:relative;flex:0 0 112px;width:112px;height:112px;}
+#main .dashboard-shell .bp-ring-svg{display:block;width:100%;height:100%;overflow:visible;}
+#main .dashboard-shell .bp-ring-track{stroke:var(--vg-color-neutral-soft);}
+#main .dashboard-shell .bp-ring-g0{stop-color:var(--ring-0);}
+#main .dashboard-shell .bp-ring-g1{stop-color:var(--ring-1);}
+#main .dashboard-shell .bp-target-ring-pct{
+  position:absolute;inset:0;padding-bottom:5px;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--vg-color-text);
+}
+#main .dashboard-shell .bp-target-ring-pct strong,
+#main .dashboard-shell .bp-target-ring-pct em{display:inline-block;}
+#main .dashboard-shell .bp-target-ring-pct strong{font-size:1.65rem;line-height:1;font-weight:760;letter-spacing:-.02em;}
+#main .dashboard-shell .bp-target-ring-pct em{font-style:normal;font-size:.78rem;font-weight:650;color:var(--vg-color-text-muted);margin-inline-start:2px;}
+#main .dashboard-shell .bp-target-strip-info{
+  flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:7px;
+  font-size:.64rem;color:var(--vg-color-text-muted);
+}
+#main .dashboard-shell .bp-target-strip-need strong{font-weight:700;color:var(--vg-color-text);}
+#main .dashboard-shell .bp-target-strip-info .bp-target-strip-days{text-align:start;}
+#main .dashboard-shell .bp-target-strip.is-behind .bp-target-strip-status{color:#9A5B00;}
+html[data-theme="dark"] #main .dashboard-shell .bp-target-strip.is-behind .bp-target-strip-status{color:var(--vg-color-warning);}
+@media (max-width:359px){
+  #main .dashboard-shell .bp-target-strip-body{flex-direction:column;align-items:center;gap:10px;}
+  #main .dashboard-shell .bp-target-strip-info{align-items:center;}
+}
+
+/* ============================================================
+   SOFT iOS LAYER — part 2 (2026-10): whole-project consistency
+   Geometry / colour / shadow only; no font-size, weight or spacing-of-text changes.
+   ============================================================ */
+
+/* ---------- Canvas: list pages sit on the same grey as every other page ---------- */
+html.vg-canvas-white,
+html.vg-canvas-white body{ background:var(--vg-color-bg); }
+
+/* ---------- Lists (customers, invoices, products, visits, suppliers, checks…) → inset white card ---------- */
+#main .tx-list,
+#main #customer-list{
+  padding:2px 14px;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+  overflow:hidden;
+}
+#main .tx-list:empty,
+#main #customer-list:empty{ display:none; }
+html[data-theme="dark"] #main .tx-list,
+html[data-theme="dark"] #main #customer-list{ border:1px solid var(--vg-color-border); }
+
+/* ---------- Section titles: drop the decorative rule (cleaner, iOS-like) ---------- */
+h2.section-title::after{ display:none; }
+
+/* ---------- Small destructive buttons: tinted instead of solid red ---------- */
+.btn.danger.small{
+  color:var(--vg-color-danger);
+  background:var(--vg-color-danger-soft);
+  border-color:transparent;
+  box-shadow:none;
+}
+
+/* ---------- Shop evaluation (Evaluation) ---------- */
+/* (#main has no per-route class, so these hook onto classes/ids unique to the page) */
+.field:has(> #eval-shop-name){
+  padding:12px 14px 14px;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+}
+.field:has(> #eval-shop-name) input{ background:var(--vg-color-surface-soft); border-color:transparent; }
+.eval-location-context{ box-shadow:var(--vg-shadow-group); border-color:transparent; }
+.eval-profile-card{
+  border-color:transparent;
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+}
+.eval-profile-card.selected{ box-shadow:0 10px 20px -10px var(--vg-color-primary); }
+.eval-q-options .chip-opt{ border-color:transparent; box-shadow:var(--vg-shadow-group); }
+.eval-q-options .chip-opt.selected{ box-shadow:0 8px 16px -8px var(--vg-color-primary); }
+.eval-one-q.card{ box-shadow:var(--vg-shadow-group); border-color:transparent; }
+.eval-progress-bar{ height:8px; border:0; border-radius:999px; background:var(--vg-color-neutral-soft); }
+.eval-progress-fill{ border-radius:999px; background:linear-gradient(270deg,#4F8DF7,#34C58E); }
+
+/* ---------- Locations ---------- */
+.field:has(> .btn-row > #new-region-input){
+  padding:12px 14px 14px;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+}
+.field:has(> .btn-row > #new-region-input) input{ background:var(--vg-color-surface-soft); border-color:transparent; }
+.field-geo-list .card{ box-shadow:var(--vg-shadow-group); border-color:transparent; }
+#region-list > .empty{
+  padding:22px 14px;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+}
+
+/* ---------- Reports: softer chart (smooth line, gradient stroke, dashed grid) ---------- */
+.rp-grid{ stroke-dasharray:3 5; }
+.rp-grid.is-base{ stroke-dasharray:none; }
+.rp-stroke-a{ stop-color:#4F8DF7; }
+.rp-stroke-b{ stop-color:#34C58E; }
+.rp-line{ stroke:url(#rp-stroke); stroke-width:2.5; }
+.rp-fade-top{ stop-color:#34C58E; stop-opacity:.22; }
+.rp-fade-bottom{ stop-color:#34C58E; stop-opacity:0; }
+.rp-dot{ background:#34C58E; border-width:3px; box-shadow:0 2px 6px rgba(52,197,142,.45); }
+.rp-card,
+.rp-hero{ border-color:transparent; }
+
+
+/* ============================================================
+   SOFT iOS LAYER — part 3 (2026-10): fixes confirmed in code review
+   ============================================================ */
+
+/* 1.1 Customers list: sparkline sits on the NAME line (was falling to a 2nd line) */
+.customer-row-title-line{display:flex;align-items:center;gap:8px;}
+.customer-row-title-line .customer-row-name{flex:0 1 auto;}
+
+/* 1.2 Summary cards → ONE grouped card with hairline separators */
+#payment-summary,
+#check-summary,
+#visit-summary,
+#prospect-summary{
+  gap:0;
+  background:var(--vg-color-surface);
+  border-radius:var(--vg-radius-soft);
+  box-shadow:var(--vg-shadow-group);
+  overflow:hidden;
+}
+#payment-summary > .card,
+#check-summary > .card,
+#visit-summary > .card,
+#prospect-summary > .card{
+  margin:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:inset 0 0 0 .5px var(--vg-color-divider);   /* hairlines between cells */
+}
+html[data-theme="dark"] #payment-summary,
+html[data-theme="dark"] #check-summary,
+html[data-theme="dark"] #visit-summary,
+html[data-theme="dark"] #prospect-summary{ border:1px solid var(--vg-color-border); }
+
+/* 1.2b Many-option filters: one swipeable row instead of 2–3 wrapped lines */
+#payment-chips,
+#check-chips,
+#visit-chips,
+#prospect-chips,
+#product-chips{
+  flex-wrap:nowrap;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  margin-inline:-14px;
+  padding-inline:14px;
+}
+#payment-chips::-webkit-scrollbar,
+#check-chips::-webkit-scrollbar,
+#visit-chips::-webkit-scrollbar,
+#prospect-chips::-webkit-scrollbar,
+#product-chips::-webkit-scrollbar{ display:none; }
+#payment-chips .chip,
+#check-chips .chip,
+#visit-chips .chip,
+#prospect-chips .chip,
+#product-chips .chip{ flex:0 0 auto; white-space:nowrap; }
+
+/* 2.2 Customer detail: address / note show in full (wrap) instead of "…" */
+#main.customer-detail-view .cd-meta-v{
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+  line-height:1.7;
+}
+
+/* 2.3 Visits: context lines wrap (max 2 lines each) instead of one clipped line */
+.tx-row-ctx{
+  white-space:normal;
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
+  overflow:hidden;
+  text-overflow:clip;
+}
+
+/* Visits summary: when only one small card + the wide one are shown, the small card takes the full row (no empty cell) */
+#visit-summary > .card:first-child:nth-last-child(2){ grid-column:1 / -1; }
+
+
+/* ============================================================
+   Chart language — every chart in the app looks like the Reports chart:
+   smooth line, blue→green stroke, soft green area, green end dot.
+   (declining customer sparkline = amber instead of green)
+   ============================================================ */
+.ch-a{stop-color:#4F8DF7;}
+.ch-b{stop-color:#34C58E;}
+.is-down .ch-a{stop-color:#F7B24F;}
+.is-down .ch-b{stop-color:#EE8A2B;}
+.ch-line{fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.ch-area{fill:#34C58E;}
+.is-down .ch-area{fill:#EE8A2B;}
+.ch-fade-top{stop-color:#34C58E;stop-opacity:.22;}
+.ch-fade-bottom{stop-color:#34C58E;stop-opacity:0;}
+
+/* Customers list sparkline */
+.customer-row-spark svg{opacity:1;}
+.customer-row-spark .ch-line{stroke-width:1.8;}
+.customer-row-spark .ch-area{opacity:.14;}
+.customer-row-spark .customer-row-spark-dot{
+  width:7px;height:7px;margin-left:-3.5px;margin-top:-3.5px;
+  background:#34C58E;border:1.5px solid var(--vg-color-surface);box-sizing:border-box;
+  box-shadow:0 1px 4px rgba(52,197,142,.45);
+}
+.customer-row-spark.is-down{color:inherit;}
+.customer-row-spark.is-down .customer-row-spark-dot{background:#EE8A2B;box-shadow:0 1px 4px rgba(238,138,43,.45);}
+.customer-list-trend-sample{color:#4F8DF7;opacity:1;}
+.customer-list-trend-sample b{background:#34C58E;}
+
+/* Customer detail trend chart */
+#main.customer-detail-view .customer-trend-chart .ch-line{stroke-width:2.5;}
+#main.customer-detail-view .customer-trend-card{border-color:transparent;}
+#main.customer-detail-view .customer-trend-dot{
+  width:11px;height:11px;margin-left:-5.5px;margin-top:-5.5px;
+  background:#34C58E;border:3px solid var(--vg-color-surface);box-sizing:border-box;
+  box-shadow:0 2px 6px rgba(52,197,142,.45);
+}
