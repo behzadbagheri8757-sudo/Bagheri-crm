@@ -682,6 +682,9 @@
         return x.toFixed(1) + ',' + y.toFixed(1);
       }).join(' ');
       const area = '0,36 ' + pts + ' 100,36';
+      const trendCoords = pts.split(' ').map(function (q) { return q.split(',').map(Number); });
+      const trendLine = chartSmoothPath(trendCoords);
+      const trendArea = trendLine + ' L 100 36 L 0 36 Z';
       const last = pts.split(' ').pop();
       const lastParts = last.split(',');
       const firstHalf = vals.slice(0, 4).reduce(function (s, v) { return s + v; }, 0);
@@ -694,7 +697,7 @@
         if (ratio >= 1.15) trendText = 'خرید اخیر بیشتر شده';
         else if (ratio <= 0.85) trendText = 'خرید اخیر کمتر شده';
       }
-      return '<div class="customer-trend-card"><div class="customer-trend-head"><div><span class="label">روند خرید</span><span class="customer-trend-period">۸ هفته اخیر</span></div><span class="customer-trend-note">' + esc(trendText) + '</span></div><div class="customer-trend-chart" aria-label="روند خرید بر اساس مبلغ فاکتورها در ۸ هفته اخیر" style="position:relative;"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><polygon points="' + area + '" class="customer-trend-area"></polygon><polyline points="' + pts + '" class="customer-trend-line" vector-effect="non-scaling-stroke"></polyline></svg><i class="customer-trend-dot" style="left:' + parseFloat(lastParts[0]) + '%;top:' + ((parseFloat(lastParts[1]) / 40) * 100) + '%;"></i></div></div>';
+      return '<div class="customer-trend-card"><div class="customer-trend-head"><div><span class="label">روند خرید</span><span class="customer-trend-period">۸ هفته اخیر</span></div><span class="customer-trend-note">' + esc(trendText) + '</span></div><div class="customer-trend-chart" aria-label="روند خرید بر اساس مبلغ فاکتورها در ۸ هفته اخیر" style="position:relative;"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="ct-grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100" y2="0"><stop class="ch-a" offset="0"/><stop class="ch-b" offset="1"/></linearGradient><linearGradient id="ct-fade" x1="0" y1="0" x2="0" y2="1"><stop class="ch-fade-top" offset="0"/><stop class="ch-fade-bottom" offset="1"/></linearGradient></defs><path d="' + trendArea + '" fill="url(#ct-fade)"/><path class="ch-line" d="' + trendLine + '" stroke="url(#ct-grad)" vector-effect="non-scaling-stroke"/></svg><i class="customer-trend-dot" style="left:' + parseFloat(lastParts[0]) + '%;top:' + ((parseFloat(lastParts[1]) / 40) * 100) + '%;"></i></div></div>';
     } catch (e) { return ''; }
   }
 
@@ -751,7 +754,7 @@
     if (typeof openSheet !== 'function') return;
     openSheet(
       '<div class="sheet-title">ثبت علت هشدار</div>' +
-      '<div class="report-note" style="margin-bottom:10px;">سه پاسخ اول هشدار را می‌بندند و همان مورد را فوراً برنمی‌گردانند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
+      '<div class="report-note" style="margin-bottom:10px;">پاسخ‌های «هنوز موجودی دارد»، «این محصول را نمی‌خواهد»، «بعداً پیگیری می‌کنم» و «فعلاً نیاز ندارد» هشدار را می‌بندند و همان مورد را فوراً برنمی‌گردانند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
       '<div id="watch-reason-list">' + optsHtml + '</div>' +
       '<div class="field" style="margin-top:10px;"><label>یادداشت (اختیاری)</label>' +
       '<input type="text" id="watch-reason-note" autocomplete="off" placeholder="توضیح کوتاه..."></div>' +

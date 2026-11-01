@@ -14,6 +14,7 @@
   let sortHandler = null;
   let chipHandlers = [];
   let listClickHandler = null;
+  let listKeyHandler = null;
   let locFilterHandler = null;
   let locUnassignedHandler = null;
   function customerHref(cid) {
@@ -74,7 +75,11 @@
       const lastParts = last.split(',');
       const dotLeftPct = parseFloat(lastParts[0]);
       const dotTopPct = (parseFloat(lastParts[1]) / 20) * 100;
-      return '<span class="customer-row-spark' + trendCls + '" aria-label="روند خرید، ۸ هفته اخیر"><svg viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline></svg><i class="customer-row-spark-dot" style="left:' + dotLeftPct + '%;top:' + dotTopPct + '%;"></i></span>';
+      const sparkCoords = pts.split(' ').map(function (q) { return q.split(',').map(Number); });
+      const sparkLine = chartSmoothPath(sparkCoords);
+      const sparkArea = sparkLine + ' L ' + sparkCoords[sparkCoords.length - 1][0].toFixed(1) + ' 20 L ' + sparkCoords[0][0].toFixed(1) + ' 20 Z';
+      const sparkId = 'cls-' + String(cid).replace(/[^a-zA-Z0-9_-]/g, '');
+      return '<span class="customer-row-spark' + trendCls + '" aria-label="روند خرید، ۸ هفته اخیر"><svg viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="' + sparkId + '" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100" y2="0"><stop class="ch-a" offset="0"/><stop class="ch-b" offset="1"/></linearGradient></defs><path class="ch-area" d="' + sparkArea + '"/><path class="ch-line" d="' + sparkLine + '" stroke="url(#' + sparkId + ')" vector-effect="non-scaling-stroke"/></svg><i class="customer-row-spark-dot" style="left:' + dotLeftPct + '%;top:' + dotTopPct + '%;"></i></span>';
     } catch (e) { return ''; }
   }
 
@@ -228,7 +233,7 @@
           (t.balance !== 0 ? toman(Math.abs(t.balance)) + ' ت' : '') +
           '</span>' +
           '</span>' +
-          '<button type="button" class="customer-row-detail-hitarea" data-customer-detail="' + esc(c.id) + '" aria-label="مشاهده جزئیات مشتری" title="مشاهده جزئیات مشتری"></button>' +
+          '<span role="button" tabindex="0" class="customer-row-detail-hitarea" data-customer-detail="' + esc(c.id) + '" aria-label="مشاهده جزئیات مشتری" title="مشاهده جزئیات مشتری"></span>' +
           '</a>'
         );
       })
@@ -375,6 +380,16 @@
       }
     };
     list.addEventListener('click', listClickHandler);
+    /* keyboard / VoiceOver activation for the span[role=button] hit-area (a <button> may not live inside the row's <a>) */
+    listKeyHandler = function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const hit = e.target.closest && e.target.closest('[data-customer-detail]');
+      if (!hit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      navigateToCustomer(hit.getAttribute('data-customer-detail'));
+    };
+    list.addEventListener('keydown', listKeyHandler);
     updateLocationFilterIndicator();
     renderCustomerListOnly();
   }
@@ -440,8 +455,10 @@
       if (listClickHandler) {
         const list = document.getElementById('customer-list');
         if (list) list.removeEventListener('click', listClickHandler);
+        if (list && listKeyHandler) list.removeEventListener('keydown', listKeyHandler);
       }
       listClickHandler = null;
+      listKeyHandler = null;
 
       if (fab) {
         fab.style.display = 'none';

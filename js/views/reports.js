@@ -455,19 +455,48 @@
     function py(v) {
       return Y1 - (v / max) * (Y1 - Y0);
     }
-    const line = pts
-      .map(function (p, i) {
-        return px(i).toFixed(2) + ',' + py(p.value || 0).toFixed(2);
-      })
-      .join(' ');
-    const area = line + ' ' + px(n - 1).toFixed(2) + ',' + Y1 + ' ' + px(0).toFixed(2) + ',' + Y1;
+    /* Presentation: smooth monotone-cubic curve through the same points.
+       Monotone interpolation never overshoots, so the line can't dip below
+       the baseline or above the peak. Data, scale and touch logic unchanged. */
+    function smoothPath(coords) {
+      const m = coords.length;
+      if (m === 0) return '';
+      if (m === 1) return 'M ' + coords[0][0].toFixed(2) + ' ' + coords[0][1].toFixed(2);
+      const dx = [], dy = [], sl = [];
+      for (let k = 0; k < m - 1; k++) {
+        dx.push(coords[k + 1][0] - coords[k][0]);
+        dy.push(coords[k + 1][1] - coords[k][1]);
+        sl.push(dy[k] / dx[k]);
+      }
+      const t = [sl[0]];
+      for (let k = 1; k < m - 1; k++) {
+        t.push(sl[k - 1] * sl[k] <= 0 ? 0 : (sl[k - 1] + sl[k]) / 2);
+      }
+      t.push(sl[m - 2]);
+      for (let k = 0; k < m - 1; k++) {
+        if (sl[k] === 0) { t[k] = 0; t[k + 1] = 0; continue; }
+        const a = t[k] / sl[k], b2 = t[k + 1] / sl[k], h = Math.hypot(a, b2);
+        if (h > 3) { const tau = 3 / h; t[k] = tau * a * sl[k]; t[k + 1] = tau * b2 * sl[k]; }
+      }
+      let d = 'M ' + coords[0][0].toFixed(2) + ' ' + coords[0][1].toFixed(2);
+      for (let k = 0; k < m - 1; k++) {
+        const x0 = coords[k][0], y0 = coords[k][1], x1 = coords[k + 1][0], y1 = coords[k + 1][1];
+        const h3 = dx[k] / 3;
+        d += ' C ' + (x0 + h3).toFixed(2) + ' ' + (y0 + t[k] * h3).toFixed(2) + ' ' +
+          (x1 - h3).toFixed(2) + ' ' + (y1 - t[k + 1] * h3).toFixed(2) + ' ' + x1.toFixed(2) + ' ' + y1.toFixed(2);
+      }
+      return d;
+    }
+    const coords = pts.map(function (p, i) { return [px(i), py(p.value || 0)]; });
+    const line = smoothPath(coords);
+    const area = line + ' L ' + px(n - 1).toFixed(2) + ' ' + Y1 + ' L ' + px(0).toFixed(2) + ' ' + Y1 + ' Z';
     let prevLine = '';
     if (trend.hasPrev) {
       const seg = [];
       pts.forEach(function (p, i) {
-        if (p.prev !== null && p.prev !== undefined) seg.push(px(i).toFixed(2) + ',' + py(p.prev).toFixed(2));
+        if (p.prev !== null && p.prev !== undefined) seg.push([px(i), py(p.prev)]);
       });
-      if (seg.length > 1) prevLine = '<polyline class="rp-line-prev" points="' + seg.join(' ') + '" vector-effect="non-scaling-stroke"/>';
+      if (seg.length > 1) prevLine = '<path class="rp-line-prev" d="' + smoothPath(seg) + '" vector-effect="non-scaling-stroke"/>';
     }
 
     chartState = { n: n, points: pts, max: max, X0: X0, X1: X1, Y0: Y0, Y1: Y1, step: step };
@@ -503,13 +532,16 @@
       '<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' +
       '<defs><linearGradient id="rp-fade" x1="0" y1="0" x2="0" y2="1">' +
       '<stop offset="0" class="rp-fade-top"/><stop offset="1" class="rp-fade-bottom"/>' +
+      '</linearGradient>' +
+      '<linearGradient id="rp-stroke" gradientUnits="userSpaceOnUse" x1="100" y1="0" x2="0" y2="0">' +
+      '<stop offset="0" class="rp-stroke-a"/><stop offset="1" class="rp-stroke-b"/>' +
       '</linearGradient></defs>' +
       '<line class="rp-grid" x1="0" x2="100" y1="' + Y0 + '" y2="' + Y0 + '" vector-effect="non-scaling-stroke"/>' +
       '<line class="rp-grid" x1="0" x2="100" y1="' + (Y0 + Y1) / 2 + '" y2="' + (Y0 + Y1) / 2 + '" vector-effect="non-scaling-stroke"/>' +
       '<line class="rp-grid is-base" x1="0" x2="100" y1="' + Y1 + '" y2="' + Y1 + '" vector-effect="non-scaling-stroke"/>' +
-      '<polygon class="rp-area" points="' + area + '"/>' +
+      '<path class="rp-area" d="' + area + '"/>' +
       prevLine +
-      '<polyline class="rp-line" points="' + line + '" vector-effect="non-scaling-stroke"/>' +
+      '<path class="rp-line" d="' + line + '" vector-effect="non-scaling-stroke"/>' +
       '</svg>' +
       '<span class="rp-ylab" style="top:' + Y0 + '%">' + compact(max) + '</span>' +
       '<span class="rp-guide" id="rp-guide" style="right:' + lastRight + '%"></span>' +

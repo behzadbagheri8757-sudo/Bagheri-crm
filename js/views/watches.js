@@ -89,7 +89,7 @@
     }).join('');
     openSheet(
       '<div class="sheet-title">ثبت علت هشدار</div>' +
-      '<div class="report-note watch-sheet-note">سه پاسخ اول هشدار را می‌بندند و همان مورد را فوراً برنمی‌گردانند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
+      '<div class="report-note watch-sheet-note">پاسخ‌های «هنوز موجودی دارد»، «این محصول را نمی‌خواهد»، «بعداً پیگیری می‌کنم» و «فعلاً نیاز ندارد» هشدار را می‌بندند و همان مورد را فوراً برنمی‌گردانند؛ سایر علت‌ها فقط ثبت می‌شوند.</div>' +
       '<div class="watch-reason-options">' + optsHtml + '</div>' +
       '<div class="field watch-sheet-note-field"><label>یادداشت (اختیاری)</label><input type="text" id="watch-detail-reason-note" autocomplete="off" placeholder="توضیح کوتاه..."></div>' +
       '<div class="btn-row watch-sheet-actions"><button type="button" class="btn secondary" id="watch-detail-dismiss">بستن هشدار</button><button type="button" class="btn secondary" id="watch-detail-cancel">انصراف</button></div>'
