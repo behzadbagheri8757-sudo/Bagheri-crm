@@ -2684,7 +2684,7 @@ function openInvoiceForm(cid, editInv, opts){
           <span class="prod-drop-name">${esc(p.name)}</span>
           ${hl.length ? `<span class="prod-drop-hint">${window.BagheriPresent.hintHtml(hl)}</span>` : ''}
         </span>
-        <span class="prod-drop-stock">${enToFaDigits(String(p.stockQty||0))}</span>
+        <span class="prod-drop-stock">${enToFaDigits(fmtQtyDisplay(p.stockQty||0))}</span>
         <span class="prod-drop-chevron" aria-hidden="true">›</span>
       </div>
     `;

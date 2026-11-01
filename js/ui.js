@@ -1153,3 +1153,29 @@ function openSheet(html, opts){
   document.getElementById('closeX').addEventListener('click', async function(){ if(await window.__requestAppExit('close')) closeModal(); });
   bindSheetDragToDismiss(sheet, sheet.querySelector('.sheet-handle'), async function(){ if(await window.__requestAppExit('drag')) closeModal(); });
 }
+
+
+/* Presentation helper: smooth monotone-cubic SVG path through [[x,y],…] points
+   (never overshoots, so a line can't dip below its baseline). Used by the small
+   charts so they match the Reports chart. Data and scales are the caller's. */
+function chartSmoothPath(coords){
+  var m = coords.length;
+  if (!m) return '';
+  var d = 'M ' + coords[0][0].toFixed(2) + ' ' + coords[0][1].toFixed(2);
+  if (m === 1) return d;
+  var dx = [], sl = [], k;
+  for (k = 0; k < m - 1; k++) { dx.push(coords[k+1][0] - coords[k][0]); sl.push((coords[k+1][1] - coords[k][1]) / dx[k]); }
+  var t = [sl[0]];
+  for (k = 1; k < m - 1; k++) t.push(sl[k-1] * sl[k] <= 0 ? 0 : (sl[k-1] + sl[k]) / 2);
+  t.push(sl[m-2]);
+  for (k = 0; k < m - 1; k++) {
+    if (sl[k] === 0) { t[k] = 0; t[k+1] = 0; continue; }
+    var a = t[k] / sl[k], b = t[k+1] / sl[k], h = Math.hypot(a, b);
+    if (h > 3) { var tau = 3 / h; t[k] = tau * a * sl[k]; t[k+1] = tau * b * sl[k]; }
+  }
+  for (k = 0; k < m - 1; k++) {
+    var h3 = dx[k] / 3, x0 = coords[k][0], y0 = coords[k][1], x1 = coords[k+1][0], y1 = coords[k+1][1];
+    d += ' C ' + (x0 + h3).toFixed(2) + ' ' + (y0 + t[k] * h3).toFixed(2) + ' ' + (x1 - h3).toFixed(2) + ' ' + (y1 - t[k+1] * h3).toFixed(2) + ' ' + x1.toFixed(2) + ' ' + y1.toFixed(2);
+  }
+  return d;
+}
