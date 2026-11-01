@@ -128,6 +128,18 @@
     return productId;
   }
 
+  // The family an ACK belongs to, resolved at READ time with the same resolver the Signal engine uses.
+  // The stored ack.familyId is a snapshot: an ACK written before its product joined an analysis group
+  // keeps the raw product id, while signals carry the current group id, so a strict compare never matched.
+  // Ungrouped products resolve to themselves (== stored value), so their behaviour is unchanged.
+  // Stored records are never modified.
+  function _currentFamilyOf(a) {
+    if (!a || a.scope !== 'product') return a ? a.familyId : null;
+    var pid = (a.productId != null && a.productId !== '') ? a.productId : a.familyId;
+    var f = _familyOf(pid);
+    return (f != null && f !== '') ? f : a.familyId;
+  }
+
   /* ---------- storage ---------- */
 
   function _loadLS() {
@@ -378,7 +390,7 @@
         for (var i = 0; i < _mem.length; i++) {
           var o = _mem[i];
           if (!o || o.status !== 'active' || o.customerId !== ack.customerId || o.scope !== ack.scope) continue;
-          if (ack.scope === 'product' && o.familyId !== ack.familyId) continue;
+          if (ack.scope === 'product' && _currentFamilyOf(o) !== ack.familyId) continue;
           if (ack.scope === 'account' && o.decision !== ack.decision) continue;   // account ACKs only replace their own kind
           if (o.decision === 'other') continue;
           o.status = 'superseded';
@@ -412,8 +424,10 @@
           (options.includeExpired && (a.status === 'expired' || (a.status === 'active' && !live))) ||
           (options.includeReversed && (a.status === 'reversed' || a.status === 'superseded'));
         if (!ok) continue;
-        if (options.familyId != null && a.scope === 'product' && a.familyId !== options.familyId) continue;
-        out.push(a);
+        var curFam = _currentFamilyOf(a);
+        if (options.familyId != null && a.scope === 'product' && curFam !== options.familyId) continue;
+        // Hand consumers (risk / action / UI) the ACK under its CURRENT family; the stored record stays as is.
+        out.push(curFam !== a.familyId ? Object.assign({}, a, { familyId: curFam }) : a);
       }
       out.sort(function (x, y) { return String(y.createdAt).localeCompare(String(x.createdAt)); });
       return out;
@@ -584,7 +598,7 @@
         var a = _mem[i];
         if (!a || a.status !== 'active' || a.customerId !== customerId || a.scope !== 'product') continue;
         if (a.decisionCategory !== 'suppress' && a.decisionCategory !== 'defer') continue;
-        if (!fams[a.familyId]) continue;
+        if (!fams[a.familyId] && !fams[_currentFamilyOf(a)]) continue;   // stale stored familyId must not escape the purchase check
         a.status = 'superseded';
         a.reversedAt = _nowISO();
         a.reversedReason = 'condition_cleared';

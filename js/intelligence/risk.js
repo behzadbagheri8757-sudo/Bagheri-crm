@@ -52,6 +52,9 @@
     low: 20,
   };
 
+  // Highest score that still reads as 'medium' (_levelFromScore: >= 50 is 'high').
+  const GROWTH_SKU_ONLY_MAX_SCORE = 49;
+
   function _levelFromScore(score) {
     if (score >= 75) return 'critical';
     if (score >= 50) return 'high';
@@ -137,6 +140,23 @@
       score += _signalPoints(s);
     });
     if (score > 100) score = 100;
+
+    // Growth consistency (UI-level risk label only): when the ONLY risk evidence is SKU-level
+    // (no account-level risk) while the account's own purchases are verifiably growing
+    // (active PURCHASE_GROWTH, same 30d-vs-previous-30d basis as the decline signals), the
+    // account is not "urgent" / "critical" for sales risk — a single product slipping inside a
+    // growing account is a product-level matter. The level is held below 'high'. Signals,
+    // Watches, ACK effects and the Action Engine are untouched, so the SKU problem is still
+    // listed and actionable; account-level risk (incl. CHECK_BOUNCED / PAYMENT_OVERDUE) is never capped.
+    if (!hasAccountRisk && scoringPool.length && score > GROWTH_SKU_ONLY_MAX_SCORE) {
+      var growing = false;
+      for (var gi = 0; gi < signals.length; gi++) {
+        var gs = signals[gi];
+        if (gs && gs.category === 'PURCHASE_GROWTH' && gs.type === 'opportunity' &&
+            gs.sourceLevel === 'account' && _isActiveForRisk(gs)) { growing = true; break; }
+      }
+      if (growing) score = GROWTH_SKU_ONLY_MAX_SCORE;
+    }
 
     return {
       customerId: cid,

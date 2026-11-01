@@ -1076,7 +1076,8 @@
     return 10;
   }
 
-  function _customerWhyNow(cid, ctx) {
+  // Visit-based timing: the ONLY honest "now" for visit-type actions.
+  function _visitWhyNow(cid, ctx) {
     const overdue = (typeof visitOverdueDays === 'function') ? visitOverdueDays(cid, ctx) : 0;
     if (overdue > 0) return 'ویزیت ' + Math.round(overdue) + ' روز عقب‌افتاده';
     if (typeof customerBehavior === 'function') {
@@ -1090,7 +1091,66 @@
         }
       } catch (e) {}
     }
-    return 'نیاز به پیگیری';
+    return null;
+  }
+
+  // "الان" must explain why THIS action is timely, from the evidence of its own primary signal.
+  // Presentation only: no scoring / ordering input. When the signal has no provable timing
+  // evidence the neutral wording is shown; nothing is invented.
+  const WHYNOW_NEUTRAL = 'نیاز به پیگیری';
+  const WHYNOW_VISIT_SIGNALS = { LONG_NO_VISIT: true, VISIT_OVERDUE: true, VISIT_CONVERSION_LOW: true, CONSECUTIVE_NO_ORDER: true };
+  const WHYNOW_PRODUCT_GAP_SIGNALS = { SKU_DELAY: true, COMBINED_SKU_DETERIORATION: true, SKU_FREQUENCY_DROP: true, SKU_QUANTITY_DROP: true, LINE_DROP: true };
+
+  function _whyNowNum(n) {
+    const v = Math.round(Number(n));
+    return (typeof enToFaDigits === 'function') ? enToFaDigits(String(v)) : String(v);
+  }
+  function _whyNowFinite(n) { return typeof n === 'number' && isFinite(n) && n > 0; }
+
+  function _customerWhyNow(cid, ctx, signal) {
+    try {
+      const cat = signal && signal.category;
+      // No signal info (legacy callers) or a visit-type signal: the visit timing is the real reason.
+      if (!cat || WHYNOW_VISIT_SIGNALS[cat]) return _visitWhyNow(cid, ctx) || WHYNOW_NEUTRAL;
+
+      if (cat === 'CHECK_BOUNCED' && _whyNowFinite(signal.value)) {
+        return _whyNowNum(signal.value) + ' چک برگشتی ثبت‌شده';
+      }
+      if (cat === 'PAYMENT_OVERDUE' && _whyNowFinite(signal.value)) {
+        return _whyNowNum(signal.value) + ' چک سررسیدگذشته و وصول‌نشده';
+      }
+
+      const b = (typeof customerBehavior === 'function') ? customerBehavior(cid, ctx) : null;
+
+      if (cat === 'PURCHASE_DECLINE_SEVERE' || cat === 'PURCHASE_DECLINE_MILD') {
+        if (b && typeof b.sales30 === 'number' && typeof b.salesPrev30 === 'number' && b.salesPrev30 > 0 &&
+            typeof toman === 'function') {
+          return 'فروش ۳۰ روز اخیر ' + toman(b.sales30) + ' ت در برابر ' + toman(b.salesPrev30) + ' ت در ۳۰ روز قبل از آن';
+        }
+        return WHYNOW_NEUTRAL;
+      }
+
+      if (cat === 'BEHIND_PATTERN') {
+        const gap = b && b.daysSinceLast;
+        const typical = b && b.avgDistinctIntervalDays;
+        if (_whyNowFinite(gap) && _whyNowFinite(typical)) {
+          return 'آخرین خرید ' + _whyNowNum(gap) + ' روز پیش؛ فاصلهٔ معمول خرید حدود ' + _whyNowNum(typical) + ' روز';
+        }
+        return WHYNOW_NEUTRAL;
+      }
+
+      if (WHYNOW_PRODUCT_GAP_SIGNALS[cat]) {
+        const ev = signal.evidence || {};
+        const gap = _whyNowFinite(ev.daysSinceLast) ? ev.daysSinceLast : (signal.unit === 'days' ? signal.value : null);
+        const typical = ev.typicalCycle;
+        if (_whyNowFinite(gap) && _whyNowFinite(typical)) {
+          const nm = _validName(signal.productName) ? ('«' + signal.productName + '» ') : '';
+          return 'آخرین خرید ' + nm + _whyNowNum(gap) + ' روز پیش؛ چرخهٔ معمول خرید ' + _whyNowNum(typical) + ' روز';
+        }
+        return WHYNOW_NEUTRAL;
+      }
+    } catch (e) { /* fall through to neutral */ }
+    return WHYNOW_NEUTRAL;
   }
 
   function _prospectTiming(days) {
@@ -1144,6 +1204,43 @@
     return out;
   }
 
+  /* Visit-ACK suppression of the daily suggested list (list-level filter ONLY).
+     While the customer's own "visit_reviewed" ACK (created by a saved visit) is still live,
+     the customer is not offered in the suggested list, even when a purchase-decline / product-delay
+     signal still holds. Signals, Watches and Risk are NOT touched here. The ACK's existing
+     expiresAt is used as-is (never created, extended or renewed here); once it lapses the
+     customer re-enters by today's state.
+     Exceptions (customer stays in the list): bounced check, overdue check / overdue invoice due date,
+     and a follow-up the seller dated himself (live follow_up_later ACK with a followUpDate).
+     Fail-open: any error / missing ACK layer => the customer is kept. */
+  function _visitAckHidesFromSuggested(cid, base, ctx) {
+    try {
+      if (typeof getActiveAcksForCustomer !== 'function') return false;
+      if (typeof isAckLayerActive === 'function' && !isAckLayerActive()) return false;
+      var acks = getActiveAcksForCustomer(cid) || [];
+      var visitAck = false;
+      var datedFollowUp = false;
+      for (var i = 0; i < acks.length; i++) {
+        var a = acks[i];
+        if (!a || a.status !== 'active') continue;
+        if (a.decision === 'visit_reviewed' && a.source === 'visit' && a.scope === 'account') visitAck = true;
+        if (a.decision === 'follow_up_later' && a.followUpDate) datedFollowUp = true;
+      }
+      if (!visitAck) return false;
+      if (datedFollowUp) return false;
+      var cat = base && base.primarySignal && base.primarySignal.category;
+      if (cat === 'CHECK_BOUNCED' || cat === 'PAYMENT_OVERDUE') return false;
+      if (ctx && typeof ctx.receivableAttention === 'function') {
+        var att = ctx.receivableAttention();
+        var row = att && att.byCustomerId ? att.byCustomerId[cid] : null;
+        if (row && row.refKind === 'invoice_due' && Number(row.daysSince) > 0) return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function calculateAllActions(ctx, skipMemo) {
     if (ctx && typeof ctx.memo === 'function' && !skipMemo) {
       return ctx.memo('allActions', 'all', function () {
@@ -1159,12 +1256,13 @@
         if (!c || c.active === false) return;
         const base = calculateCustomerAction(c.id, null, { economicRankMap: economicRankMap, ctx: ctx });
         if (!base || base.actionType === 'no_action') return;
+        if (_visitAckHidesFromSuggested(c.id, base, ctx)) return;
 
         const urgencyPts = URGENCY_SCORE[base.urgency] || 10;
         const impactPts = impactMap[c.id] != null ? impactMap[c.id] : 15;
         const timingPts = _customerTiming(c.id, ctx);
         const unifiedScore = urgencyPts + impactPts + timingPts;
-        const whyNow = _customerWhyNow(c.id, ctx);
+        const whyNow = _customerWhyNow(c.id, ctx, base.primarySignal);
 
         actions.push({
           type: 'customer',

@@ -883,6 +883,17 @@
     return { active: rows.length, unreviewed: unreviewed };
   }
 
+  // A completed follow-up ends the premise of the pending follow_up_later ACK. Without this the old ACK
+  // stays active until its date and, when it expires, _releaseWatchFor() would release the NEW suppression
+  // and bring the alert back although the seller already answered. Fail-open, same guard as the mirror.
+  function _closePendingFollowUpAck(rec) {
+    try {
+      if (typeof ackReverseForWatch !== 'function') return;
+      if (typeof ackWatchSyncActive === 'function' && ackWatchSyncActive()) return;
+      ackReverseForWatch(rec.id);
+    } catch (eClose) { /* best-effort */ }
+  }
+
   /**
    * Record seller reason + optional note. Does NOT resolve the Watch.
    * Status stays 'active'; badge becomes «بررسی شده».
@@ -905,7 +916,7 @@
 
   // ACK bridge (fail-open). Watch stays the owner of its tombstone; every decision is mirrored
   // into the unified SellerAck unless the call itself came FROM an ACK (re-entrancy guard).
-  function _mirrorToAck(rec, decision, comment, followUpDate) {
+  function _mirrorToAck(rec, decision, comment, followUpDate, supersede) {
     try {
       if (typeof createAck !== 'function') return;
       if (typeof ackWatchSyncActive === 'function' && ackWatchSyncActive()) return;
@@ -920,7 +931,8 @@
         legacyKey: 'watch:' + rec.id,
         sourceContext: { watchCategory: rec.watchCategory || null },
         note: comment || '',
-        followUpDate: followUpDate || null
+        followUpDate: followUpDate || null,
+        supersedeExisting: supersede ? true : undefined   // undefined → ACK's own default (unchanged for every existing caller)
       });
     } catch (eAck) { console.warn('ACK mirror failed (Watch unaffected)', eAck); }
   }
@@ -1070,6 +1082,8 @@
       // can still be reopened later by the existing genuine escalation path.
       rec.suppression = _decisionSnapshot(rec, 'dismiss');
       _persist(rec);
+      _closePendingFollowUpAck(rec);
+      _mirrorToAck(rec, 'dismiss', text, null, true);
       return rec;
     }
     rec.reason = {
@@ -1090,6 +1104,8 @@
     rec.suppression.releasedAt = null;
     rec.suppression.releasedBy = null;
     _persist(rec);
+    _closePendingFollowUpAck(rec);
+    _mirrorToAck(rec, code, text, null, true);
     return rec;
   }
 
