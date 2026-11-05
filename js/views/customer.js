@@ -395,12 +395,12 @@
 
   /* Reads existing Truth only (same sources the page used before). */
   function loadWatchData(cid, ctx) {
-    var out = { activeConfirmed: [], occs: [], status: 'ok', errors: [] };
-    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function' && typeof getActiveWatchOccurrences !== 'function') { out.status = 'unavailable'; return out; }
+    var out = { activeConfirmed: [], occs: [] };
+    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function' && typeof getActiveWatchOccurrences !== 'function') return out;
 
     var confirmed = [];
     if (typeof extractCustomerSignals === 'function') {
-      try { confirmed = extractCustomerSignals(cid, ctx) || []; } catch (e) { confirmed = []; out.errors.push('signals'); }
+      try { confirmed = extractCustomerSignals(cid, ctx) || []; } catch (e) { confirmed = []; }
     }
     // ACK: attach the seller's live decisions and drop the signals a decision suppresses, so
     // Focus / Story match Risk and Action. Applied to COPIES: the memoized signal objects are shared
@@ -412,14 +412,14 @@
         confirmed = confirmed.map(_freshSignalCopy);
         applyAcksToSignals(confirmed, getActiveAcksForCustomer(cid));
       }
-    } catch (eAckW) { out.errors.push('ack'); }
+    } catch (eAckW) { /* fail-open */ }
     out.activeConfirmed = confirmed.filter(function (s) {
       return s && s.status === 'active' && s.ackActionEffect !== 'suppress';
     });
 
     var occs = [];
     if (typeof getActiveWatchOccurrences === 'function') {
-      try { occs = getActiveWatchOccurrences(cid) || []; } catch (eOcc) { occs = []; out.errors.push('occurrences'); }
+      try { occs = getActiveWatchOccurrences(cid) || []; } catch (eOcc) { occs = []; }
     }
     // Fallback to raw generation if lifecycle absent. Guarded against inactive customers
     // (W-BUG-02): this path bypasses reconcileWatchLifecycle's active-customer check.
@@ -432,7 +432,7 @@
       try {
         var raw = extractWatchObservations(cid, confirmed, ctx) || [];
         if (typeof filterSuppressedWatchObservations === 'function') {
-          try { raw = filterSuppressedWatchObservations(cid, raw, ctx) || []; } catch (eF) { out.errors.push('suppression'); }
+          try { raw = filterSuppressedWatchObservations(cid, raw, ctx) || []; } catch (eF) { /* fail-open */ }
         }
         occs = raw.map(function (w) {
           return {
@@ -449,9 +449,8 @@
             status: 'active'
           };
         });
-      } catch (e2) { occs = []; out.errors.push('observations'); }
+      } catch (e2) { occs = []; }
     }
-    if (out.errors.length) { out.status = 'error'; console.warn('Customer Watch data incomplete', out.errors); }
     // Presentation-level de-duplication (new array; source objects untouched).
     var seen = Object.create(null);
     out.occs = occs.filter(function (o) {
@@ -1496,576 +1495,432 @@
   }
 
 
-  /* Pre-visit summary: derives a compact, read-only snapshot from the same
-     execution-scoped context and frozen Priority/Watch APIs used elsewhere. */
-  var activeCustomerQuickView = null;
-  var QV_TIMING_NOT_DUE = 0.7;
-  var QV_TIMING_DUE = 1;
+  /* ======================================================================
+     Quick View = «خلاصهٔ پیش از ویزیت» (pre-visit scan).
+     Presentation-only. Reads existing Truth; no new financial/intelligence logic.
+     Reused (not rewritten): customerBehavior / customerInvoices / customerChecks /
+     loadWatchData / BagheriPresent.{lastPurchaseMap,lastOfferMap,relDays,n0,stockShort,reasonLabel}
+     / ctx.customerById / ctx.productById / fifoAvailableQty / _behaviorDaysDiff / todayISO.
+     Every base datum is read ONCE in collectVisitSummaryInputs and passed down as `precomputed`.
+     ====================================================================== */
+  var QV_TIMING_NEAR_RATIO = 0.7;          // days since last purchase / usual interval: below → «هنوز زود است»
+  var QV_TIMING_DUE_RATIO = 1;             // at/after this → «موعد احتمالی رسیده»
+  var QV_TIMING_MIN_PURCHASE_DAYS = 3;     // distinct purchase days needed for a non-noisy estimate
+  var QV_MAX_PRODUCTS = 2;
+  var QV_CHECK_DUE_SOON_DAYS = 3;
+  var QV_HINT_HIDDEN_ACTION_TYPES = ['visit', 'follow_up', 'payment_followup', 'invoice']; // already = a main button
 
-  function qvValidISODate(value) {
-    if (value == null || value === '') return false;
-    var raw = String(value).slice(0, 10);
-    if (typeof parseISODateParts === 'function') {
-      try {
-        var p = parseISODateParts(raw);
-        if (!p) return false;
-        var d = new Date(p.y, p.m - 1, p.d);
-        return d.getFullYear() === p.y && d.getMonth() === p.m - 1 && d.getDate() === p.d;
-      } catch (eDate) { return false; }
+  function qvSafe(fn, fallback) { try { return fn(); } catch (e) { return fallback; } }
+
+  /* The one place that reads shared inputs (each exactly once). */
+  function collectVisitSummaryInputs(cid, ctx) {
+    var P = global.BagheriPresent || {};
+    var hasCtx = !!(ctx && typeof ctx.customerById === 'function');
+    var customer = hasCtx
+      ? ctx.customerById(cid)
+      : (data.customers || []).find(function (x) { return x && x.id === cid; }) || null;
+    if (!customer) return null;
+    // ctx.productById is already an indexed/memoised lookup; only without a ctx do we build ONE Map.
+    var productById;
+    if (ctx && typeof ctx.productById === 'function') {
+      productById = function (pid) { return ctx.productById(pid); };
+    } else {
+      var productMap = new Map((data.products || []).map(function (p) { return [p.id, p]; }));
+      productById = function (pid) { return productMap.get(pid) || null; };
     }
-    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
-    if (!m) return false;
-    var dt = new Date(+m[1], +m[2] - 1, +m[3]);
-    return dt.getFullYear() === +m[1] && dt.getMonth() === +m[2] - 1 && dt.getDate() === +m[3];
-  }
-
-  function qvDateKey(value) {
-    return qvValidISODate(value) ? String(value).slice(0, 10) : null;
-  }
-
-  function qvRelativeDays(date) {
-    var d = qvDateKey(date);
-    if (!d) return null;
-    if (typeof daysAgo === 'function') {
-      try {
-        var n = daysAgo(d);
-        return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null;
-      } catch (eDays) { return null; }
-    }
-    var today = typeof todayISO === 'function' ? qvDateKey(todayISO()) : null;
-    if (!today) return null;
-    var a = new Date(d + 'T00:00:00').getTime();
-    var b = new Date(today + 'T00:00:00').getTime();
-    return isFinite(a) && isFinite(b) ? Math.round((b - a) / 86400000) : null;
-  }
-
-  function qvRelativeLabel(days) {
-    if (days == null) return '';
-    if (days === 0) return 'امروز';
-    if (days === 1) return 'دیروز';
-    return (typeof BagheriPresent !== 'undefined' && BagheriPresent.n0
-      ? BagheriPresent.n0(days) : String(days)) + ' روز پیش';
-  }
-
-  function qvInvoiceValid(inv) {
-    if (!inv || !qvValidISODate(inv.date)) return false;
-    // Persisted invoice rows are the project's invoice truth; deletion removes the row.
-    // The current invoice model has no draft/cancelled lifecycle status contract.
-    return true;
-  }
-
-  function qvInvoiceOrder(a, b) {
-    var byDate = String(b.date).slice(0, 10).localeCompare(String(a.date).slice(0, 10));
-    if (byDate) return byDate;
-    var an = a.number == null ? '' : String(a.number);
-    var bn = b.number == null ? '' : String(b.number);
-    return bn.localeCompare(an, undefined, { numeric: true });
-  }
-
-  function qvEventTime(date, time) {
-    var d = qvDateKey(date);
-    if (!d) return null;
-    if (time == null || time === '') return { key: d, hasTime: false, timeState: 'missing' };
-    var t = String(time);
-    if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(t)) return { key: d, hasTime: false, timeState: 'invalid' };
-    var normalizedTime = t.length === 5 ? t + ':00' : t;
-    return { key: d + 'T' + normalizedTime, hasTime: true, timeState: 'valid' };
-  }
-
-  function qvCompareEvents(a, b) {
-    if (a.key.slice(0, 10) !== b.key.slice(0, 10)) return a.key < b.key ? -1 : 1;
-    if (a.hasTime && b.hasTime && a.key !== b.key) return a.key < b.key ? -1 : 1;
-    return 0; // same calendar day without two comparable clock times
-  }
-
-  function qvProductName(product, id) {
-    if (product && product.name) return product.name;
-    var BP = global.BagheriPresent;
-    return BP && typeof BP.pname === 'function' ? BP.pname(id, '') : '';
-  }
-
-  function buildCustomerVisitSummary(cid, ctx, supplied) {
-    supplied = supplied || {};
-    var result = {
-      status: 'ok', lastPurchase: { status: 'unknown' },
-      purchaseTiming: { status: 'unknown', text: 'سابقه کافی برای برآورد زمان خرید نداریم' },
-      priorityAlert: { status: 'unknown' },
-      suggestedProducts: [], productsToCheck: [], productsStatus: 'ok', story: ''
+    var lastPurchaseMap = (typeof P.lastPurchaseMap === 'function' ? P.lastPurchaseMap(cid) : null) || {};
+    // Same inputs the visit form feeds productPurchaseCycle: {buys, metrics}. Metrics are ctx-memoised.
+    var skuMetrics = [];
+    try { if (typeof _extractSkuRawMetrics === 'function') skuMetrics = _extractSkuRawMetrics(cid, ctx) || []; } catch (eM) { skuMetrics = []; }
+    var cycleInput = { buys: lastPurchaseMap, metrics: skuMetrics };
+    var cycleCache = new Map();
+    return {
+      ctx: ctx,
+      customer: customer,
+      // Per-product cycle (BagheriPresent.productPurchaseCycle = same helper as the visit form), computed once per pid.
+      // null = helper unavailable → callers show nothing (no invented due dates).
+      cycleOf: function (pid) {
+        if (!cycleCache.has(pid)) {
+          cycleCache.set(pid, typeof P.productPurchaseCycle === 'function'
+            ? qvSafe(function () { return P.productPurchaseCycle(cid, pid, cycleInput); }, null)
+            : null);
+        }
+        return cycleCache.get(pid);
+      },
+      behavior: customerBehavior(cid, ctx) || {},
+      invoices: customerInvoices(cid, ctx) || [],
+      checks: customerChecks(cid, ctx) || [],
+      watchData: loadWatchData(cid, ctx),
+      productById: productById,
+      lastPurchaseMap: lastPurchaseMap,
+      lastOfferMap: (typeof P.lastOfferMap === 'function' ? P.lastOfferMap(cid, customer) : null) || {},
+      today: todayISO()
     };
-    var invoices;
-    try {
-      invoices = Array.isArray(supplied.invoices) ? supplied.invoices :
-        (typeof customerInvoices === 'function' ? customerInvoices(cid, ctx) : null);
-      if (!Array.isArray(invoices)) throw new Error('customerInvoices unavailable');
-    } catch (eInv) {
-      console.warn('Customer Quick View invoice history unavailable', eInv);
-      result.lastPurchase = { status: 'error' };
-      result.productsStatus = 'error';
-      result.purchaseTiming = { status: 'unknown', text: 'سابقه کافی برای برآورد زمان خرید نداریم' };
-      invoices = [];
-    }
-
-    var validInvoices = invoices.filter(function (inv) {
-      return inv && inv.customerId === cid && qvInvoiceValid(inv);
-    }).sort(qvInvoiceOrder);
-    if (result.lastPurchase.status !== 'error') {
-      if (!validInvoices.length) {
-        result.lastPurchase = { status: invoices.length ? 'unknown' : 'none' };
-      } else {
-        var last = validInvoices[0], ago = qvRelativeDays(last.date);
-        result.lastPurchase = {
-          status: 'ok', date: String(last.date).slice(0, 10), number: last.number,
-          total: typeof last.total === 'number' && isFinite(last.total) ? last.total : null, daysAgo: ago,
-          relative: ago == null ? '' : qvRelativeLabel(ago)
-        };
-      }
-    }
-
-    try {
-      var behavior = typeof customerBehavior === 'function' ? customerBehavior(cid, ctx) : null;
-      var avg = behavior && behavior.avgIntervalDays;
-      var lastDate = result.lastPurchase.status === 'ok' ? result.lastPurchase.date : null;
-      var since = lastDate ? qvRelativeDays(lastDate) : null;
-      if (validInvoices.length >= 3 && typeof avg === 'number' && isFinite(avg) && avg > 0 && since != null) {
-        var ratio = since / avg;
-        var state = ratio < QV_TIMING_NOT_DUE ? 'not_due' : (ratio < QV_TIMING_DUE ? 'near' : 'due');
-        var cycleText = Math.round(avg);
-        var present = global.BagheriPresent;
-        var cycleFa = present && typeof present.n0 === 'function' ? present.n0(cycleText) : String(cycleText);
-        var sinceFa = present && typeof present.n0 === 'function' ? present.n0(since) : String(since);
-        result.purchaseTiming = {
-          status: 'ok', state: state, ratio: ratio, avgIntervalDays: avg, daysSinceLast: since,
-          text: state === 'not_due' ? 'هنوز تا زمان احتمالی خرید فاصله دارد' :
-            (state === 'near' ? 'به زمان احتمالی خرید نزدیک شده' : 'زمان احتمالی خرید رسیده یا گذشته'),
-          detail: 'چرخه تقریبی ' + cycleFa + ' روز · ' + sinceFa + ' روز از خرید'
-        };
-      }
-    } catch (eTiming) { console.warn('Customer Quick View timing unavailable', eTiming); }
-
-    try {
-      var watch = supplied.watchData || loadWatchData(cid, ctx);
-      var watchUsable = !!watch && watch.status !== 'unavailable' && watch.status !== 'error' &&
-        !(Array.isArray(watch.errors) && watch.errors.length);
-      var confirmed = watch && Array.isArray(watch.activeConfirmed) ? watch.activeConfirmed : [];
-      // CHECK_BOUNCED is an immediate, account-level signal. Keep it on the
-      // official Watch/ACK path; raw check rows must never bypass that lifecycle.
-      var bounced = confirmed.find(function (signal) {
-        return signal && signal.category === 'CHECK_BOUNCED' && signal.status === 'active' &&
-          signal.ackActionEffect !== 'suppress';
-      });
-
-      var checkRows = null, checkDataError = false, overdueCheck = false, dueSoonCheck = false;
-      if (!Array.isArray(data.checks)) {
-        checkDataError = true;
-      } else {
-        checkRows = typeof customerChecks === 'function'
-          ? customerChecks(cid, ctx)
-          : data.checks.filter(function (check) { return check && check.customerId === cid; });
-        if (!Array.isArray(checkRows)) checkDataError = true;
-      }
-
-      var today = typeof todayISO === 'function' ? qvDateKey(todayISO()) : null;
-      if (!today) checkDataError = true;
-      if (Array.isArray(checkRows) && today) {
-        checkRows.forEach(function (check) {
-          if (!check || check.customerId !== cid || check.status !== 'pending') return;
-          var amountValid = check.amount != null && check.amount !== '' &&
-            Number.isFinite(Number(check.amount)) && Number(check.amount) > 0;
-          if (!qvValidISODate(check.dueDate) || !amountValid) {
-            checkDataError = true;
-            return;
-          }
-          var delta = Math.round((new Date(String(check.dueDate).slice(0, 10) + 'T00:00:00').getTime() -
-            new Date(today + 'T00:00:00').getTime()) / 86400000);
-          if (!isFinite(delta)) { checkDataError = true; return; }
-          if (delta < 0) overdueCheck = true;
-          else if (delta <= 3) dueSoonCheck = true;
-        });
-      }
-
-      // PAYMENT_OVERDUE is not a check label unless its evidence is actually
-      // check-backed. In this project pending receivable checks are the direct
-      // source of truth for overdue / near-due check reminders.
-      var checkCategory = overdueCheck ? 'CHECK_OVERDUE' : (dueSoonCheck ? 'CHECK_DUE' : null);
-      var checkText = overdueCheck ? 'چک سررسیدگذشته و وصول‌نشده' :
-        (dueSoonCheck ? 'چک وصول‌نشده با سررسید امروز تا سه روز آینده' : '');
-
-      if (bounced) {
-        result.priorityAlert = { status: 'ok', category: 'CHECK_BOUNCED', text: bounced.reason || 'چک برگشتی فعال' };
-      } else if (checkCategory) {
-        result.priorityAlert = {
-          status: (checkDataError || !watchUsable) ? 'error' : 'ok',
-          category: checkCategory, text: checkText
-        };
-      } else if (checkDataError || !watchUsable) {
-        result.priorityAlert = { status: 'error' };
-      } else {
-        result.priorityAlert = { status: 'ok', category: null };
-      }
-    } catch (eAlert) {
-      console.warn('Customer Quick View check alert unavailable', eAlert);
-      result.priorityAlert = { status: 'error' };
-    }
-
-    // Purchase-backed suggestions and latest reaction are derived from actual customer events.
-    try {
-      if (result.lastPurchase.status === 'error') throw new Error('Customer invoice history unavailable');
-      if (!Array.isArray(data.products)) throw new Error('Product catalog unavailable');
-      var products = data.products;
-      var productById = new Map();
-      products.forEach(function (p) { if (p && p.id != null) productById.set(p.id, p); });
-      var purchaseById = new Map();
-      validInvoices.forEach(function (inv) {
-        (Array.isArray(inv.items) ? inv.items : []).forEach(function (it) {
-          if (!it || it.productId == null || !(Number(it.qty) > 0)) return;
-          var cur = purchaseById.get(it.productId);
-          var ev = qvEventTime(inv.date, inv.time);
-          if (!ev) return;
-          var cmp = cur ? qvCompareEvents(ev, cur.event) : 1;
-          if (!cur || cmp > 0) {
-            var sameDayAmbiguity = !!(cur && cur.ambiguous && ev.key.slice(0, 10) === cur.event.key.slice(0, 10));
-            purchaseById.set(it.productId, {
-              event: ev, date: inv.date, productId: it.productId, ambiguous: sameDayAmbiguity
-            });
-          } else if (cmp === 0) {
-            cur.ambiguous = true;
-          }
-        });
-      });
-
-      var latestOfferById = new Map();
-      var customer = ctx && typeof ctx.customerById === 'function' ? ctx.customerById(cid) :
-        (data.customers || []).find(function (x) { return x && x.id === cid; });
-      (customer && Array.isArray(customer.visits) ? customer.visits : []).forEach(function (visit) {
-        if (!visit || !Array.isArray(visit.offeredProducts)) return;
-        var event = qvEventTime(visit.date, visit.time);
-        if (!event) return;
-        visit.offeredProducts.forEach(function (op) {
-          if (!op || op.productId == null) return;
-          var cur = latestOfferById.get(op.productId);
-          var cmp = cur ? qvCompareEvents(event, cur.event) : 1;
-          if (!cur || cmp > 0) {
-            var sameDayAmbiguity = !!(cur && cur.ambiguous && event.key.slice(0, 10) === cur.event.key.slice(0, 10));
-            latestOfferById.set(op.productId, {
-              event: event, date: visit.date, reaction: op.reaction,
-              reason: op.rejectionReason || null, stockSource: op.stockSource || null,
-              ambiguous: sameDayAmbiguity
-            });
-          } else if (cmp === 0) {
-            cur.ambiguous = true;
-          }
-        });
-      });
-
-      var suggested = [], toCheck = [];
-      var cycleMetrics = [], cycleHelperFailed = false;
-      try {
-        if (typeof _extractSkuRawMetrics === 'function') cycleMetrics = _extractSkuRawMetrics(cid, ctx) || [];
-      } catch (eCycleMetrics) {
-        cycleMetrics = [];
-        cycleHelperFailed = true;
-        console.warn('Customer product-cycle metrics unavailable', eCycleMetrics);
-      }
-      var cycleBuys = Object.create(null);
-      purchaseById.forEach(function (purchase, pid) { cycleBuys[pid] = purchase.date; });
-      var cyclePrecomputed = { metrics: cycleMetrics, buys: cycleBuys };
-      latestOfferById.forEach(function (offer, pid) {
-        if (offer.ambiguous || offer.reaction !== 'rejected') return;
-        var purchase = purchaseById.get(pid);
-        var purchaseOfferOrder = purchase
-          ? (purchase.ambiguous && purchase.event.key.slice(0, 10) === offer.event.key.slice(0, 10)
-            ? 0 : qvCompareEvents(purchase.event, offer.event))
-          : null;
-        if (purchase && purchaseOfferOrder > 0) return;
-        if (purchase && purchaseOfferOrder === 0) return;
-        var p = productById.get(pid);
-        if (!p || p.active === false) return;
-        var productName = qvProductName(p, pid);
-        if (!productName) return;
-        var BP = global.BagheriPresent;
-        var reason = '';
-        if (BP && offer.reason === 'still_stock' && offer.stockSource && typeof BP.stockSentence === 'function') {
-          reason = BP.stockSentence(offer.stockSource);
-        } else if (BP && typeof BP.reasonLabel === 'function') reason = BP.reasonLabel(offer.reason) || '';
-        var days = qvRelativeDays(offer.date);
-        toCheck.push({
-          productId: pid, name: productName, reason: reason,
-          date: offer.date, dateLabel: typeof faDate === 'function' ? faDate(offer.date) : String(offer.date),
-          daysAgo: days, relative: days == null ? '' : qvRelativeLabel(days), event: offer.event
-        });
-      });
-      toCheck.sort(function (a, b) {
-        var cmp = qvCompareEvents(b.event, a.event);
-        return cmp || String(b.productId).localeCompare(String(a.productId));
-      });
-
-      purchaseById.forEach(function (purchase, pid) {
-        if (latestOfferById.has(pid)) {
-          var offer = latestOfferById.get(pid);
-          if (offer.ambiguous) return;
-          var order = purchase
-            ? (purchase.ambiguous && purchase.event.key.slice(0, 10) === offer.event.key.slice(0, 10)
-              ? 0 : qvCompareEvents(purchase.event, offer.event))
-            : null;
-          if (offer.reaction === 'rejected' && (!purchase || order <= 0)) return;
-        }
-        var p = productById.get(pid);
-        if (!p || p.active === false) return;
-        var productName = qvProductName(p, pid);
-        if (!productName) return;
-        // stockQty is the canonical stock field used by the existing action engine.
-        if (typeof p.stockQty === 'number' && isFinite(p.stockQty) && p.stockQty <= 0) return;
-        var cycle = null;
-        var BPcycle = global.BagheriPresent;
-        if (BPcycle && typeof BPcycle.productPurchaseCycle === 'function') {
-          try { cycle = BPcycle.productPurchaseCycle(cid, pid, cyclePrecomputed); }
-          catch (eOneCycle) { cycle = null; cycleHelperFailed = true; }
-        }
-        if (cycle && (cycle.state === 'stock_out' || cycle.state === 'today_purchase')) return;
-        var days = qvRelativeDays(purchase.date);
-        suggested.push({
-          productId: pid, name: productName, date: purchase.date,
-          dateLabel: typeof faDate === 'function' ? faDate(purchase.date) : String(purchase.date),
-          daysAgo: days, relative: days == null ? '' : qvRelativeLabel(days),
-          cycleState: cycle && cycle.state ? cycle.state : null,
-          source: 'previous_purchase'
-        });
-      });
-      suggested.sort(function (a, b) {
-        var ar = a.cycleState === 'overdue' || a.cycleState === 'due_today' || a.cycleState === 'due_soon' ? 0 : 1;
-        var br = b.cycleState === 'overdue' || b.cycleState === 'due_today' || b.cycleState === 'due_soon' ? 0 : 1;
-        if (ar !== br) return ar - br;
-        var da = a.daysAgo == null ? Infinity : a.daysAgo;
-        var db = b.daysAgo == null ? Infinity : b.daysAgo;
-        return da - db;
-      });
-      if (cycleHelperFailed) console.warn('Customer product-cycle helper incomplete; previous-purchase candidates retained');
-      result.productsToCheck = toCheck.slice(0, 2);
-      var rejectedIds = new Set(result.productsToCheck.map(function (x) { return x.productId; }));
-      result.suggestedProducts = suggested.filter(function (x) { return !rejectedIds.has(x.productId); }).slice(0, 2);
-    } catch (eProducts) {
-      console.warn('Customer Quick View product summary unavailable', eProducts);
-      result.productsStatus = 'error';
-      result.suggestedProducts = [];
-      result.productsToCheck = [];
-    }
-
-    result.story = supplied.story || '';
-    return result;
   }
 
-  function openCustomerQuickView(cid) {
-    var c = (data.customers || []).find(function (x) { return x && x.id === cid; });
-    if (!c) return;
-    if (activeCustomerQuickView) activeCustomerQuickView.close(true);
+  /* ---- shared helpers (each has one job) ---- */
+  function qvDaysUntil(pre, iso) {            // + = future, 0 = today, − = past, null = unknown
+    return iso ? _behaviorDaysDiff(pre.today, String(iso).slice(0, 10)) : null;
+  }
+  // Sellable stock = what the sale gate (validateSaleAvailability) allows: BOTH stockQty and open FIFO layers.
+  // null/undefined stockQty = UNKNOWN (returns null), never zero.
+  function getSellableStock(product) {
+    if (!product || product.stockQty == null) return null;
+    var s = Number(product.stockQty);
+    if (!isFinite(s)) return null;
+    if (typeof fifoAvailableQty === 'function') s = Math.min(s, fifoAvailableQty(product.id));
+    return s;
+  }
+  function isOfferableProduct(product) {      // active AND (unknown stock OR stock > 0)
+    if (!product || product.active === false) return false;
+    var s = getSellableStock(product);
+    return s === null || s > 0;
+  }
+  function getRejectionText(reason, stockSource) {
+    var P = global.BagheriPresent || {};
+    if (reason === 'still_stock') {
+      var src = typeof P.stockShort === 'function' ? P.stockShort(stockSource) : '';
+      return src ? 'گفت ' + src : 'گفت هنوز موجودی دارد';
+    }
+    var label = typeof P.reasonLabel === 'function' ? P.reasonLabel(reason) : '';
+    return 'رد کرد' + (label ? ' — ' + label : '');
+  }
 
+  /* ---- the five outputs ---- */
+  function getLatestPurchase(pre) {
+    // «معتبر» = same rule customerBehavior uses for purchase days: dated invoice with total > 0.
+    var best = null;
+    pre.invoices.forEach(function (inv) {
+      if (!inv || !(inv.total > 0) || !parseISODateParts(inv.date)) return;
+      var d = String(inv.date).slice(0, 10);
+      var newer = !best || d > best.date ||
+        (d === best.date && String(inv.number || '').localeCompare(String(best.invoiceNumber || '')) > 0);
+      if (newer) best = { date: d, amount: inv.total, invoiceNumber: inv.number || null };
+    });
+    if (!best) return null;
+    var ds = _behaviorDaysDiff(best.date, pre.today);
+    best.daysSince = (ds != null && ds >= 0) ? ds : null;
+    return best;
+  }
+
+  function getPurchaseTiming(pre, lastPurchase) {
+    var P = global.BagheriPresent || {};
+    var b = pre.behavior;
+    if (!lastPurchase) return { state: 'none', text: 'خریدی ثبت نشده' };
+    var avg = b.avgDistinctIntervalDays;   // same-day invoices = ONE purchase (limited-history guard in calc.js)
+    var days = lastPurchase.daysSince;
+    if (!(b.purchaseDayCount >= QV_TIMING_MIN_PURCHASE_DAYS) || !(avg > 0) || days == null) {
+      return { state: 'insufficient', text: 'سابقهٔ کافی برای برآورد زمان خرید نداریم' };
+    }
+    var n = typeof P.n0 === 'function' ? P.n0(avg) : String(Math.round(avg));
+    if (days < avg * QV_TIMING_NEAR_RATIO) {
+      return { state: 'early', text: 'معمولاً حدود هر ' + n + ' روز خرید می‌کند؛ هنوز زود است' };
+    }
+    if (days < avg * QV_TIMING_DUE_RATIO) {
+      return { state: 'near', text: 'نزدیک زمان معمول خرید است (حدود هر ' + n + ' روز)' };
+    }
+    return { state: 'due', text: 'موعد احتمالی خرید رسیده است' };
+  }
+
+  function getPriorityAlert(pre) {
+    var P = global.BagheriPresent || {};
+    var fa = typeof P.n0 === 'function' ? P.n0 : function (v) { return String(v); };
+    var sumAmt = function (list) { return list.reduce(function (s, c) { return s + (Number(c.amount) || 0); }, 0); };
+    var amtText = function (list) { var t = sumAmt(list); return t > 0 ? ' — ' + toman(t) + ' ت' : ''; };
+
+    // 1) active bounced check (watchData = ACK-aware, exactly what Quick View used before)
+    var bouncedActive = (pre.watchData.activeConfirmed || []).some(function (s) { return s && s.category === 'CHECK_BOUNCED'; });
+    if (bouncedActive) {
+      var bounced = pre.checks.filter(function (c) { return c && c.status === 'bounced'; });
+      return { level: 'danger', kind: 'bounced_check',
+        text: 'چک برگشتی فعال' + (bounced.length > 1 ? ' (' + fa(bounced.length) + ' چک)' : '') + amtText(bounced) };
+    }
+    // 2) overdue, uncollected (same rule as PAYMENT_OVERDUE: pending + dueDate < today)
+    var pending = pre.checks.filter(function (c) { return c && c.status === 'pending' && qvDaysUntil(pre, c.dueDate) !== null; });
+    var overdue = pending.filter(function (c) { return qvDaysUntil(pre, c.dueDate) < 0; });
+    if (overdue.length) {
+      return { level: 'warning', kind: 'overdue_check',
+        text: fa(overdue.length) + ' چک سررسیدگذشته و وصول‌نشده' + amtText(overdue) };
+    }
+    // 3) due within 0..3 days
+    var soon = pending.filter(function (c) { var d = qvDaysUntil(pre, c.dueDate); return d >= 0 && d <= QV_CHECK_DUE_SOON_DAYS; });
+    if (soon.length) {
+      var nearest = Math.min.apply(null, soon.map(function (c) { return qvDaysUntil(pre, c.dueDate); }));
+      return { level: 'warning', kind: 'due_soon_check',
+        text: 'چک با سررسید ' + (nearest === 0 ? 'امروز' : fa(nearest) + ' روز دیگر') +
+          (soon.length > 1 ? ' (' + fa(soon.length) + ' چک)' : '') + amtText(soon) };
+    }
+    return null;
+  }
+
+  function getProductsToCheck(pre) {
+    var P = global.BagheriPresent || {};
+    var rel = typeof P.relDays === 'function' ? P.relDays : function () { return ''; };
+    var rows = [];
+    Object.keys(pre.lastOfferMap).forEach(function (pid) {
+      var of = pre.lastOfferMap[pid];                      // lastOfferMap = ONLY the latest reaction per product
+      if (!of || (of.reaction !== 'rejected' && of.reaction !== 'deferred')) return;   // accepted → not here
+      var product = pre.productById(pid);
+      if (!isOfferableProduct(product)) return;
+      var bought = pre.lastPurchaseMap[pid];
+      // Resolved only when the purchase is strictly AFTER the reaction day. Same-day order is unknown
+      // (invoices carry no time), so it stays listed — we do not claim it was resolved.
+      if (bought && String(bought).slice(0, 10) > String(of.date || '').slice(0, 10)) return;
+      var when = rel(of.date);
+      var cy = pre.cycleOf(pid);
+      var detail = (when ? when + ' ' : '') + (of.reaction === 'deferred' ? 'گفت بعداً تصمیم می‌گیرد' : getRejectionText(of.reason, of.stockSource));
+      rows.push({
+        productId: pid,
+        name: product.name || '',
+        kind: of.reaction,                                  // 'rejected' | 'deferred' (never merged)
+        // relevance to THIS visit: product's own cycle is due/overdue → first; then recency
+        relevance: (cy && (cy.state === 'due_today' || cy.state === 'overdue')) ? 0 : 1,
+        sortKey: of.key || '',
+        detail: detail,
+        text: (product.name || '') + ' — ' + detail
+      });
+    });
+    rows.sort(function (a, b) {
+      if (a.relevance !== b.relevance) return a.relevance - b.relevance;
+      return a.sortKey < b.sortKey ? 1 : (a.sortKey > b.sortKey ? -1 : 0);
+    });
+    // NOT capped here: eligibility is decided for every product; the display cap is applied by the caller.
+    return rows.map(function (r) { return { productId: r.productId, name: r.name, kind: r.kind, detail: r.detail, text: r.text }; });
+  }
+
+  // «پیشنهاد محتمل» = the purchase cycle (productPurchaseCycle, same helper as the visit form) is due today or overdue.
+  // For a grouped product (analysisGroupId) cycle, count and last date are the GROUP's, so the due date belongs to the
+  // group: at most ONE suggestion per group. Rejections are per product (never spread to siblings); the representative
+  // is the first eligible member: aggregation's representative SKU (most recent purchase event), then latest own purchase.
+  // Candidates = every product the customer bought; not due / unknown / thin history → not suggested; slots never padded.
+  function getSuggestedProducts(pre, excludePids) {
+    var P = global.BagheriPresent || {};
+    var rel = typeof P.relDays === 'function' ? P.relDays : function () { return ''; };
+    var n0 = typeof P.n0 === 'function' ? P.n0 : function (v) { return String(v); };
+    var skip = Object.create(null);
+    (excludePids || []).forEach(function (pid) { skip[pid] = true; });
+    var rows = [];
+    Object.keys(pre.lastPurchaseMap).forEach(function (pid) {
+      if (skip[pid]) return;
+      var product = pre.productById(pid);
+      if (!isOfferableProduct(product)) return;
+      var cy = pre.cycleOf(pid);
+      if (!cy || (cy.state !== 'due_today' && cy.state !== 'overdue')) return;
+      var when = rel(pre.lastPurchaseMap[pid]);
+      var grouped = !!cy.familyLevel;
+      rows.push({
+        productId: pid,
+        name: product.name || '',
+        groupKey: grouped && cy.familyId != null ? 'g:' + cy.familyId : 'p:' + pid,
+        isRepresentative: cy.representativeProductId === pid ? 1 : 0,
+        skuLastDate: String(pre.lastPurchaseMap[pid] || ''),
+        behind: cy.typicalCycle > 0 ? cy.daysOverdue / cy.typicalCycle : 0,   // lateness relative to its OWN cycle
+        purchaseCount: cy.purchaseCount || 0,                                   // history quality: tie-breaker only
+        daysOverdue: cy.daysOverdue || 0,
+        reasonText: grouped
+          ? 'موعد گروه تحلیلی این محصول: ' + (cy.state === 'overdue' ? 'حدود ' + n0(cy.daysOverdue) + ' روز از موعد معمول گذشته' : 'امروز موعد معمول است')
+          : (cy.state === 'overdue' ? 'حدود ' + n0(cy.daysOverdue) + ' روز از موعد معمول خرید گذشته' : 'امروز موعد معمول خرید است'),
+        lastPurchaseText: when ? (grouped ? 'آخرین خرید همین محصول: ' : 'آخرین خرید: ') + when : ''
+      });
+    });
+    rows.sort(function (a, b) {
+      return (b.behind - a.behind) || (b.purchaseCount - a.purchaseCount) || (b.daysOverdue - a.daysOverdue) ||
+        (b.isRepresentative - a.isRepresentative) || (a.skuLastDate < b.skuLastDate ? 1 : (a.skuLastDate > b.skuLastDate ? -1 : 0)) ||
+        String(a.name).localeCompare(String(b.name));
+    });
+    var seen = Object.create(null), out = [];
+    for (var i = 0; i < rows.length && out.length < QV_MAX_PRODUCTS; i++) {
+      if (seen[rows[i].groupKey]) continue;     // one suggestion per group
+      seen[rows[i].groupKey] = true;
+      out.push({ productId: rows[i].productId, name: rows[i].name, reasonText: rows[i].reasonText, lastPurchaseText: rows[i].lastPurchaseText });
+    }
+    return out;
+  }
+
+  function buildCustomerVisitSummary(cid, ctx, precomputed) {
+    var summary = { lastPurchase: null, purchaseTiming: null, priorityAlert: null, suggestedProducts: [], productsToCheck: [] };
+    var pre = precomputed || qvSafe(function () { return collectVisitSummaryInputs(cid, ctx); }, null);
+    if (!pre) return summary;
+    summary.lastPurchase = qvSafe(function () { return getLatestPurchase(pre); }, null);
+    summary.purchaseTiming = qvSafe(function () { return getPurchaseTiming(pre, summary.lastPurchase); }, null);
+    summary.priorityAlert = qvSafe(function () { return getPriorityAlert(pre); }, null);
+    var allToCheck = qvSafe(function () { return getProductsToCheck(pre); }, []);
+    // A product lives in ONE list: every unresolved rejection/deferral (not just the 2 displayed) is kept out of «پیشنهاد».
+    var checkIds = allToCheck.map(function (p) { return p.productId; });
+    summary.productsToCheck = allToCheck.slice(0, QV_MAX_PRODUCTS);   // display cap only; eligibility above used ALL
+    summary.suggestedProducts = qvSafe(function () { return getSuggestedProducts(pre, checkIds); }, []);
+    return summary;
+  }
+
+  /* ---- rendering (grouped boxes; tokens/rules in visual-grammar-pages.css) ---- */
+  function qvPurchaseHtml(s) {
+    var P = global.BagheriPresent || {};
+    var lp = s.lastPurchase, t = s.purchaseTiming;
+    if (!lp && !(t && t.state === 'none')) return '';
+    var rel = lp && typeof P.relDays === 'function' ? P.relDays(lp.date) : '';
+    var main = lp ? '<div class="bp-qv-main">' + (rel ? esc(rel) + ' · ' : '') + toman(lp.amount) + ' ت</div>' : '';
+    var sub = lp
+      ? '<div class="bp-qv-sub">' + esc(faDate(lp.date)) + (lp.invoiceNumber ? ' · فاکتور ' + esc(lp.invoiceNumber) : '') + '</div>'
+      : '';
+    var timing = t ? '<div class="bp-qv-timing is-' + esc(t.state) + '">' + esc(t.text) + '</div>' : '';
+    return '<section class="bp-qv-group"><div class="bp-qv-section-label">آخرین خرید</div>' + main + sub + timing + '</section>';
+  }
+  function qvProductsHtml(s) {
+    var out = '';
+    if (s.suggestedProducts.length) {
+      out += '<section class="bp-qv-section"><div class="bp-qv-section-label">پیشنهاد محتمل</div>' + s.suggestedProducts.map(function (p) {
+        return '<div class="bp-qv-item"><div class="bp-qv-item-name">' + esc(p.name) + '</div>' +
+          '<div class="bp-qv-item-sub">' + esc(p.reasonText) + (p.lastPurchaseText ? ' · ' + esc(p.lastPurchaseText) : '') + '</div></div>';
+      }).join('') + '</section>';
+    }
+    if (s.productsToCheck.length) {
+      out += '<section class="bp-qv-section"><div class="bp-qv-section-label">قبل از پیشنهاد بررسی کن</div>' + s.productsToCheck.map(function (p) {
+        return '<div class="bp-qv-item is-check is-' + esc(p.kind) + '"><div class="bp-qv-item-name">' + esc(p.name) +
+          (p.kind === 'deferred' ? '<span class="bp-qv-tag">پیگیری پیشنهاد قبلی</span>' : '') + '</div>' +
+          '<div class="bp-qv-item-sub">' + esc(p.detail) + '</div></div>';
+      }).join('') + '</section>';
+    }
+    return out;
+  }
+
+  /* Central quick view for the Customers list. Presentation-only: it reuses
+     the frozen Priority/Watch/Balance outputs and existing action APIs. */
+  function openCustomerQuickView(cid) {
     var ctx = typeof createComputationContext === 'function'
       ? createComputationContext({ data: data })
       : { aggregatePairMapCache: Object.create(null) };
-    var totals = null, financeStatus = 'ok';
-    try {
-      totals = typeof customerTotals === 'function' ? customerTotals(cid, ctx) : null;
-      if (!totals || typeof totals.balance !== 'number' || !isFinite(totals.balance)) financeStatus = 'unknown';
-    } catch (eTotals) { financeStatus = 'error'; console.warn('Customer Quick View balance unavailable', eTotals); }
-    var priority = null, story = '', priorityStatus = 'unknown';
-    try {
-      priority = typeof calculateCustomerPriority === 'function' ? calculateCustomerPriority(cid, { ctx: ctx }) : null;
-      if (priority) priorityStatus = 'ok';
-      story = priority && priority.customerStory && priority.customerStory.summary ? priority.customerStory.summary : '';
-    } catch (ePriority) { console.warn('Customer Quick View priority unavailable', ePriority); }
-    var watchData = null;
-    try { watchData = loadWatchData(cid, ctx); } catch (eWatch) { watchData = null; console.warn('Customer Quick View Watch data unavailable', eWatch); }
-    var summary = buildCustomerVisitSummary(cid, ctx, { watchData: watchData, story: story });
-
+    var priority = null;
+    try { priority = typeof calculateCustomerPriority === 'function' ? calculateCustomerPriority(cid, { ctx: ctx }) : null; } catch (e) { priority = null; }
+    var pre = collectVisitSummaryInputs(cid, ctx);   // customer + behavior + invoices + checks + watchData: ONE read
+    if (!pre) return;
+    var c = pre.customer;
+    var summary = buildCustomerVisitSummary(cid, ctx, pre);
+    var totals = customerTotals(cid, ctx) || { balance: 0 };
+    var story = priority && priority.customerStory && priority.customerStory.summary ? priority.customerStory.summary : '';
     var riskLevel = priority ? priority.riskLevel : null;
-    var health = 'وضعیت نامشخص';
-    try {
-      health = priorityStatus === 'ok' && typeof getRiskBadge === 'function'
-        ? (getRiskBadge(riskLevel).label || 'وضعیت عادی') : 'وضعیت نامشخص';
-    } catch (eHealth) { console.warn('Customer Quick View risk badge unavailable', eHealth); }
+    var health = (typeof getRiskBadge === 'function' ? getRiskBadge(riskLevel).label : '') || 'وضعیت عادی';
+
+    // Recommended action (same calculateCustomerAction the Detail page and Dashboard queue use).
+    // Signature: calculateCustomerAction(cid, precomputedPriority, { ctx }).
     var recommendedAction = null;
     try {
       if (typeof calculateCustomerAction === 'function') {
         var qa = calculateCustomerAction(cid, priority, { ctx: ctx });
-        if (qa && qa.actionType && qa.actionType !== 'no_action') recommendedAction = qa;
+        recommendedAction = (qa && qa.actionType !== 'no_action' && qa.action) ? qa : null;
       }
-    } catch (eAct) { recommendedAction = null; console.warn('Customer Quick View action unavailable', eAct); }
+    } catch (eAct) { recommendedAction = null; }
 
-    var recType = recommendedAction && recommendedAction.actionType;
-    var primaryAction = (recType === 'visit' || recType === 'follow_up') ? 'visit' :
-      (recType === 'payment_followup' ? 'payment' : (recType === 'invoice' ? 'invoice' : 'visit'));
-    var hasDedicatedAction = recType === 'visit' || recType === 'follow_up' ||
-      recType === 'payment_followup' || recType === 'invoice';
-    var hintText = recommendedAction && typeof recommendedAction.action === 'string' ? recommendedAction.action.trim() : '';
-    var hintHtml = !hasDedicatedAction && hintText
-      ? '<div class="bp-qv-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' + esc(hintText) + '</div>' : '';
+    // When the recommendation IS "register a visit" / "register a payment", the matching fixed button
+    // becomes the primary one (no duplicate button, no hint). Only other actions get a one-line hint.
+    var recMatchesVisit = !!(recommendedAction && (recommendedAction.actionType === 'visit' || recommendedAction.actionType === 'follow_up'));
+    var recMatchesPayment = !!(recommendedAction && recommendedAction.actionType === 'payment_followup');
+    var recommendedHintHtml = (recommendedAction && QV_HINT_HIDDEN_ACTION_TYPES.indexOf(recommendedAction.actionType) < 0)
+      ? '<div class="bp-qv-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' + esc(recommendedAction.action) + '</div>'
+      : '';
 
-    var alertHtml = '';
-    if (summary.priorityAlert.category) {
-      var alertTone = summary.priorityAlert.category === 'CHECK_BOUNCED' ? 'is-danger' : 'is-warning';
-      alertHtml = '<div class="bp-qv-alert ' + alertTone + '">' + esc(summary.priorityAlert.text) + '</div>' +
-        (summary.priorityAlert.status !== 'ok' ? '<div class="bp-qv-alert is-unknown">وضعیت کامل هشدارها مشخص نیست</div>' : '');
-    } else if (summary.priorityAlert.status === 'error' || summary.priorityAlert.status === 'unknown') {
-      alertHtml = '<div class="bp-qv-alert is-unknown">وضعیت هشدارها مشخص نیست</div>';
-    }
+    var showStory = !!story;   // shown whenever it exists; CSS clamps it to 2 lines
 
-    var lastHtml = '';
-    if (summary.lastPurchase.status === 'none') lastHtml = '<div class="bp-qv-line">خریدی ثبت نشده</div>';
-    else if (summary.lastPurchase.status === 'error' || summary.lastPurchase.status === 'unknown') {
-      lastHtml = '<div class="bp-qv-line is-muted">اطلاعات آخرین خرید در دسترس نیست</div>';
-    } else {
-      var lp = summary.lastPurchase;
-      var exactPurchaseDate = typeof faDate === 'function' ? faDate(lp.date) : lp.date;
-      var amount = lp.total == null ? '' : (typeof toman === 'function' ? toman(lp.total) : String(lp.total)) + ' تومان';
-      var invoiceSubline = (lp.relative ? exactPurchaseDate : '') +
-        (lp.number != null && lp.number !== '' ? (lp.relative ? ' · ' : '') + 'فاکتور ' + lp.number : '');
-      lastHtml = '<div class="bp-qv-line"><strong>آخرین خرید:</strong> ' +
-        esc(lp.relative || exactPurchaseDate) + (amount ? ' · ' + esc(amount) : '') + '</div>' +
-        (invoiceSubline ? '<div class="bp-qv-subline">' + esc(invoiceSubline) + '</div>' : '');
-    }
-
-    var timingHtml = '<div class="bp-qv-timing"><div class="bp-qv-line">' + esc(summary.purchaseTiming.text) + '</div>' +
-      (summary.purchaseTiming.detail ? '<div class="bp-qv-subline">' + esc(summary.purchaseTiming.detail) + '</div>' : '') + '</div>';
-    function productRows(items, type) {
-      if (summary.productsStatus === 'error') return '<div class="bp-qv-empty">اطلاعات پیشنهاد محصولات در دسترس نیست</div>';
-      if (!items.length) return '<div class="bp-qv-empty">مورد قابل اتکایی ثبت نشده</div>';
-      return '<ul class="bp-qv-product-list">' + items.map(function (p) {
-        var detail = type === 'check'
-          ? (p.reason ? p.reason : 'دلیل ثبت نشده') + ((p.relative || p.dateLabel) ? ' · ' + (p.relative || p.dateLabel) : '')
-          : 'از خریدهای قبلی' + ((p.relative || p.dateLabel) ? ' · ' + (p.relative || p.dateLabel) : '');
-        return '<li><strong>' + esc(p.name || 'محصول') + '</strong><span>' + esc(detail) + '</span></li>';
-      }).join('') + '</ul>';
-    }
-    var suggestionHtml =
-      '<section class="bp-qv-section bp-qv-products is-suggest"><div class="bp-qv-section-label">پیشنهاد محتمل</div>' +
-      productRows(summary.suggestedProducts, 'suggest') + '</section>' +
-      '<section class="bp-qv-section bp-qv-products is-check"><div class="bp-qv-section-label">قبل از پیشنهاد بررسی کن</div>' +
-      productRows(summary.productsToCheck, 'check') + '</section>';
-    var storyHtml = summary.story
-      ? '<div class="bp-qv-story"><div class="bp-qv-section-label">خلاصه وضعیت</div><div class="bp-qv-story-text">' + esc(summary.story) + '</div></div>' : '';
+    var alertHtml = summary.priorityAlert
+      ? '<div class="bp-qv-alert is-' + esc(summary.priorityAlert.level) + '" role="alert">' + esc(summary.priorityAlert.text) + '</div>'
+      : '';
 
     function qvBtn(action, label) {
-      return '<button type="button" class="btn ' + (primaryAction === action ? 'primary' : 'secondary') +
-        '" data-action="' + action + '">' + label + '</button>';
+      var primary;
+      if (recMatchesVisit) primary = (action === 'visit');
+      else if (recMatchesPayment) primary = (action === 'payment');
+      else primary = (action === 'visit');
+      return '<button type="button" class="btn ' + (primary ? 'primary' : 'secondary') + '" data-action="' + action + '">' + label + '</button>';
     }
+
     var overlay = document.createElement('div');
     overlay.className = 'bp-qv-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', 'خلاصه پیش از ویزیت');
     overlay.innerHTML =
       '<div class="bp-qv-card" role="document">' +
-        '<div class="bp-qv-handle" aria-hidden="true"></div>' +
         '<button type="button" class="bp-qv-close" aria-label="بستن">×</button>' +
         '<div class="bp-qv-head">' +
           '<div class="bp-qv-name">' + esc(c.name || 'مشتری') + '</div>' +
-          (c.ownerName ? '<div class="bp-qv-meta">' + esc(c.ownerName) + '</div>' : '') +
-          (c.phone ? '<div class="bp-qv-meta">' + esc(c.phone) + '</div>' : '') +
-          (financeStatus === 'ok' ? '<div class="bp-qv-balance is-prominent ' + (totals.balance > 0 ? 'is-debt' : '') + '">' +
-            '<span class="bp-qv-balance-label">' + esc(balanceStatusWord(totals.balance)) + '</span>' +
-            (totals.balance !== 0 ? '<span class="bp-qv-balance-amount">' + toman(Math.abs(totals.balance)) + ' تومان</span>' : '') +
-          '</div>' : '<div class="bp-qv-finance-unknown">مانده حساب: اطلاعات مالی نامشخص است</div>') +
-          '<div class="bp-qv-health radar-risk-' + esc(riskLevel || 'normal') + '">' + esc(health) + '</div>' +
+          ((c.ownerName || c.phone) ? '<div class="bp-qv-meta">' + [c.ownerName, c.phone].filter(Boolean).map(esc).join(' · ') + '</div>' : '') +
+          '<div class="bp-qv-status">' +
+            '<div class="bp-qv-balance is-prominent ' + (totals.balance > 0 ? 'is-debt' : '') + '">' +
+              '<span class="bp-qv-balance-label">' + esc(balanceStatusWord(totals.balance)) + '</span>' +
+              (totals.balance !== 0 ? '<span class="bp-qv-balance-amount">' + toman(Math.abs(totals.balance)) + ' ت</span>' : '') +
+            '</div>' +
+            '<div class="bp-qv-health radar-risk-' + esc(riskLevel || 'normal') + '">' + esc(health) + '</div>' +
+          '</div>' +
         '</div>' +
         alertHtml +
-        '<section class="bp-qv-section bp-qv-purchase"><div class="bp-qv-section-label">آخرین خرید و زمان خرید احتمالی</div>' + lastHtml + timingHtml + '</section>' +
-        suggestionHtml + storyHtml + hintHtml +
-        '<div class="bp-qv-actions">' +
-          qvBtn('visit', 'ثبت ویزیت') + qvBtn('invoice', 'ثبت فاکتور') + qvBtn('payment', 'ثبت پرداخت') +
+        qvPurchaseHtml(summary) +
+        qvProductsHtml(summary) +
+        (showStory ? '<div class="bp-qv-story"><div class="bp-qv-section-label">خلاصه وضعیت</div><div class="bp-qv-story-text">' + esc(story) + '</div></div>' : '') +
+        recommendedHintHtml +
+        '<div class="bp-qv-footer">' +
+          '<div class="bp-qv-actions">' +
+            qvBtn('visit', 'ثبت ویزیت') +
+            qvBtn('invoice', 'ثبت فاکتور') +
+            qvBtn('payment', 'ثبت پرداخت') +
+          '</div>' +
+          '<button type="button" class="bp-qv-full">جزئیات بیشتر ›</button>' +
         '</div>' +
-        '<button type="button" class="bp-qv-full">جزئیات بیشتر ›</button>' +
       '</div>';
-
     var modalRoot = document.getElementById('modalRoot');
     if (!modalRoot) return;
-    // Snapshot the underlying page state before replacing modal DOM or locking scroll.
-    var previousFocus = document.activeElement;
-    var previousScrollX = global.scrollX || 0, previousScrollY = global.scrollY || global.pageYOffset || 0;
     modalRoot.innerHTML = '';
     modalRoot.appendChild(overlay);
-    try { document.body.classList.add('modal-open'); } catch (_e) {}
-    var closed = false, cleaned = false, closeTimer = null, startY = null;
+    try { document.body.classList.add('modal-open'); } catch(_e) {}
+
     var card = overlay.querySelector('.bp-qv-card');
-    var handle = overlay.querySelector('.bp-qv-handle');
-    function cleanup() {
-      if (cleaned) return;
-      cleaned = true;
-      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-      document.removeEventListener('keydown', onKeydown);
-      overlay.removeEventListener('click', onClick);
-      if (handle) {
-        handle.removeEventListener('touchstart', onTouchStart);
-        handle.removeEventListener('touchend', onTouchEnd);
-        handle.removeEventListener('touchcancel', onTouchCancel);
-      }
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      var anotherModalRemains = modalRoot.childElementCount > 0;
-      if (!anotherModalRemains) {
-        try { document.body.classList.remove('modal-open'); } catch (_e) {}
-      }
-      if (activeCustomerQuickView && activeCustomerQuickView.overlay === overlay) activeCustomerQuickView = null;
-      if (!anotherModalRemains) {
-        if (previousFocus && typeof previousFocus.focus === 'function' && document.contains(previousFocus)) {
-          try { previousFocus.focus({ preventScroll: true }); } catch (_focusError) { previousFocus.focus(); }
-        }
-        if (typeof global.scrollTo === 'function') {
-          try { global.scrollTo(previousScrollX, previousScrollY); } catch (_scrollError) {}
-        }
-      }
-    }
-    function close(immediate, afterClose) {
-      if (closed) { if (immediate) cleanup(); return; }
+    var previousFocus = document.activeElement;
+    var closed = false;
+    function close() {
+      if (closed) return;
       closed = true;
       overlay.classList.add('is-closing');
-      if (immediate) {
-        cleanup();
-        if (typeof afterClose === 'function') afterClose();
-      } else {
-        closeTimer = setTimeout(function () {
-          cleanup();
-          if (typeof afterClose === 'function') afterClose();
-        }, 180);
-      }
+      setTimeout(function () {
+        try { document.body.classList.remove('modal-open'); } catch(_e) {}
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+      }, 180);
+      document.removeEventListener('keydown', onKeydown);
     }
-    function onKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); close(false); } }
-    function onClick(e) {
-      if (e.target === overlay || e.target.closest('.bp-qv-close')) { e.preventDefault(); close(false); return; }
+    function onKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || e.target.closest('.bp-qv-close')) { e.preventDefault(); close(); return; }
       var action = e.target.closest('[data-action]');
       if (action) {
         e.preventDefault();
         var type = action.getAttribute('data-action');
-        close(false, function () {
+        close();
+        setTimeout(function () {
           if (type === 'visit' && typeof openAddVisit === 'function') openAddVisit(cid);
           else if (type === 'invoice' && typeof openAddInvoice === 'function') openAddInvoice(cid);
           else if (type === 'payment' && typeof openAddTransaction === 'function') openAddTransaction(cid);
-        });
+        }, 185);
         return;
       }
-      if (e.target.closest('.bp-qv-full')) {
+      if (e.target.closest('.bp-qv-full') || e.target.closest('.bp-topic')) {
         e.preventDefault();
-        close(false, function () {
-          if (typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', { id: cid });
-        });
+        close();
+        setTimeout(function () { if (typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', { id: cid }); }, 185);
       }
-    }
-    function onTouchStart(e) { if (e.touches && e.touches[0]) startY = e.touches[0].clientY; }
-    function onTouchEnd(e) {
-      if (startY == null || !e.changedTouches || !e.changedTouches[0]) { startY = null; return; }
-      if (e.changedTouches[0].clientY - startY > 70) close(false);
-      startY = null;
-    }
-    function onTouchCancel() { startY = null; }
-    overlay.addEventListener('click', onClick);
+    });
     document.addEventListener('keydown', onKeydown);
-    if (handle) {
-      handle.addEventListener('touchstart', onTouchStart, { passive: true });
-      handle.addEventListener('touchend', onTouchEnd, { passive: true });
-      handle.addEventListener('touchcancel', onTouchCancel, { passive: true });
-    }
-    activeCustomerQuickView = { overlay: overlay, close: close };
-    requestAnimationFrame(function () { if (!closed) overlay.classList.add('is-open'); });
+    requestAnimationFrame(function () { overlay.classList.add('is-open'); });
     var closeBtn = overlay.querySelector('.bp-qv-close');
     if (closeBtn) closeBtn.focus();
+
+    // Lightweight downward swipe-to-close; no document-level gesture handling.
+    var startY = null;
+    if (card) {
+      // Only a swipe that starts AND ends with the content at the top may close; scrolling back up must not.
+      card.addEventListener('touchstart', function (e) { startY = (e.touches && e.touches[0] && card.scrollTop <= 0) ? e.touches[0].clientY : null; }, { passive: true });
+      card.addEventListener('touchend', function (e) {
+        if (startY == null || !e.changedTouches || !e.changedTouches[0]) return;
+        if (card.scrollTop <= 0 && e.changedTouches[0].clientY - startY > 70) close();
+        startY = null;
+      }, { passive: true });
+    }
   }
 
   function mount(root, params) {
