@@ -40,7 +40,7 @@
    entry. It was already in PRECACHE_URLS; no asset list, route, or business
    logic otherwise changed.) */
 /* CHANGED: v98 -> v99 (Soft iOS look: CSS-only visual refresh — tokens in visual-grammar.css and a new layer at the end of visual-grammar-pages.css. No asset list, route or business logic changed.) */
-const CACHE_NAME = 'baqeri-shell-v99';
+const CACHE_NAME = 'baqeri-shell-v100';
 
 /** App Shell — paths relative to this SW (same directory as index.html). */
 const PRECACHE_URLS = [
