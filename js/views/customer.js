@@ -395,12 +395,12 @@
 
   /* Reads existing Truth only (same sources the page used before). */
   function loadWatchData(cid, ctx) {
-    var out = { activeConfirmed: [], occs: [] };
-    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function' && typeof getActiveWatchOccurrences !== 'function') return out;
+    var out = { activeConfirmed: [], occs: [], status: 'ok', errors: [] };
+    if (typeof extractCustomerSignals !== 'function' && typeof extractWatchObservations !== 'function' && typeof getActiveWatchOccurrences !== 'function') { out.status = 'unavailable'; return out; }
 
     var confirmed = [];
     if (typeof extractCustomerSignals === 'function') {
-      try { confirmed = extractCustomerSignals(cid, ctx) || []; } catch (e) { confirmed = []; }
+      try { confirmed = extractCustomerSignals(cid, ctx) || []; } catch (e) { confirmed = []; out.errors.push('signals'); }
     }
     // ACK: attach the seller's live decisions and drop the signals a decision suppresses, so
     // Focus / Story match Risk and Action. Applied to COPIES: the memoized signal objects are shared
@@ -412,14 +412,14 @@
         confirmed = confirmed.map(_freshSignalCopy);
         applyAcksToSignals(confirmed, getActiveAcksForCustomer(cid));
       }
-    } catch (eAckW) { /* fail-open */ }
+    } catch (eAckW) { out.errors.push('ack'); }
     out.activeConfirmed = confirmed.filter(function (s) {
       return s && s.status === 'active' && s.ackActionEffect !== 'suppress';
     });
 
     var occs = [];
     if (typeof getActiveWatchOccurrences === 'function') {
-      try { occs = getActiveWatchOccurrences(cid) || []; } catch (eOcc) { occs = []; }
+      try { occs = getActiveWatchOccurrences(cid) || []; } catch (eOcc) { occs = []; out.errors.push('occurrences'); }
     }
     // Fallback to raw generation if lifecycle absent. Guarded against inactive customers
     // (W-BUG-02): this path bypasses reconcileWatchLifecycle's active-customer check.
@@ -432,7 +432,7 @@
       try {
         var raw = extractWatchObservations(cid, confirmed, ctx) || [];
         if (typeof filterSuppressedWatchObservations === 'function') {
-          try { raw = filterSuppressedWatchObservations(cid, raw, ctx) || []; } catch (eF) { /* fail-open */ }
+          try { raw = filterSuppressedWatchObservations(cid, raw, ctx) || []; } catch (eF) { out.errors.push('suppression'); }
         }
         occs = raw.map(function (w) {
           return {
@@ -449,8 +449,9 @@
             status: 'active'
           };
         });
-      } catch (e2) { occs = []; }
+      } catch (e2) { occs = []; out.errors.push('observations'); }
     }
+    if (out.errors.length) { out.status = 'error'; console.warn('Customer Watch data incomplete', out.errors); }
     // Presentation-level de-duplication (new array; source objects untouched).
     var seen = Object.create(null);
     out.occs = occs.filter(function (o) {
@@ -1495,142 +1496,576 @@
   }
 
 
-  /* Central quick view for the Customers list. Presentation-only: it reuses
-     the frozen Priority/Watch/Balance outputs and existing action APIs. */
+  /* Pre-visit summary: derives a compact, read-only snapshot from the same
+     execution-scoped context and frozen Priority/Watch APIs used elsewhere. */
+  var activeCustomerQuickView = null;
+  var QV_TIMING_NOT_DUE = 0.7;
+  var QV_TIMING_DUE = 1;
+
+  function qvValidISODate(value) {
+    if (value == null || value === '') return false;
+    var raw = String(value).slice(0, 10);
+    if (typeof parseISODateParts === 'function') {
+      try {
+        var p = parseISODateParts(raw);
+        if (!p) return false;
+        var d = new Date(p.y, p.m - 1, p.d);
+        return d.getFullYear() === p.y && d.getMonth() === p.m - 1 && d.getDate() === p.d;
+      } catch (eDate) { return false; }
+    }
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+    if (!m) return false;
+    var dt = new Date(+m[1], +m[2] - 1, +m[3]);
+    return dt.getFullYear() === +m[1] && dt.getMonth() === +m[2] - 1 && dt.getDate() === +m[3];
+  }
+
+  function qvDateKey(value) {
+    return qvValidISODate(value) ? String(value).slice(0, 10) : null;
+  }
+
+  function qvRelativeDays(date) {
+    var d = qvDateKey(date);
+    if (!d) return null;
+    if (typeof daysAgo === 'function') {
+      try {
+        var n = daysAgo(d);
+        return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null;
+      } catch (eDays) { return null; }
+    }
+    var today = typeof todayISO === 'function' ? qvDateKey(todayISO()) : null;
+    if (!today) return null;
+    var a = new Date(d + 'T00:00:00').getTime();
+    var b = new Date(today + 'T00:00:00').getTime();
+    return isFinite(a) && isFinite(b) ? Math.round((b - a) / 86400000) : null;
+  }
+
+  function qvRelativeLabel(days) {
+    if (days == null) return '';
+    if (days === 0) return 'امروز';
+    if (days === 1) return 'دیروز';
+    return (typeof BagheriPresent !== 'undefined' && BagheriPresent.n0
+      ? BagheriPresent.n0(days) : String(days)) + ' روز پیش';
+  }
+
+  function qvInvoiceValid(inv) {
+    if (!inv || !qvValidISODate(inv.date)) return false;
+    // Persisted invoice rows are the project's invoice truth; deletion removes the row.
+    // The current invoice model has no draft/cancelled lifecycle status contract.
+    return true;
+  }
+
+  function qvInvoiceOrder(a, b) {
+    var byDate = String(b.date).slice(0, 10).localeCompare(String(a.date).slice(0, 10));
+    if (byDate) return byDate;
+    var an = a.number == null ? '' : String(a.number);
+    var bn = b.number == null ? '' : String(b.number);
+    return bn.localeCompare(an, undefined, { numeric: true });
+  }
+
+  function qvEventTime(date, time) {
+    var d = qvDateKey(date);
+    if (!d) return null;
+    if (time == null || time === '') return { key: d, hasTime: false, timeState: 'missing' };
+    var t = String(time);
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(t)) return { key: d, hasTime: false, timeState: 'invalid' };
+    var normalizedTime = t.length === 5 ? t + ':00' : t;
+    return { key: d + 'T' + normalizedTime, hasTime: true, timeState: 'valid' };
+  }
+
+  function qvCompareEvents(a, b) {
+    if (a.key.slice(0, 10) !== b.key.slice(0, 10)) return a.key < b.key ? -1 : 1;
+    if (a.hasTime && b.hasTime && a.key !== b.key) return a.key < b.key ? -1 : 1;
+    return 0; // same calendar day without two comparable clock times
+  }
+
+  function qvProductName(product, id) {
+    if (product && product.name) return product.name;
+    var BP = global.BagheriPresent;
+    return BP && typeof BP.pname === 'function' ? BP.pname(id, '') : '';
+  }
+
+  function buildCustomerVisitSummary(cid, ctx, supplied) {
+    supplied = supplied || {};
+    var result = {
+      status: 'ok', lastPurchase: { status: 'unknown' },
+      purchaseTiming: { status: 'unknown', text: 'سابقه کافی برای برآورد زمان خرید نداریم' },
+      priorityAlert: { status: 'unknown' },
+      suggestedProducts: [], productsToCheck: [], productsStatus: 'ok', story: ''
+    };
+    var invoices;
+    try {
+      invoices = Array.isArray(supplied.invoices) ? supplied.invoices :
+        (typeof customerInvoices === 'function' ? customerInvoices(cid, ctx) : null);
+      if (!Array.isArray(invoices)) throw new Error('customerInvoices unavailable');
+    } catch (eInv) {
+      console.warn('Customer Quick View invoice history unavailable', eInv);
+      result.lastPurchase = { status: 'error' };
+      result.productsStatus = 'error';
+      result.purchaseTiming = { status: 'unknown', text: 'سابقه کافی برای برآورد زمان خرید نداریم' };
+      invoices = [];
+    }
+
+    var validInvoices = invoices.filter(function (inv) {
+      return inv && inv.customerId === cid && qvInvoiceValid(inv);
+    }).sort(qvInvoiceOrder);
+    if (result.lastPurchase.status !== 'error') {
+      if (!validInvoices.length) {
+        result.lastPurchase = { status: invoices.length ? 'unknown' : 'none' };
+      } else {
+        var last = validInvoices[0], ago = qvRelativeDays(last.date);
+        result.lastPurchase = {
+          status: 'ok', date: String(last.date).slice(0, 10), number: last.number,
+          total: typeof last.total === 'number' && isFinite(last.total) ? last.total : null, daysAgo: ago,
+          relative: ago == null ? '' : qvRelativeLabel(ago)
+        };
+      }
+    }
+
+    try {
+      var behavior = typeof customerBehavior === 'function' ? customerBehavior(cid, ctx) : null;
+      var avg = behavior && behavior.avgIntervalDays;
+      var lastDate = result.lastPurchase.status === 'ok' ? result.lastPurchase.date : null;
+      var since = lastDate ? qvRelativeDays(lastDate) : null;
+      if (validInvoices.length >= 3 && typeof avg === 'number' && isFinite(avg) && avg > 0 && since != null) {
+        var ratio = since / avg;
+        var state = ratio < QV_TIMING_NOT_DUE ? 'not_due' : (ratio < QV_TIMING_DUE ? 'near' : 'due');
+        var cycleText = Math.round(avg);
+        var present = global.BagheriPresent;
+        var cycleFa = present && typeof present.n0 === 'function' ? present.n0(cycleText) : String(cycleText);
+        var sinceFa = present && typeof present.n0 === 'function' ? present.n0(since) : String(since);
+        result.purchaseTiming = {
+          status: 'ok', state: state, ratio: ratio, avgIntervalDays: avg, daysSinceLast: since,
+          text: state === 'not_due' ? 'هنوز تا زمان احتمالی خرید فاصله دارد' :
+            (state === 'near' ? 'به زمان احتمالی خرید نزدیک شده' : 'زمان احتمالی خرید رسیده یا گذشته'),
+          detail: 'چرخه تقریبی ' + cycleFa + ' روز · ' + sinceFa + ' روز از خرید'
+        };
+      }
+    } catch (eTiming) { console.warn('Customer Quick View timing unavailable', eTiming); }
+
+    try {
+      var watch = supplied.watchData || loadWatchData(cid, ctx);
+      var watchUsable = !!watch && watch.status !== 'unavailable' && watch.status !== 'error' &&
+        !(Array.isArray(watch.errors) && watch.errors.length);
+      var confirmed = watch && Array.isArray(watch.activeConfirmed) ? watch.activeConfirmed : [];
+      // CHECK_BOUNCED is an immediate, account-level signal. Keep it on the
+      // official Watch/ACK path; raw check rows must never bypass that lifecycle.
+      var bounced = confirmed.find(function (signal) {
+        return signal && signal.category === 'CHECK_BOUNCED' && signal.status === 'active' &&
+          signal.ackActionEffect !== 'suppress';
+      });
+
+      var checkRows = null, checkDataError = false, overdueCheck = false, dueSoonCheck = false;
+      if (!Array.isArray(data.checks)) {
+        checkDataError = true;
+      } else {
+        checkRows = typeof customerChecks === 'function'
+          ? customerChecks(cid, ctx)
+          : data.checks.filter(function (check) { return check && check.customerId === cid; });
+        if (!Array.isArray(checkRows)) checkDataError = true;
+      }
+
+      var today = typeof todayISO === 'function' ? qvDateKey(todayISO()) : null;
+      if (!today) checkDataError = true;
+      if (Array.isArray(checkRows) && today) {
+        checkRows.forEach(function (check) {
+          if (!check || check.customerId !== cid || check.status !== 'pending') return;
+          var amountValid = check.amount != null && check.amount !== '' &&
+            Number.isFinite(Number(check.amount)) && Number(check.amount) > 0;
+          if (!qvValidISODate(check.dueDate) || !amountValid) {
+            checkDataError = true;
+            return;
+          }
+          var delta = Math.round((new Date(String(check.dueDate).slice(0, 10) + 'T00:00:00').getTime() -
+            new Date(today + 'T00:00:00').getTime()) / 86400000);
+          if (!isFinite(delta)) { checkDataError = true; return; }
+          if (delta < 0) overdueCheck = true;
+          else if (delta <= 3) dueSoonCheck = true;
+        });
+      }
+
+      // PAYMENT_OVERDUE is not a check label unless its evidence is actually
+      // check-backed. In this project pending receivable checks are the direct
+      // source of truth for overdue / near-due check reminders.
+      var checkCategory = overdueCheck ? 'CHECK_OVERDUE' : (dueSoonCheck ? 'CHECK_DUE' : null);
+      var checkText = overdueCheck ? 'چک سررسیدگذشته و وصول‌نشده' :
+        (dueSoonCheck ? 'چک وصول‌نشده با سررسید امروز تا سه روز آینده' : '');
+
+      if (bounced) {
+        result.priorityAlert = { status: 'ok', category: 'CHECK_BOUNCED', text: bounced.reason || 'چک برگشتی فعال' };
+      } else if (checkCategory) {
+        result.priorityAlert = {
+          status: (checkDataError || !watchUsable) ? 'error' : 'ok',
+          category: checkCategory, text: checkText
+        };
+      } else if (checkDataError || !watchUsable) {
+        result.priorityAlert = { status: 'error' };
+      } else {
+        result.priorityAlert = { status: 'ok', category: null };
+      }
+    } catch (eAlert) {
+      console.warn('Customer Quick View check alert unavailable', eAlert);
+      result.priorityAlert = { status: 'error' };
+    }
+
+    // Purchase-backed suggestions and latest reaction are derived from actual customer events.
+    try {
+      if (result.lastPurchase.status === 'error') throw new Error('Customer invoice history unavailable');
+      if (!Array.isArray(data.products)) throw new Error('Product catalog unavailable');
+      var products = data.products;
+      var productById = new Map();
+      products.forEach(function (p) { if (p && p.id != null) productById.set(p.id, p); });
+      var purchaseById = new Map();
+      validInvoices.forEach(function (inv) {
+        (Array.isArray(inv.items) ? inv.items : []).forEach(function (it) {
+          if (!it || it.productId == null || !(Number(it.qty) > 0)) return;
+          var cur = purchaseById.get(it.productId);
+          var ev = qvEventTime(inv.date, inv.time);
+          if (!ev) return;
+          var cmp = cur ? qvCompareEvents(ev, cur.event) : 1;
+          if (!cur || cmp > 0) {
+            var sameDayAmbiguity = !!(cur && cur.ambiguous && ev.key.slice(0, 10) === cur.event.key.slice(0, 10));
+            purchaseById.set(it.productId, {
+              event: ev, date: inv.date, productId: it.productId, ambiguous: sameDayAmbiguity
+            });
+          } else if (cmp === 0) {
+            cur.ambiguous = true;
+          }
+        });
+      });
+
+      var latestOfferById = new Map();
+      var customer = ctx && typeof ctx.customerById === 'function' ? ctx.customerById(cid) :
+        (data.customers || []).find(function (x) { return x && x.id === cid; });
+      (customer && Array.isArray(customer.visits) ? customer.visits : []).forEach(function (visit) {
+        if (!visit || !Array.isArray(visit.offeredProducts)) return;
+        var event = qvEventTime(visit.date, visit.time);
+        if (!event) return;
+        visit.offeredProducts.forEach(function (op) {
+          if (!op || op.productId == null) return;
+          var cur = latestOfferById.get(op.productId);
+          var cmp = cur ? qvCompareEvents(event, cur.event) : 1;
+          if (!cur || cmp > 0) {
+            var sameDayAmbiguity = !!(cur && cur.ambiguous && event.key.slice(0, 10) === cur.event.key.slice(0, 10));
+            latestOfferById.set(op.productId, {
+              event: event, date: visit.date, reaction: op.reaction,
+              reason: op.rejectionReason || null, stockSource: op.stockSource || null,
+              ambiguous: sameDayAmbiguity
+            });
+          } else if (cmp === 0) {
+            cur.ambiguous = true;
+          }
+        });
+      });
+
+      var suggested = [], toCheck = [];
+      var cycleMetrics = [], cycleHelperFailed = false;
+      try {
+        if (typeof _extractSkuRawMetrics === 'function') cycleMetrics = _extractSkuRawMetrics(cid, ctx) || [];
+      } catch (eCycleMetrics) {
+        cycleMetrics = [];
+        cycleHelperFailed = true;
+        console.warn('Customer product-cycle metrics unavailable', eCycleMetrics);
+      }
+      var cycleBuys = Object.create(null);
+      purchaseById.forEach(function (purchase, pid) { cycleBuys[pid] = purchase.date; });
+      var cyclePrecomputed = { metrics: cycleMetrics, buys: cycleBuys };
+      latestOfferById.forEach(function (offer, pid) {
+        if (offer.ambiguous || offer.reaction !== 'rejected') return;
+        var purchase = purchaseById.get(pid);
+        var purchaseOfferOrder = purchase
+          ? (purchase.ambiguous && purchase.event.key.slice(0, 10) === offer.event.key.slice(0, 10)
+            ? 0 : qvCompareEvents(purchase.event, offer.event))
+          : null;
+        if (purchase && purchaseOfferOrder > 0) return;
+        if (purchase && purchaseOfferOrder === 0) return;
+        var p = productById.get(pid);
+        if (!p || p.active === false) return;
+        var productName = qvProductName(p, pid);
+        if (!productName) return;
+        var BP = global.BagheriPresent;
+        var reason = '';
+        if (BP && offer.reason === 'still_stock' && offer.stockSource && typeof BP.stockSentence === 'function') {
+          reason = BP.stockSentence(offer.stockSource);
+        } else if (BP && typeof BP.reasonLabel === 'function') reason = BP.reasonLabel(offer.reason) || '';
+        var days = qvRelativeDays(offer.date);
+        toCheck.push({
+          productId: pid, name: productName, reason: reason,
+          date: offer.date, dateLabel: typeof faDate === 'function' ? faDate(offer.date) : String(offer.date),
+          daysAgo: days, relative: days == null ? '' : qvRelativeLabel(days), event: offer.event
+        });
+      });
+      toCheck.sort(function (a, b) {
+        var cmp = qvCompareEvents(b.event, a.event);
+        return cmp || String(b.productId).localeCompare(String(a.productId));
+      });
+
+      purchaseById.forEach(function (purchase, pid) {
+        if (latestOfferById.has(pid)) {
+          var offer = latestOfferById.get(pid);
+          if (offer.ambiguous) return;
+          var order = purchase
+            ? (purchase.ambiguous && purchase.event.key.slice(0, 10) === offer.event.key.slice(0, 10)
+              ? 0 : qvCompareEvents(purchase.event, offer.event))
+            : null;
+          if (offer.reaction === 'rejected' && (!purchase || order <= 0)) return;
+        }
+        var p = productById.get(pid);
+        if (!p || p.active === false) return;
+        var productName = qvProductName(p, pid);
+        if (!productName) return;
+        // stockQty is the canonical stock field used by the existing action engine.
+        if (typeof p.stockQty === 'number' && isFinite(p.stockQty) && p.stockQty <= 0) return;
+        var cycle = null;
+        var BPcycle = global.BagheriPresent;
+        if (BPcycle && typeof BPcycle.productPurchaseCycle === 'function') {
+          try { cycle = BPcycle.productPurchaseCycle(cid, pid, cyclePrecomputed); }
+          catch (eOneCycle) { cycle = null; cycleHelperFailed = true; }
+        }
+        if (cycle && (cycle.state === 'stock_out' || cycle.state === 'today_purchase')) return;
+        var days = qvRelativeDays(purchase.date);
+        suggested.push({
+          productId: pid, name: productName, date: purchase.date,
+          dateLabel: typeof faDate === 'function' ? faDate(purchase.date) : String(purchase.date),
+          daysAgo: days, relative: days == null ? '' : qvRelativeLabel(days),
+          cycleState: cycle && cycle.state ? cycle.state : null,
+          source: 'previous_purchase'
+        });
+      });
+      suggested.sort(function (a, b) {
+        var ar = a.cycleState === 'overdue' || a.cycleState === 'due_today' || a.cycleState === 'due_soon' ? 0 : 1;
+        var br = b.cycleState === 'overdue' || b.cycleState === 'due_today' || b.cycleState === 'due_soon' ? 0 : 1;
+        if (ar !== br) return ar - br;
+        var da = a.daysAgo == null ? Infinity : a.daysAgo;
+        var db = b.daysAgo == null ? Infinity : b.daysAgo;
+        return da - db;
+      });
+      if (cycleHelperFailed) console.warn('Customer product-cycle helper incomplete; previous-purchase candidates retained');
+      result.productsToCheck = toCheck.slice(0, 2);
+      var rejectedIds = new Set(result.productsToCheck.map(function (x) { return x.productId; }));
+      result.suggestedProducts = suggested.filter(function (x) { return !rejectedIds.has(x.productId); }).slice(0, 2);
+    } catch (eProducts) {
+      console.warn('Customer Quick View product summary unavailable', eProducts);
+      result.productsStatus = 'error';
+      result.suggestedProducts = [];
+      result.productsToCheck = [];
+    }
+
+    result.story = supplied.story || '';
+    return result;
+  }
+
   function openCustomerQuickView(cid) {
     var c = (data.customers || []).find(function (x) { return x && x.id === cid; });
     if (!c) return;
+    if (activeCustomerQuickView) activeCustomerQuickView.close(true);
+
     var ctx = typeof createComputationContext === 'function'
       ? createComputationContext({ data: data })
       : { aggregatePairMapCache: Object.create(null) };
-    var totals = customerTotals(cid, ctx) || { balance: 0 };
-    var priority = null;
-    try { priority = typeof calculateCustomerPriority === 'function' ? calculateCustomerPriority(cid, { ctx: ctx }) : null; } catch (e) { priority = null; }
-    var story = priority && priority.customerStory && priority.customerStory.summary ? priority.customerStory.summary : '';
-    var riskLevel = priority ? priority.riskLevel : null;
-    var health = (typeof getRiskBadge === 'function' ? getRiskBadge(riskLevel).label : '') || 'وضعیت عادی';
-    var watchData = loadWatchData(cid, ctx);
+    var totals = null, financeStatus = 'ok';
+    try {
+      totals = typeof customerTotals === 'function' ? customerTotals(cid, ctx) : null;
+      if (!totals || typeof totals.balance !== 'number' || !isFinite(totals.balance)) financeStatus = 'unknown';
+    } catch (eTotals) { financeStatus = 'error'; console.warn('Customer Quick View balance unavailable', eTotals); }
+    var priority = null, story = '', priorityStatus = 'unknown';
+    try {
+      priority = typeof calculateCustomerPriority === 'function' ? calculateCustomerPriority(cid, { ctx: ctx }) : null;
+      if (priority) priorityStatus = 'ok';
+      story = priority && priority.customerStory && priority.customerStory.summary ? priority.customerStory.summary : '';
+    } catch (ePriority) { console.warn('Customer Quick View priority unavailable', ePriority); }
+    var watchData = null;
+    try { watchData = loadWatchData(cid, ctx); } catch (eWatch) { watchData = null; console.warn('Customer Quick View Watch data unavailable', eWatch); }
+    var summary = buildCustomerVisitSummary(cid, ctx, { watchData: watchData, story: story });
 
-    // Recommended action (same calculateCustomerAction the Detail page and Dashboard queue use).
-    // Signature: calculateCustomerAction(cid, precomputedPriority, { ctx }).
+    var riskLevel = priority ? priority.riskLevel : null;
+    var health = 'وضعیت نامشخص';
+    try {
+      health = priorityStatus === 'ok' && typeof getRiskBadge === 'function'
+        ? (getRiskBadge(riskLevel).label || 'وضعیت عادی') : 'وضعیت نامشخص';
+    } catch (eHealth) { console.warn('Customer Quick View risk badge unavailable', eHealth); }
     var recommendedAction = null;
     try {
       if (typeof calculateCustomerAction === 'function') {
         var qa = calculateCustomerAction(cid, priority, { ctx: ctx });
-        recommendedAction = (qa && qa.actionType !== 'no_action' && qa.action) ? qa : null;
+        if (qa && qa.actionType && qa.actionType !== 'no_action') recommendedAction = qa;
       }
-    } catch (eAct) { recommendedAction = null; }
+    } catch (eAct) { recommendedAction = null; console.warn('Customer Quick View action unavailable', eAct); }
 
-    // v5 hierarchy: when the recommendation IS "register a visit" / "register a payment", the matching
-    // fixed button becomes the primary one and a one-line hint explains why — no duplicate button.
-    // Only actions without a dedicated fixed button (check, investigate, call, ...) get their own card.
-    var recMatchesVisit = !!(recommendedAction && (recommendedAction.actionType === 'visit' || recommendedAction.actionType === 'follow_up'));
-    var recMatchesPayment = !!(recommendedAction && recommendedAction.actionType === 'payment_followup');
-    var recommendedHintHtml = recommendedAction
-      ? '<div class="bp-qv-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' + esc(recommendedAction.action) + '</div>'
-      : '';
+    var recType = recommendedAction && recommendedAction.actionType;
+    var primaryAction = (recType === 'visit' || recType === 'follow_up') ? 'visit' :
+      (recType === 'payment_followup' ? 'payment' : (recType === 'invoice' ? 'invoice' : 'visit'));
+    var hasDedicatedAction = recType === 'visit' || recType === 'follow_up' ||
+      recType === 'payment_followup' || recType === 'invoice';
+    var hintText = recommendedAction && typeof recommendedAction.action === 'string' ? recommendedAction.action.trim() : '';
+    var hintHtml = !hasDedicatedAction && hintText
+      ? '<div class="bp-qv-action-hint"><span class="bp-qv-action-hint-label">پیشنهاد</span> ' + esc(hintText) + '</div>' : '';
 
-    // The ONLY alert in Quick View: an active bounced check (always immediate).
-    var bouncedAlertHtml = '';
-    try {
-      var bounced = (watchData.activeConfirmed || []).some(function (s) { return s && s.category === 'CHECK_BOUNCED'; });
-      if (bounced) {
-        bouncedAlertHtml = '<div class="bp-customer-attention" style="margin:10px 0;"><span class="bp-attention-icon" aria-hidden="true"></span>' +
-          '<span>چک برگشتی فعال — ' + esc(typeof getRiskBadge === 'function' ? getRiskBadge('critical').label : 'اقدام فوری') + '</span></div>';
-      }
-    } catch (eBounced) { bouncedAlertHtml = ''; }
-
-    function qvBtn(action, label) {
-      var primary;
-      if (recMatchesVisit) primary = (action === 'visit');
-      else if (recMatchesPayment) primary = (action === 'payment');
-      else primary = (action === 'visit');
-      return '<button type="button" class="btn ' + (primary ? 'primary' : 'secondary') + '" data-action="' + action + '">' + label + '</button>';
+    var alertHtml = '';
+    if (summary.priorityAlert.category) {
+      var alertTone = summary.priorityAlert.category === 'CHECK_BOUNCED' ? 'is-danger' : 'is-warning';
+      alertHtml = '<div class="bp-qv-alert ' + alertTone + '">' + esc(summary.priorityAlert.text) + '</div>' +
+        (summary.priorityAlert.status !== 'ok' ? '<div class="bp-qv-alert is-unknown">وضعیت کامل هشدارها مشخص نیست</div>' : '');
+    } else if (summary.priorityAlert.status === 'error' || summary.priorityAlert.status === 'unknown') {
+      alertHtml = '<div class="bp-qv-alert is-unknown">وضعیت هشدارها مشخص نیست</div>';
     }
 
+    var lastHtml = '';
+    if (summary.lastPurchase.status === 'none') lastHtml = '<div class="bp-qv-line">خریدی ثبت نشده</div>';
+    else if (summary.lastPurchase.status === 'error' || summary.lastPurchase.status === 'unknown') {
+      lastHtml = '<div class="bp-qv-line is-muted">اطلاعات آخرین خرید در دسترس نیست</div>';
+    } else {
+      var lp = summary.lastPurchase;
+      var exactPurchaseDate = typeof faDate === 'function' ? faDate(lp.date) : lp.date;
+      var amount = lp.total == null ? '' : (typeof toman === 'function' ? toman(lp.total) : String(lp.total)) + ' تومان';
+      var invoiceSubline = (lp.relative ? exactPurchaseDate : '') +
+        (lp.number != null && lp.number !== '' ? (lp.relative ? ' · ' : '') + 'فاکتور ' + lp.number : '');
+      lastHtml = '<div class="bp-qv-line"><strong>آخرین خرید:</strong> ' +
+        esc(lp.relative || exactPurchaseDate) + (amount ? ' · ' + esc(amount) : '') + '</div>' +
+        (invoiceSubline ? '<div class="bp-qv-subline">' + esc(invoiceSubline) + '</div>' : '');
+    }
+
+    var timingHtml = '<div class="bp-qv-timing"><div class="bp-qv-line">' + esc(summary.purchaseTiming.text) + '</div>' +
+      (summary.purchaseTiming.detail ? '<div class="bp-qv-subline">' + esc(summary.purchaseTiming.detail) + '</div>' : '') + '</div>';
+    function productRows(items, type) {
+      if (summary.productsStatus === 'error') return '<div class="bp-qv-empty">اطلاعات پیشنهاد محصولات در دسترس نیست</div>';
+      if (!items.length) return '<div class="bp-qv-empty">مورد قابل اتکایی ثبت نشده</div>';
+      return '<ul class="bp-qv-product-list">' + items.map(function (p) {
+        var detail = type === 'check'
+          ? (p.reason ? p.reason : 'دلیل ثبت نشده') + ((p.relative || p.dateLabel) ? ' · ' + (p.relative || p.dateLabel) : '')
+          : 'از خریدهای قبلی' + ((p.relative || p.dateLabel) ? ' · ' + (p.relative || p.dateLabel) : '');
+        return '<li><strong>' + esc(p.name || 'محصول') + '</strong><span>' + esc(detail) + '</span></li>';
+      }).join('') + '</ul>';
+    }
+    var suggestionHtml =
+      '<section class="bp-qv-section bp-qv-products is-suggest"><div class="bp-qv-section-label">پیشنهاد محتمل</div>' +
+      productRows(summary.suggestedProducts, 'suggest') + '</section>' +
+      '<section class="bp-qv-section bp-qv-products is-check"><div class="bp-qv-section-label">قبل از پیشنهاد بررسی کن</div>' +
+      productRows(summary.productsToCheck, 'check') + '</section>';
+    var storyHtml = summary.story
+      ? '<div class="bp-qv-story"><div class="bp-qv-section-label">خلاصه وضعیت</div><div class="bp-qv-story-text">' + esc(summary.story) + '</div></div>' : '';
+
+    function qvBtn(action, label) {
+      return '<button type="button" class="btn ' + (primaryAction === action ? 'primary' : 'secondary') +
+        '" data-action="' + action + '">' + label + '</button>';
+    }
     var overlay = document.createElement('div');
     overlay.className = 'bp-qv-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'خلاصه پیش از ویزیت');
     overlay.innerHTML =
       '<div class="bp-qv-card" role="document">' +
+        '<div class="bp-qv-handle" aria-hidden="true"></div>' +
         '<button type="button" class="bp-qv-close" aria-label="بستن">×</button>' +
         '<div class="bp-qv-head">' +
           '<div class="bp-qv-name">' + esc(c.name || 'مشتری') + '</div>' +
           (c.ownerName ? '<div class="bp-qv-meta">' + esc(c.ownerName) + '</div>' : '') +
           (c.phone ? '<div class="bp-qv-meta">' + esc(c.phone) + '</div>' : '') +
-          '<div class="bp-qv-balance is-prominent ' + (totals.balance > 0 ? 'is-debt' : '') + '">' +
+          (financeStatus === 'ok' ? '<div class="bp-qv-balance is-prominent ' + (totals.balance > 0 ? 'is-debt' : '') + '">' +
             '<span class="bp-qv-balance-label">' + esc(balanceStatusWord(totals.balance)) + '</span>' +
-            (totals.balance !== 0 ? '<span class="bp-qv-balance-amount">' + toman(Math.abs(totals.balance)) + ' ت</span>' : '') +
-          '</div>' +
+            (totals.balance !== 0 ? '<span class="bp-qv-balance-amount">' + toman(Math.abs(totals.balance)) + ' تومان</span>' : '') +
+          '</div>' : '<div class="bp-qv-finance-unknown">مانده حساب: اطلاعات مالی نامشخص است</div>') +
           '<div class="bp-qv-health radar-risk-' + esc(riskLevel || 'normal') + '">' + esc(health) + '</div>' +
         '</div>' +
-        bouncedAlertHtml +
-        (story ? '<div class="bp-qv-story"><div class="bp-qv-section-label">خلاصه وضعیت</div><div>' + esc(story) + '</div></div>' : '') +
-        recommendedHintHtml +
+        alertHtml +
+        '<section class="bp-qv-section bp-qv-purchase"><div class="bp-qv-section-label">آخرین خرید و زمان خرید احتمالی</div>' + lastHtml + timingHtml + '</section>' +
+        suggestionHtml + storyHtml + hintHtml +
         '<div class="bp-qv-actions">' +
-          qvBtn('visit', 'ثبت ویزیت') +
-          qvBtn('invoice', 'ثبت فاکتور') +
-          qvBtn('payment', 'ثبت پرداخت') +
+          qvBtn('visit', 'ثبت ویزیت') + qvBtn('invoice', 'ثبت فاکتور') + qvBtn('payment', 'ثبت پرداخت') +
         '</div>' +
         '<button type="button" class="bp-qv-full">جزئیات بیشتر ›</button>' +
       '</div>';
+
     var modalRoot = document.getElementById('modalRoot');
     if (!modalRoot) return;
+    // Snapshot the underlying page state before replacing modal DOM or locking scroll.
+    var previousFocus = document.activeElement;
+    var previousScrollX = global.scrollX || 0, previousScrollY = global.scrollY || global.pageYOffset || 0;
     modalRoot.innerHTML = '';
     modalRoot.appendChild(overlay);
-    try { document.body.classList.add('modal-open'); } catch(_e) {}
-
+    try { document.body.classList.add('modal-open'); } catch (_e) {}
+    var closed = false, cleaned = false, closeTimer = null, startY = null;
     var card = overlay.querySelector('.bp-qv-card');
-    var previousFocus = document.activeElement;
-    var closed = false;
-    function close() {
-      if (closed) return;
+    var handle = overlay.querySelector('.bp-qv-handle');
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+      document.removeEventListener('keydown', onKeydown);
+      overlay.removeEventListener('click', onClick);
+      if (handle) {
+        handle.removeEventListener('touchstart', onTouchStart);
+        handle.removeEventListener('touchend', onTouchEnd);
+        handle.removeEventListener('touchcancel', onTouchCancel);
+      }
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      var anotherModalRemains = modalRoot.childElementCount > 0;
+      if (!anotherModalRemains) {
+        try { document.body.classList.remove('modal-open'); } catch (_e) {}
+      }
+      if (activeCustomerQuickView && activeCustomerQuickView.overlay === overlay) activeCustomerQuickView = null;
+      if (!anotherModalRemains) {
+        if (previousFocus && typeof previousFocus.focus === 'function' && document.contains(previousFocus)) {
+          try { previousFocus.focus({ preventScroll: true }); } catch (_focusError) { previousFocus.focus(); }
+        }
+        if (typeof global.scrollTo === 'function') {
+          try { global.scrollTo(previousScrollX, previousScrollY); } catch (_scrollError) {}
+        }
+      }
+    }
+    function close(immediate, afterClose) {
+      if (closed) { if (immediate) cleanup(); return; }
       closed = true;
       overlay.classList.add('is-closing');
-      setTimeout(function () {
-        try { document.body.classList.remove('modal-open'); } catch(_e) {}
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
-      }, 180);
-      document.removeEventListener('keydown', onKeydown);
+      if (immediate) {
+        cleanup();
+        if (typeof afterClose === 'function') afterClose();
+      } else {
+        closeTimer = setTimeout(function () {
+          cleanup();
+          if (typeof afterClose === 'function') afterClose();
+        }, 180);
+      }
     }
-    function onKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay || e.target.closest('.bp-qv-close')) { e.preventDefault(); close(); return; }
+    function onKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); close(false); } }
+    function onClick(e) {
+      if (e.target === overlay || e.target.closest('.bp-qv-close')) { e.preventDefault(); close(false); return; }
       var action = e.target.closest('[data-action]');
       if (action) {
         e.preventDefault();
         var type = action.getAttribute('data-action');
-        close();
-        setTimeout(function () {
+        close(false, function () {
           if (type === 'visit' && typeof openAddVisit === 'function') openAddVisit(cid);
           else if (type === 'invoice' && typeof openAddInvoice === 'function') openAddInvoice(cid);
           else if (type === 'payment' && typeof openAddTransaction === 'function') openAddTransaction(cid);
-        }, 185);
+        });
         return;
       }
-      if (e.target.closest('.bp-qv-full') || e.target.closest('.bp-topic')) {
+      if (e.target.closest('.bp-qv-full')) {
         e.preventDefault();
-        close();
-        setTimeout(function () { if (typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', { id: cid }); }, 185);
+        close(false, function () {
+          if (typeof AppRouter !== 'undefined' && AppRouter.navigate) AppRouter.navigate('/customer', { id: cid });
+        });
       }
-    });
+    }
+    function onTouchStart(e) { if (e.touches && e.touches[0]) startY = e.touches[0].clientY; }
+    function onTouchEnd(e) {
+      if (startY == null || !e.changedTouches || !e.changedTouches[0]) { startY = null; return; }
+      if (e.changedTouches[0].clientY - startY > 70) close(false);
+      startY = null;
+    }
+    function onTouchCancel() { startY = null; }
+    overlay.addEventListener('click', onClick);
     document.addEventListener('keydown', onKeydown);
-    requestAnimationFrame(function () { overlay.classList.add('is-open'); });
+    if (handle) {
+      handle.addEventListener('touchstart', onTouchStart, { passive: true });
+      handle.addEventListener('touchend', onTouchEnd, { passive: true });
+      handle.addEventListener('touchcancel', onTouchCancel, { passive: true });
+    }
+    activeCustomerQuickView = { overlay: overlay, close: close };
+    requestAnimationFrame(function () { if (!closed) overlay.classList.add('is-open'); });
     var closeBtn = overlay.querySelector('.bp-qv-close');
     if (closeBtn) closeBtn.focus();
-
-    // Lightweight downward swipe-to-close; no document-level gesture handling.
-    var startY = null;
-    if (card) {
-      card.addEventListener('touchstart', function (e) { if (e.touches && e.touches[0]) startY = e.touches[0].clientY; }, { passive: true });
-      card.addEventListener('touchend', function (e) {
-        if (startY == null || !e.changedTouches || !e.changedTouches[0]) return;
-        if (e.changedTouches[0].clientY - startY > 70) close();
-        startY = null;
-      }, { passive: true });
-    }
   }
 
   function mount(root, params) {
@@ -1673,6 +2108,7 @@
 
   global.CustomerView = { mount: mount, unmount: function () {} };
   global.openCustomerQuickView = openCustomerQuickView;
+  global.buildCustomerVisitSummary = buildCustomerVisitSummary;
   // Test / settings seams for Product Rejection Insight (UI-only)
   global.getProductRejectionThreshold = getProductRejectionThreshold;
   global.setProductRejectionThreshold = setProductRejectionThreshold;
