@@ -259,7 +259,6 @@ main .empty{margin:14px 0;}
   background:var(--vg-color-primary-soft);
   border-color:transparent;
   border-inline-start:3px solid var(--vg-color-primary);
-  overflow-wrap:anywhere;
 }
 
 #main.customer-detail-view .cust-recommended-action-btn{
@@ -335,7 +334,6 @@ main .empty{margin:14px 0;}
    just two identical white boxes stacked together. */
 #main.customer-detail-view .watch-confirmed-card{
   border-inline-start:3px solid var(--vg-color-primary);
-  overflow-wrap:anywhere;
 }
 #main.customer-detail-view .watch-lifecycle-card{
   border-inline-start:3px solid var(--vg-color-warning);
@@ -1282,59 +1280,65 @@ html[data-theme="dark"] .watch-detail-reason .watch-detail-value{color:var(--vg-
 .bp-target-strip.has-progress .bp-target-strip-bar span::after{content:"";position:absolute;top:1px;left:5px;right:5px;height:4px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.42),rgba(255,255,255,0));pointer-events:none;}
 .bp-target-strip-days{font-size:.58rem;line-height:1;color:var(--vg-color-text-muted);text-align:left;}
 
-/* Customer Quick View — pre-visit sheet */
-.bp-qv-overlay{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(12,18,28,.42);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);opacity:0;transition:opacity 220ms cubic-bezier(.22,1,.36,1);}
+.bp-qv-overlay{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.42);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);opacity:0;transition:opacity 220ms cubic-bezier(.22,1,.36,1);}
 .bp-qv-overlay.is-open{opacity:1;}
 .bp-qv-overlay.is-closing{opacity:0;}
-.bp-qv-card{position:relative;width:min(100%,440px);max-height:min(90vh,90dvh);overflow-x:hidden;overflow-y:auto;overflow-wrap:anywhere;word-break:normal;border:1px solid color-mix(in srgb,var(--vg-color-divider) 65%,transparent);border-radius:26px;padding:20px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--vg-color-surface);box-shadow:var(--vg-shadow-overlay);transform:scale(.96);opacity:0;transition:transform 220ms cubic-bezier(.22,1,.36,1),opacity 220ms cubic-bezier(.22,1,.36,1);overscroll-behavior:contain;}
+.bp-qv-card{--qv-pad:18px;--qv-box-radius:calc(var(--vg-radius-soft) - 6px);position:relative;width:min(100%,380px);max-height:min(85vh, 85dvh);overflow-y:auto;border-radius:var(--vg-radius-soft);padding:var(--qv-pad) var(--qv-pad) 0;background:var(--vg-color-surface);box-shadow:var(--vg-shadow-overlay);transform:scale(.94);opacity:0;transition:transform 220ms cubic-bezier(.22,1,.36,1),opacity 220ms cubic-bezier(.22,1,.36,1);overscroll-behavior:contain;}
 .bp-qv-overlay.is-open .bp-qv-card{transform:scale(1);opacity:1;}
-.bp-qv-overlay.is-closing .bp-qv-card{transform:scale(.97);opacity:0;}
-.bp-qv-close{position:absolute;top:12px;left:12px;z-index:2;width:38px;height:38px;border:1px solid var(--vg-color-divider);border-radius:50%;background:var(--vg-color-surface-2,var(--vg-color-bg));color:var(--vg-color-text-muted);font-size:23px;line-height:1;cursor:pointer;}
-.bp-qv-handle{height:42px;display:flex;justify-content:center;align-items:flex-start;padding-top:7px;margin:0 auto 8px;touch-action:pan-y;}
-.bp-qv-handle::before{content:"";display:block;width:48px;height:5px;border-radius:999px;background:var(--vg-color-divider);}
-.bp-qv-head{padding:2px 2px 15px 42px;min-width:0;border-bottom:1px solid var(--vg-color-divider);}
-.bp-qv-name,.bp-qv-meta,.bp-qv-story-text,.bp-qv-product-list strong,.bp-qv-product-list span{min-width:0;overflow-wrap:anywhere;word-break:break-word;}
-.bp-qv-name{font-size:1.08rem;font-weight:750;color:var(--vg-color-text);line-height:1.5;}
-.bp-qv-meta{margin-top:3px;font-size:.78rem;color:var(--vg-color-text-muted);}
-.bp-qv-balance{margin-top:14px;font-size:.86rem;font-weight:750;color:var(--vg-color-text);}
+.bp-qv-overlay.is-closing .bp-qv-card{transform:scale(.96);opacity:0;}
+.bp-qv-close{position:absolute;top:10px;left:10px;width:32px;height:32px;border:0;border-radius:50%;background:var(--vg-color-surface-2,var(--vg-color-bg));color:var(--vg-color-text-muted);font-size:20px;line-height:1;cursor:pointer;}
+.bp-qv-head{padding-left:34px;}
+.bp-qv-name{font-size:1.02rem;font-weight:750;color:var(--vg-color-text);line-height:1.45;}
+.bp-qv-name,.bp-qv-meta,.bp-qv-alert,.bp-qv-item,.bp-qv-timing,.bp-qv-main,.bp-qv-sub,.bp-qv-story-text{overflow-wrap:anywhere;word-break:break-word;}
+.bp-qv-meta{margin-top:2px;font-size:.72rem;color:var(--vg-color-text-muted);}
+.bp-qv-status{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--vg-space-related);margin-top:10px;}
+.bp-qv-balance{font-size:.82rem;font-weight:750;color:var(--vg-color-text);}
 .bp-qv-balance.is-debt{color:var(--vg-color-danger);}
-.bp-qv-finance-unknown{margin-top:12px;font-size:.78rem;color:var(--vg-color-warning);}
-.bp-qv-health{display:inline-flex;margin-top:10px;padding:5px 11px;border-radius:999px;background:var(--vg-color-primary-soft);font-size:.7rem;font-weight:700;color:var(--vg-color-primary);}
-.bp-qv-health.radar-risk-critical{background:color-mix(in srgb,var(--vg-color-danger) 10%,var(--vg-color-surface));color:var(--vg-color-danger);}
-.bp-qv-health.radar-risk-high,.bp-qv-health.radar-risk-medium{background:color-mix(in srgb,var(--vg-color-warning) 12%,var(--vg-color-surface));color:var(--vg-color-warning);}
-.bp-qv-alert{margin:12px 0 4px;padding:12px 14px;border-radius:17px;font-size:.82rem;font-weight:700;line-height:1.7;overflow-wrap:anywhere;}
-.bp-qv-alert.is-danger{background:color-mix(in srgb,var(--vg-color-danger) 12%,var(--vg-color-surface));color:var(--vg-color-danger);}
-.bp-qv-alert.is-warning{background:color-mix(in srgb,var(--vg-color-warning) 13%,var(--vg-color-surface));color:var(--vg-color-warning);}
-.bp-qv-alert.is-unknown{background:var(--vg-color-surface-2,var(--vg-color-bg));color:var(--vg-color-warning);}
-.bp-qv-section{margin-top:15px;padding-top:13px;border-top:1px solid var(--vg-color-divider);min-width:0;}
-.bp-qv-section-label{margin-bottom:9px;font-size:.78rem;font-weight:750;color:var(--vg-color-text-muted);}
-.bp-qv-line{font-size:.88rem;line-height:1.75;color:var(--vg-color-text);overflow-wrap:anywhere;}
-.bp-qv-line.is-muted,.bp-qv-subline,.bp-qv-empty{font-size:.76rem;color:var(--vg-color-text-muted);line-height:1.7;}
-.bp-qv-subline{margin-top:2px;}
-.bp-qv-timing{margin-top:10px;padding:11px 13px;border-radius:16px;background:var(--vg-color-primary-soft);color:var(--vg-color-primary);}
-.bp-qv-timing .bp-qv-line{font-weight:700;color:var(--vg-color-primary);}
-.bp-qv-timing .bp-qv-subline{color:var(--vg-color-text-secondary,var(--vg-color-text-muted));}
-.bp-qv-product-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;}
-.bp-qv-product-list li{display:grid;gap:3px;min-width:0;padding:11px 13px;border-radius:16px;background:var(--vg-color-surface-2,var(--vg-color-bg));border:1px solid color-mix(in srgb,var(--vg-color-divider) 55%,transparent);}
-.bp-qv-products.is-check .bp-qv-product-list li{border-inline-start:4px solid var(--vg-color-primary);background:color-mix(in srgb,var(--vg-color-primary-soft) 72%,var(--vg-color-surface));}
-.bp-qv-product-list strong{font-size:.86rem;font-weight:750;color:var(--vg-color-text);}
-.bp-qv-product-list span{font-size:.76rem;line-height:1.65;color:var(--vg-color-text-muted);}
-.bp-qv-story{margin-top:15px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--vg-color-divider) 60%,transparent);border-radius:17px;background:var(--vg-color-surface-2,var(--vg-color-bg));}
-.bp-qv-story .bp-qv-section-label{margin-bottom:6px;}
-.bp-qv-story > div.bp-qv-story-text{font-size:.82rem;line-height:1.75;color:var(--vg-color-text);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;}
+.bp-qv-health{display:inline-flex;flex:none;padding:4px 8px;border-radius:999px;background:var(--vg-color-surface-2,var(--vg-color-bg));font-size:.64rem;font-weight:700;color:var(--vg-color-text-muted);}
+.bp-qv-health.radar-risk-critical{color:var(--vg-color-danger);}
+.bp-qv-health.radar-risk-high,.bp-qv-health.radar-risk-medium{color:var(--vg-color-warning);}
+.bp-qv-focus{margin-top:16px;padding-top:14px;border-top:1px solid var(--vg-color-divider);}
+.bp-qv-section-label{margin-bottom:5px;font-size:.68rem;font-weight:700;color:var(--vg-color-text-muted);}
+
+/* Quick View groups: boxed, rounded, regular rhythm. Colour meaning:
+   alert = danger/warning · timing = neutral/primary-soft · suggestion = neutral box · check = thin warning/neutral bar */
+.bp-qv-alert{margin-top:var(--vg-space-related);padding:9px 11px;border-radius:var(--qv-box-radius);border-inline-start:3px solid currentColor;font-size:.76rem;font-weight:var(--vg-weight-value);line-height:1.7;}
+.bp-qv-alert.is-danger{background:var(--vg-color-danger-soft);color:var(--vg-color-danger);}
+.bp-qv-alert.is-warning{background:var(--vg-color-warning-soft);color:var(--vg-color-warning);}
+.bp-qv-group{margin-top:var(--vg-space-related);padding:10px 12px;border-radius:var(--qv-box-radius);background:var(--vg-color-surface-soft);}
+.bp-qv-section{margin-top:12px;}
+.bp-qv-main{font-size:.9rem;font-weight:var(--vg-weight-value);line-height:1.5;color:var(--vg-color-text);font-variant-numeric:tabular-nums;}
+.bp-qv-sub{margin-top:1px;font-size:.68rem;line-height:1.6;color:var(--vg-color-text-muted);}
+.bp-qv-timing{margin-top:8px;padding:7px 10px;border-radius:var(--qv-box-radius);background:var(--vg-color-surface);font-size:.76rem;line-height:1.7;color:var(--vg-color-text-secondary);}
+.bp-qv-timing.is-near,.bp-qv-timing.is-due{background:var(--vg-color-primary-soft);color:var(--vg-color-text);}
+.bp-qv-timing.is-due{border-inline-start:3px solid var(--vg-color-primary);font-weight:var(--vg-weight-title);}
+.bp-qv-item{margin-top:6px;padding:8px 11px;border-radius:var(--qv-box-radius);background:var(--vg-color-surface-soft);}
+.bp-qv-item-name{font-size:.82rem;font-weight:var(--vg-weight-value);line-height:1.5;color:var(--vg-color-text);}
+.bp-qv-item-sub{margin-top:1px;font-size:.7rem;line-height:1.6;color:var(--vg-color-text-muted);}
+.bp-qv-item.is-check{border-inline-start:3px solid var(--vg-color-warning);}
+.bp-qv-item.is-check.is-deferred{border-inline-start-color:var(--vg-color-neutral);}
+.bp-qv-tag{display:inline-block;margin-inline-start:6px;padding:1px 7px;border-radius:var(--vg-radius-pill);background:var(--vg-color-surface);font-size:.62rem;font-weight:var(--vg-weight-label);color:var(--vg-color-text-muted);vertical-align:middle;}
+.bp-qv-story{margin-top:12px;padding-inline:2px;}
+.bp-qv-story-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:.72rem;line-height:1.75;color:var(--vg-color-text-muted);}
 .bp-qv-focus .bp-focus{margin:0;}
 .bp-qv-focus .bp-topic{cursor:default;}
 .bp-qv-focus .bp-topic:hover{background:transparent;}
-.bp-qv-actions{display:grid;grid-template-columns:1fr 1fr 1.12fr;gap:8px;margin-top:17px;padding-top:2px;}
-.bp-qv-actions .btn{min-height:46px;padding-inline:8px;border-radius:999px;font-size:.76rem;font-weight:700;white-space:nowrap;}
-.bp-qv-full{width:100%;margin-top:7px;padding:10px;border:0;background:transparent;color:var(--vg-color-primary);font-size:.78rem;font-weight:750;cursor:pointer;}
+.bp-qv-footer{position:sticky;bottom:0;margin:12px calc(-1 * var(--qv-pad)) 0;padding:10px var(--qv-pad) calc(var(--qv-pad) - 6px + env(safe-area-inset-bottom, 0px));background:var(--vg-color-surface);border-top:1px solid var(--vg-color-divider);}
+.bp-qv-actions{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:7px;}
+.bp-qv-actions .btn{min-height:42px;padding-inline:8px;font-size:.7rem;white-space:nowrap;}
+.bp-qv-full{width:100%;margin-top:4px;padding:7px;border:0;background:transparent;color:var(--vg-color-primary);font-size:.72rem;font-weight:700;cursor:pointer;}
 @media(max-width:380px){
-  .bp-qv-overlay{padding:8px;}
-  .bp-qv-card{width:100%;max-height:92vh;max-height:92dvh;padding:15px;padding-bottom:calc(13px + env(safe-area-inset-bottom,0px));border-radius:23px;}
-  .bp-qv-actions{grid-template-columns:1fr 1fr 1.05fr;gap:5px;}
-  .bp-qv-actions .btn{font-size:.68rem;padding-inline:4px;white-space:normal;}
+  .bp-target-strip{padding-inline:11px;margin-bottom:12px;}
+  .bp-target-strip-figures{gap:6px;font-size:.58rem;}
+  .bp-target-strip-current{font-size:.92rem;}
+  .bp-target-strip-target{font-size:.66rem;}
+  .bp-target-strip-percent strong{font-size:.7rem;}
+  .bp-qv-card{--qv-pad:16px;}
+  .bp-qv-actions{grid-template-columns:1fr;}
 }
-@media(prefers-reduced-motion:reduce){.bp-qv-overlay,.bp-qv-card,.bp-target-strip-bar span{transition:none;}}
+@media(prefers-reduced-motion:reduce){
+  .bp-qv-overlay,.bp-qv-card,.bp-target-strip-bar span{transition:none;}
+}
 
 /* Receivable attention (P1) */
 .bp-customer-attention{
@@ -2223,7 +2227,7 @@ html .sheet.inv-sheet-host .inv-mini-input:focus{
 /* Quick View — the balance is the first number the eye should find */
 .bp-qv-balance.is-prominent{
   display:flex;flex-direction:column;gap:2px;
-  margin-top:14px;line-height:1.35;
+  line-height:1.35;
 }
 .bp-qv-balance.is-prominent .bp-qv-balance-label{
   font-size:.78rem;font-weight:var(--vg-weight-label);
@@ -2244,7 +2248,6 @@ html .sheet.inv-sheet-host .inv-mini-input:focus{
   background:var(--vg-color-primary-soft);
   border-radius:10px;
   border-inline-start:3px solid var(--vg-color-primary);
-  overflow-wrap:anywhere;
 }
 .bp-qv-action-hint-label{
   font-weight:var(--vg-weight-title);
@@ -2303,9 +2306,6 @@ html[data-theme="dark"] .bp-target-strip.is-ontrack .bp-target-strip-status{colo
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 #main.customer-detail-view .cd-action-hint{margin:0 0 10px;}
-
-/* Quick View — air between the debt and the health badge */
-.bp-qv-health{margin-top:12px;}
 
 
 /* Reports — only the Light-mode contrast of link-style buttons («مشاهده جزئیات») */
@@ -2771,4 +2771,3 @@ html[data-theme="dark"] #prospect-summary{ border:1px solid var(--vg-color-borde
   background:#34C58E;border:3px solid var(--vg-color-surface);box-sizing:border-box;
   box-shadow:0 2px 6px rgba(52,197,142,.45);
 }
-
