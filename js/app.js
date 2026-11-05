@@ -1467,9 +1467,10 @@ window.BagheriPresent = (function () {
     if (d === 1) return 'دیروز';
     return n0(d) + ' روز پیش';
   }
-  function lastOfferMap(cid) {
+  function lastOfferMap(cid, customer) {
     var map = Object.create(null);
-    var c = (data.customers || []).find(function (x) { return x && x.id === cid; });
+    // optional `customer` lets callers that already hold the record skip a second lookup
+    var c = customer || (data.customers || []).find(function (x) { return x && x.id === cid; });
     if (!c || !Array.isArray(c.visits)) return map;
     c.visits.forEach(function (v) {
       if (!v || !Array.isArray(v.offeredProducts)) return;
@@ -1568,8 +1569,11 @@ window.BagheriPresent = (function () {
       try { buys = lastPurchaseMap(cid) || {}; } catch (e) { buys = {}; }
       try { if (typeof _extractSkuRawMetrics === 'function') raw = _extractSkuRawMetrics(cid) || []; } catch (e2) { raw = []; }
     }
-    var lastDate = buys[pid] || null;
+    var skuLastDate = buys[pid] || null;   // this SKU's own history only — never the basis of a Family cycle
     var metric = raw.find(function (m) { return m && (m.productId === pid || (Array.isArray(m.memberProductIds) && m.memberProductIds.indexOf(pid) >= 0)); }) || null;
+    // typicalCycle / purchaseCount / lastPurchaseDate all come from the SAME Family metric. If the metric has no
+    // valid date, daysSince stays null → state is unknown/insufficient (no mixing of Family cycle with SKU date).
+    var lastDate = metric ? (metric.lastPurchaseDate || null) : skuLastDate;
     var count = metric ? Number(metric.purchaseCount) || 0 : 0;
     var cycle = metric && Number.isFinite(Number(metric.typicalCycle)) && Number(metric.typicalCycle) > 0 ? Number(metric.typicalCycle) : null;
     var daysSince = null;
@@ -1592,7 +1596,11 @@ window.BagheriPresent = (function () {
       else if (daysRemaining === 0) state = 'due_today';
       else state = 'overdue';
     } else if (stockOut && count >= 3) state = 'stock_out';
-    return { state: state, daysRemaining: daysRemaining, daysSinceLast: daysSince, typicalCycle: cycle, purchaseCount: count, lastPurchaseDate: lastDate, daysOverdue: daysOverdue, stockOut: stockOut };
+    return { state: state, daysRemaining: daysRemaining, daysSinceLast: daysSince, typicalCycle: cycle, purchaseCount: count, lastPurchaseDate: lastDate, daysOverdue: daysOverdue, stockOut: stockOut,
+      // lastPurchaseDate above = basis of the cycle (Family when grouped). SKU date kept separately for SKU history display.
+      skuLastPurchaseDate: skuLastDate, familyId: metric ? metric.familyId : null,
+      familyLevel: !!(metric && Array.isArray(metric.memberProductIds) && metric.memberProductIds.length > 1),
+      representativeProductId: metric ? metric.productId : null };
   }
 
   return {
@@ -1601,7 +1609,7 @@ window.BagheriPresent = (function () {
     detailsHtml: detailsHtml, evidenceLines: evidenceLines, namesText: namesText,
     stockSentence: stockSentence, stockShort: stockShort, reasonLabel: reasonLabel,
     relDays: relDays, productHints: productHints, hintHtml: hintHtml,
-    lastPurchaseMap: lastPurchaseMap, productPurchaseCycle: productPurchaseCycle
+    lastPurchaseMap: lastPurchaseMap, lastOfferMap: lastOfferMap, productPurchaseCycle: productPurchaseCycle
   };
 })();
 
