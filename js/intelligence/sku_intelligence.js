@@ -1324,6 +1324,9 @@
         historicalPresenceRate: current.historicalPresenceRate,
         currentBasketPresence: current.currentBasketPresence,
         purchaseCount: historical.purchaseCount,
+        // Last purchase of the whole Family (pair.purchases is date-ascending: sorted at the end of
+        // _aggregatePairMap; same value _computeCurrent uses for currentGap). Same set as typicalCycle/purchaseCount.
+        lastPurchaseDate: current.lastPurchaseDate,
         stockOut: stockOut
       });
     }
