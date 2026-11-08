@@ -293,6 +293,23 @@
       });
     } catch (e2) {}
 
+    // چک‌های پرداختی به تامین‌کننده (جدا از data.checks): سررسیدگذشته / نزدیک سررسید / برگشتی.
+    // برگشتی فقط وقتی هشدار است که هنوز بدهی باز به همان تامین‌کننده مانده (چک برگشتی = بدهی برگشته).
+    var supOverdue = 0, supDueSoon = 0, supBounced = 0;
+    try {
+      if (typeof supplierCheckEntries === 'function') {
+        supplierCheckEntries().forEach(function (e) {
+          if (e.status === 'pending' && e.dueDiff !== null) {
+            if (e.dueDiff < 0) supOverdue++;
+            else if (e.dueDiff <= 3) supDueSoon++;
+          } else if (e.status === 'bounced') {
+            var st = typeof supplierTotals === 'function' ? supplierTotals(e.supplier.id) : null;
+            if (st && st.balance > 0) supBounced++;
+          }
+        });
+      }
+    } catch (e5) {}
+
     // موارد قبلی نوار (حفظ شده تا رگرسیون ایجاد نشود)
     try {
       followups = typeof getPendingWatchFollowUps === 'function'
@@ -305,7 +322,7 @@
     } catch (e3) {}
     try { lowStock = typeof lowStockProducts === 'function' ? (lowStockProducts() || []).length : 0; } catch (e4) {}
 
-    if (!(att.count || overdueChecks.length || dueSoonChecks.length || followups || lowStock)) return '';
+    if (!(att.count || overdueChecks.length || dueSoonChecks.length || supOverdue || supDueSoon || supBounced || followups || lowStock)) return '';
 
     /* هر مورد یک ردیف کامل (iOS list row): متن راست، مقدار/توضیح کنار آن، فلش در انتها. */
     function row(href, count, label, meta, extraAttr) {
@@ -320,6 +337,9 @@
     if (att.count > 0) bits.push(row('#', att.count, 'مشتری نیازمند پیگیری', money(att.totalBalance), ' data-attention="1"'));
     if (overdueChecks.length > 0) bits.push(row('#/checks?filter=overdue', overdueChecks.length, 'چک سررسیدگذشته'));
     if (dueSoonChecks.length > 0) bits.push(row('#/checks?filter=dueSoon', dueSoonChecks.length, 'چک نزدیک سررسید'));
+    if (supBounced > 0) bits.push(row('#/checks?side=supplier&filter=bounced', supBounced, 'چک برگشتیِ پرداختی به تامین‌کننده'));
+    if (supOverdue > 0) bits.push(row('#/checks?side=supplier&filter=overdue', supOverdue, 'چک پرداختی سررسیدگذشته'));
+    if (supDueSoon > 0) bits.push(row('#/checks?side=supplier&filter=dueSoon', supDueSoon, 'چک پرداختی نزدیک سررسید'));
     if (followups) bits.push(row('#/watches?filter=followup', followups, 'پیگیری‌های باز'));
     if (lowStock) bits.push(row('#/inventory', lowStock, 'کالای کم‌موجودی'));
 

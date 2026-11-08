@@ -40,6 +40,236 @@
     return { label: 'پرداخت جزئی', cls: 'accent-amber' };
   }
 
+  /* ---- «خلاصه حساب شما» — read-only narrative.
+     Only reads existing records/functions; nothing is saved or recomputed officially.
+     Live balance comes ONLY from customerTotals(...).balance (passed in).
+     prevBalance/newBalance are historical snapshots, never mixed with the live balance. ---- */
+  const ACCT_EPS = 0.5; // same tolerance the project uses for invoice remain / paid checks
+  const PAY_LABEL = { cash: 'نقد', card: 'کارت', transfer: 'انتقال' };
+
+  function acctNum(x) { return typeof x === 'number' && isFinite(x); }
+  function acctDay(d) { return String(d || '').slice(0, 10); }
+  function acctDate(d) { return esc(typeof faDate === 'function' ? faDate(acctDay(d)) : acctDay(d)); }
+  function acctByDate(a, b) {
+    return acctDay(a.date || a.dueDate).localeCompare(acctDay(b.date || b.dueDate)) ||
+      String(a.number || '').localeCompare(String(b.number || '')) ||
+      String(a.id || '').localeCompare(String(b.id || ''));
+  }
+  function acctSum(list, pick) {
+    return list.reduce(function (s, x) { return s + (Number(pick(x)) || 0); }, 0);
+  }
+  function acctMoney(n, cls) {
+    return '<b' + (cls ? ' class="' + cls + '"' : '') + '>' + toman(n) + ' ت</b>';
+  }
+  /* بدهکار / بستانکار / صفر — returns {word, amount, cls} */
+  function acctBalance(bal) {
+    if (bal > ACCT_EPS) return { word: 'بدهکار', amount: bal, cls: 'accent-rust' };
+    if (bal < -ACCT_EPS) return { word: 'بستانکار', amount: -bal, cls: 'accent-olive' };
+    return { word: '', amount: 0, cls: '' };
+  }
+  function acctRow(html, sub, first) {
+    return '<div class="ledger-row" style="cursor:default;align-items:flex-start;' +
+      (first ? '' : 'border-top:1px solid var(--vg-color-divider);') + '">' +
+      '<span class="name" style="font-weight:400;line-height:1.8;">' + html +
+      (sub ? '<span class="sub" style="display:block;">' + sub + '</span>' : '') + '</span></div>';
+  }
+  function acctHeading(text) {
+    return '<div class="sub" style="margin:12px 0 0;font-weight:600;">' + esc(text) + '</div>';
+  }
+  /* A tappable row (plain <details>, existing look): sentence + list of real records. */
+  function acctExpandable(sentenceHtml, sub, itemsHtml, first) {
+    return '<details style="' + (first ? '' : 'border-top:1px solid var(--vg-color-divider);') + '">' +
+      '<summary style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-height:52px;padding:12px 2px;cursor:pointer;">' +
+      '<span class="name" style="font-weight:400;line-height:1.8;">' + sentenceHtml +
+      (sub ? '<span class="sub" style="display:block;">' + sub + '</span>' : '') + '</span>' +
+      '<span class="sub" aria-hidden="true" style="flex:none;">‹</span></summary>' +
+      '<div style="margin:0 0 8px;padding:0 10px;background:var(--vg-color-surface-soft);border-radius:10px;">' + itemsHtml + '</div>' +
+      '</details>';
+  }
+  function acctItem(title, sub, amount, first) {
+    return '<div class="ledger-row" style="cursor:default;min-height:44px;padding:8px 0;' +
+      (first ? '' : 'border-top:1px solid var(--vg-color-divider);') + '">' +
+      '<span class="name" style="font-weight:400;">' + title +
+      (sub ? '<span class="sub" style="display:block;">' + sub + '</span>' : '') + '</span>' +
+      '<span class="filler"></span><span class="amount">' + toman(amount) + ' ت</span></div>';
+  }
+  function acctList(items) {
+    return items.map(function (it, i) { return acctItem(it.title, it.sub, it.amount, i === 0); }).join('');
+  }
+
+  function buildAccountSummary(inv, cust, ctx, liveBalance, hasAlloc) {
+    const cid = cust.id;
+    const invDay = acctDay(inv.date);
+    const total = Number(inv.total) || 0;
+
+    const allInvs = customerInvoices(cid, ctx);
+
+    const pays = customerPayments(cid, ctx);
+    const checks = customerChecks(cid, ctx);
+    const positive = function (x) { return (Number(x.amount) || 0) > 0; };
+    const cashLike = pays.filter(function (p) { return PAY_LABEL[p.method] && positive(p); });
+
+    /* Records already counted inside invoiceOnRecordPaid(inv): this invoice's own linked
+       cash/card/transfer payments and checks (calc.js contract). They are never added again.
+       Linked return / discount records are NOT part of invoiceOnRecordPaid, so they stay visible. */
+    const isOwnOnRecordPay = function (p) { return p.invoiceId === inv.id && !!PAY_LABEL[p.method]; };
+
+    /* ---- on the invoice itself ---- */
+    const nonCheckOnRec = (inv.cashPaid || 0) + (inv.cardPaid || 0) + (inv.transferPaid || 0);
+    const checkOnRec = inv.checkPaid || 0;
+    const onRec = invoiceOnRecordPaid(inv);
+    const hasPrev = acctNum(inv.prevBalance);
+    const hasNew = acctNum(inv.newBalance);
+    const snapOk = !(hasPrev && hasNew) ||
+      Math.abs(inv.prevBalance + total - onRec - inv.newBalance) <= ACCT_EPS;
+
+    const rowsInvoice = [];
+    const pushInv = function (html, sub) { rowsInvoice.push(html, sub || ''); };
+    if (total > ACCT_EPS) pushInv('این بار ' + acctMoney(total) + ' خرید کردید.');
+    if (nonCheckOnRec > ACCT_EPS) {
+      const keys = ['cash', 'card', 'transfer'].filter(function (k) { return (inv[k + 'Paid'] || 0) > 0; });
+      pushInv('پرداخت ثبت‌شده روی این فاکتور: ' + acctMoney(nonCheckOnRec, 'accent-olive'),
+        keys.length > 1
+          ? keys.map(function (k) { return PAY_LABEL[k] + ' ' + toman(inv[k + 'Paid']); }).join(' · ')
+          : (keys[0] ? PAY_LABEL[keys[0]] : ''));
+    }
+    if (checkOnRec > ACCT_EPS) {
+      const dues = checks.filter(function (c) { return c.invoiceId === inv.id && c.dueDate; })
+        .map(function (c) { return acctDate(c.dueDate); });
+      pushInv('چک ثبت‌شده روی این فاکتور: ' + acctMoney(checkOnRec, 'accent-amber'),
+        'منظورشده در حساب' + (dues.length ? ' · سررسید ' + dues.join('، ') : ''));
+    }
+    const prevHtml = hasPrev ? (function () {
+      const b = acctBalance(inv.prevBalance);
+      return b.word
+        ? 'قبل از این خرید، ' + acctMoney(b.amount, b.cls) + ' ' + b.word + ' بودید.'
+        : 'قبل از این خرید، حساب شما صفر بود.';
+    })() : '';
+    const newHtml = hasNew ? (function () {
+      const b = acctBalance(inv.newBalance);
+      return 'مانده پس از ثبت این خرید: ' + (b.word ? acctMoney(b.amount, b.cls) + ' ' + b.word : '<b>صفر</b>');
+    })() : '';
+
+    const toRows = function (pairs) {
+      const out = [];
+      for (let k = 0; k < pairs.length; k += 2) out.push(acctRow(pairs[k], pairs[k + 1], out.length === 0));
+      return out.join('');
+    };
+    let atHtml = '';
+    if (snapOk) {
+      const pairs = [];
+      if (prevHtml) pairs.push(prevHtml, '');
+      Array.prototype.push.apply(pairs, rowsInvoice);
+      if (newHtml) pairs.push(newHtml, '');
+      if (pairs.length) atHtml = acctHeading('هنگام ثبت این خرید') + '<div>' + toRows(pairs) + '</div>';
+    } else {
+      /* Snapshot disagrees with itself: invoice facts and historical balances are shown independently. */
+      if (rowsInvoice.length) atHtml += acctHeading('این فاکتور') + '<div>' + toRows(rowsInvoice) + '</div>';
+      const bal = [];
+      if (prevHtml) bal.push(prevHtml, '');
+      if (newHtml) bal.push(newHtml, '');
+      if (bal.length) atHtml += acctHeading('مانده‌ها هنگام ثبت (جدا از ردیف‌های بالا)') + '<div>' + toRows(bal) + '</div>';
+    }
+
+    /* ---- after this invoice's date (strictly later days only; same-day order is unknowable) ---- */
+    const after = [];
+    const same = [];
+    const addGroup = function (arr, sentenceHtml, sub, itemsHtml) {
+      arr.push(acctExpandable(sentenceHtml, sub, itemsHtml, arr.length === 0));
+    };
+    const byMethodItems = function (list) {
+      return acctList(list.map(function (p) { return { title: esc(PAY_LABEL[p.method] || (p.method === 'discount' ? 'تخفیف' : 'برگشت کالا')), sub: acctDate(p.date), amount: p.amount }; }));
+    };
+    const invItems = function (list) {
+      return acctList(list.map(function (i) {
+        return {
+          title: '<a class="tx-inline-link" href="#/invoice?id=' + encodeURIComponent(i.id) + '">فاکتور #' + esc(String(i.number || '—')) + '</a>',
+          sub: acctDate(i.date), amount: i.total
+        };
+      }));
+    };
+    let sumInv = 0, sumCash = 0, sumDisc = 0, sumRet = 0, sumChk = 0, sameAny = false;
+    if (invDay) {
+      const otherInvs = allInvs.filter(function (i) { return i.id !== inv.id; });
+      const notOwn = function (p) { return !isOwnOnRecordPay(p); };
+      const laterInvs = otherInvs.filter(function (i) { return acctDay(i.date) > invDay; }).sort(acctByDate);
+      const laterOf = function (m) { return pays.filter(function (p) { return p.method === m && positive(p) && notOwn(p) && acctDay(p.date) > invDay; }).sort(acctByDate); };
+      const laterCash = cashLike.filter(function (p) { return notOwn(p) && acctDay(p.date) > invDay; }).sort(acctByDate);
+      const laterDisc = laterOf('discount');
+      const laterRet = laterOf('return');
+      const laterChecks = checks.filter(function (c) { return c.invoiceId !== inv.id && acctDay(c.dueDate) > invDay && positive(c); }).sort(acctByDate);
+
+      sumInv = acctSum(laterInvs, function (i) { return i.total; });
+      sumCash = acctSum(laterCash, function (p) { return p.amount; });
+      sumDisc = acctSum(laterDisc, function (p) { return p.amount; });
+      sumRet = acctSum(laterRet, function (p) { return p.amount; });
+      sumChk = acctSum(laterChecks, function (c) { return c.amount; });
+
+      if (sumInv > ACCT_EPS) addGroup(after, 'بعد از تاریخ این خرید، ' + acctMoney(sumInv) + ' خرید دیگر داشتید.', '', invItems(laterInvs));
+      if (sumCash > ACCT_EPS) addGroup(after, 'بعد از تاریخ این خرید، ' + acctMoney(sumCash, 'accent-olive') + ' پرداخت کردید.', '', byMethodItems(laterCash));
+      if (sumDisc > ACCT_EPS) addGroup(after, 'تخفیف: ' + acctMoney(sumDisc, 'accent-amber'), 'ثبت‌شده بعد از تاریخ این خرید', byMethodItems(laterDisc));
+      if (sumRet > ACCT_EPS) addGroup(after, 'برگشت کالا: ' + acctMoney(sumRet, 'accent-amber'), 'ثبت‌شده بعد از تاریخ این خرید', byMethodItems(laterRet));
+      if (sumChk > ACCT_EPS) {
+        addGroup(after, 'چک‌های منظورشده در حساب: ' + acctMoney(sumChk, 'accent-amber'), 'سررسید بعد از تاریخ این خرید',
+          acctList(laterChecks.map(function (c) {
+            return { title: 'چک' + (c.checkNumber ? ' ' + esc(String(c.checkNumber)) : ''), sub: 'سررسید ' + acctDate(c.dueDate), amount: c.amount };
+          })));
+      }
+
+      const sameDayPay = function (p) { return notOwn(p) && positive(p) && acctDay(p.date) === invDay; };
+      const sameInvs = otherInvs.filter(function (i) { return acctDay(i.date) === invDay; }).sort(acctByDate);
+      const sameCash = cashLike.filter(sameDayPay).sort(acctByDate);
+      const sameDisc = pays.filter(function (p) { return p.method === 'discount' && sameDayPay(p); }).sort(acctByDate);
+      const sameRet = pays.filter(function (p) { return p.method === 'return' && sameDayPay(p); }).sort(acctByDate);
+      const note = 'ترتیب نسبت به این فاکتور مشخص نیست';
+      const sInv = acctSum(sameInvs, function (i) { return i.total; });
+      const sCash = acctSum(sameCash, function (p) { return p.amount; });
+      const sDisc = acctSum(sameDisc, function (p) { return p.amount; });
+      const sRet = acctSum(sameRet, function (p) { return p.amount; });
+      if (sInv > ACCT_EPS) addGroup(same, 'فاکتورهای دیگر در همین تاریخ: ' + acctMoney(sInv), note, invItems(sameInvs));
+      if (sCash > ACCT_EPS) addGroup(same, 'پرداخت‌های ثبت‌شده در همین تاریخ: ' + acctMoney(sCash, 'accent-olive'), note, byMethodItems(sameCash));
+      if (sDisc > ACCT_EPS) addGroup(same, 'تخفیف در همین تاریخ: ' + acctMoney(sDisc, 'accent-amber'), note, byMethodItems(sameDisc));
+      if (sRet > ACCT_EPS) addGroup(same, 'برگشت کالا در همین تاریخ: ' + acctMoney(sRet, 'accent-amber'), note, byMethodItems(sameRet));
+      sameAny = same.length > 0;
+    }
+
+    /* Read-only check: do the rows above actually lead from the historical balance to the live one?
+       Only then are they presented as one continuous story. Otherwise they stay independent records. */
+    const live = acctNum(liveBalance) ? acctBalance(liveBalance) : null;
+    const storyOk = !!(invDay && live && hasNew && snapOk && !sameAny &&
+      Math.abs(inv.newBalance + sumInv - sumCash - sumDisc - sumRet - sumChk - liveBalance) <= ACCT_EPS);
+
+    /* ---- last real receipt (cash/card/transfer only) ---- */
+    let lastPayRow = '';
+    if (cashLike.length) {
+      const lp = cashLike.slice().sort(acctByDate).pop();
+      lastPayRow = acctRow('آخرین پرداخت شما: ' + acctMoney(lp.amount, 'accent-olive'),
+        esc(PAY_LABEL[lp.method]) + ' · ' + acctDate(lp.date), true);
+    }
+
+    /* ---- live balance (single source: customerTotals().balance) ---- */
+    const liveHero = live ? (
+      '<div style="margin-top:12px;padding:14px;border-radius:12px;background:var(--vg-color-surface-soft);text-align:center;">' +
+      '<div class="label">الان</div>' +
+      '<div class="value ' + live.cls + '" style="font-size:1.45rem;">' + (live.word ? toman(live.amount) + ' ت' : '۰ ت') + '</div>' +
+      '<div class="sub">' + (live.word ? (live.word === 'بدهکار' ? 'بدهکارید' : 'بستانکارید') : 'مانده حساب شما صفر است') + '</div>' +
+      '</div>') : '';
+
+    const allocBtn = hasAlloc
+      ? '<div class="btn-row" style="margin-top:10px;"><button type="button" class="btn secondary small" data-inv-action="open-alloc">جزئیات تسویه همین فاکتور</button></div>'
+      : '';
+
+    const inner =
+      atHtml +
+      (after.length ? acctHeading(storyOk ? 'از آن تاریخ تا الان' : 'رکوردهای ثبت‌شده بعد از تاریخ این خرید') + '<div>' + after.join('') + '</div>' : '') +
+      (same.length ? acctHeading('در همین تاریخ') + '<div>' + same.join('') + '</div>' : '') +
+      (lastPayRow ? '<div style="margin-top:12px;border-top:1px solid var(--vg-color-divider);">' + lastPayRow + '</div>' : '') +
+      liveHero + allocBtn;
+
+    return '<div class="inv-surface" style="padding-top:12px;padding-bottom:14px;">' +
+      '<div style="font-size:.95rem;font-weight:700;">خلاصه حساب شما</div>' + inner + '</div>';
+  }
+
   function drawInvoicePage(root) {
     if (!root) return;
     const id = currentInvoiceId;
@@ -66,6 +296,26 @@
     const remain = invoiceRemain(inv);
     const st = invoicePayStatus(inv);
     const hasSnapshot = typeof inv.prevBalance === 'number';
+
+    /* One computation context and ONE customerTotals call per render.
+       Everything about the new card is inside try: a failure here must never break the invoice page. */
+    let allocTrace = null;
+    try {
+      allocTrace = typeof invoiceAllocationTrace === 'function' ? invoiceAllocationTrace(inv.id) : null;
+    } catch (e) {
+      allocTrace = null;
+    }
+    let acctHtml = '';
+    if (cust) {
+      try {
+        const acctCtx = typeof createComputationContext === 'function' ? createComputationContext({ data: data }) : null;
+        const liveBalance = customerTotals(cust.id, acctCtx).balance;
+        acctHtml = buildAccountSummary(inv, cust, acctCtx, liveBalance, !!allocTrace);
+      } catch (e) {
+        console.error('account summary failed', e);
+        acctHtml = '';
+      }
+    }
 
     /* G5: optional Visit↔Invoice relationship (invoice side only; independent workflows) */
     let linkedVisitLabel = '';
@@ -114,10 +364,22 @@
       }).join('')}</div>
     ` : '';
 
+    const payCards = `
+          ${inv.discount ? `<div class="card"><div class="label">تخفیف فاکتور${inv.discountType === 'percent' ? ' (%)' : ''}</div><div class="value">${toman(inv.discount)}${inv.discountType === 'percent' ? ' %' : ' ت'}</div></div>` : ''}
+          ${inv.cashPaid ? `<div class="card"><div class="label">نقد</div><div class="value" style="font-size:1rem;">${toman(inv.cashPaid)} ت</div></div>` : ''}
+          ${inv.cardPaid ? `<div class="card"><div class="label">کارت</div><div class="value" style="font-size:1rem;">${toman(inv.cardPaid)} ت</div></div>` : ''}
+          ${inv.transferPaid ? `<div class="card"><div class="label">انتقال</div><div class="value" style="font-size:1rem;">${toman(inv.transferPaid)} ت</div></div>` : ''}
+          ${inv.checkPaid ? `<div class="card"><div class="label">چک</div><div class="value" style="font-size:1rem;">${toman(inv.checkPaid)} ت</div></div>` : ''}
+          ${hasSnapshot ? `
+            <div class="card"><div class="label">مانده قبلی مشتری</div><div class="value" style="font-size:1rem;">${toman(inv.prevBalance)} ت</div></div>
+            <div class="card"><div class="label">مانده بعد از فاکتور</div><div class="value" style="font-size:1rem;">${toman(Math.abs(inv.newBalance || 0))} ت ${balanceStatusWord(inv.newBalance || 0)}</div></div>
+          ` : ''}
+    `.trim();
+
     root.innerHTML = `<div class="inv-detail">
       <div class="btn-row" style="margin-bottom:10px;">
         <a class="btn secondary small" href="#/invoices">← فاکتورها</a>
-        ${cust ? `<a class="btn secondary small" href="#/customer?id=${encodeURIComponent(cust.id)}">مشتری</a>` : ''}
+        ${cust ? `<a class="btn secondary small" href="#/customer?id=${encodeURIComponent(cust.id)}&fromInv=${encodeURIComponent(inv.id)}">مشتری</a>` : ''}
       </div>
 
       <!-- IDENTITY -->
@@ -148,42 +410,26 @@
         </div>
       </div>
 
+      <!-- ACCOUNT SUMMARY (customer-facing story) -->
+      ${acctHtml}
+
       <!-- PRIMARY ACTIONS -->
       <div class="btn-row tx-actions-primary" style="margin-bottom:14px;">
         <button type="button" class="btn" data-inv-action="print">چاپ</button>
         <button type="button" class="btn secondary" data-inv-action="edit">ویرایش</button>
         <button type="button" class="btn secondary" data-inv-action="image">تصویر</button>
-        <button type="button" class="btn small danger" data-inv-action="del">حذف</button>
       </div>
 
       <!-- ITEMS -->
       <h3 class="sub-title">اقلام</h3>
       <div class="tx-items inv-surface">${itemRows}</div>
 
-      <!-- PAYMENT DETAILS (progressive) -->
-      <details class="tx-details">
-        <summary>جزئیات پرداخت و سود</summary>
-        <div class="cards" style="margin-top:10px;margin-bottom:8px;">
-          ${inv.discount ? `<div class="card"><div class="label">تخفیف فاکتور${inv.discountType === 'percent' ? ' (%)' : ''}</div><div class="value">${toman(inv.discount)}${inv.discountType === 'percent' ? ' %' : ' ت'}</div></div>` : ''}
-          ${inv.cashPaid ? `<div class="card"><div class="label">نقد</div><div class="value" style="font-size:1rem;">${toman(inv.cashPaid)} ت</div></div>` : ''}
-          ${inv.cardPaid ? `<div class="card"><div class="label">کارت</div><div class="value" style="font-size:1rem;">${toman(inv.cardPaid)} ت</div></div>` : ''}
-          ${inv.transferPaid ? `<div class="card"><div class="label">انتقال</div><div class="value" style="font-size:1rem;">${toman(inv.transferPaid)} ت</div></div>` : ''}
-          ${inv.checkPaid ? `<div class="card"><div class="label">چک</div><div class="value" style="font-size:1rem;">${toman(inv.checkPaid)} ت</div></div>` : ''}
-          ${hasSnapshot ? `
-            <div class="card"><div class="label">مانده قبلی مشتری</div><div class="value" style="font-size:1rem;">${toman(inv.prevBalance)} ت</div></div>
-            <div class="card"><div class="label">مانده بعد از فاکتور</div><div class="value" style="font-size:1rem;">${toman(Math.abs(inv.newBalance || 0))} ت ${balanceStatusWord(inv.newBalance || 0)}</div></div>
-          ` : ''}
-          <div class="card wide"><div class="label">سود اقلام این فاکتور</div><div class="value">${toman(invProfit)} ت</div></div>
-        </div>
-      </details>
-
+      <!-- MORE DETAILS (payment breakdown, settlement trace, visit link) -->
+      <details class="tx-details" id="inv-more-details">
+        <summary>جزئیات بیشتر</summary>
+        ${payCards ? `<h3 class="sub-title" style="margin-top:10px;">پرداخت</h3><div class="cards" style="margin-bottom:8px;">${payCards}</div>` : ''}
       ${(() => {
-        let tr = null;
-        try {
-          tr = typeof invoiceAllocationTrace === 'function' ? invoiceAllocationTrace(inv.id) : null;
-        } catch (e) {
-          tr = null;
-        }
+        const tr = allocTrace;
         if (!tr) return '';
 
         const fmtDate = function(d){ return typeof faDate === 'function' ? faDate(d) : (d || '—'); };
@@ -234,17 +480,14 @@
             (tr.incomingTotal === tr.effectivePaid ? finalRows : '<div class="ledger-row" style="cursor:default;"><span class="label">جمع مبالغ مؤثر در تسویه</span><span class="filler"></span><span class="amount">' + toman(tr.incomingTotal) + ' ت</span></div>' + finalRows) + legacyText;
         }
 
-        return '<details class="tx-details">' +
-          '<summary>ریز تسویه فاکتور</summary>' +
-          '<div style="margin-top:10px;margin-bottom:8px;">' + body + '</div>' +
+        return '<div id="inv-alloc-section">' +
+          '<h3 class="sub-title">ریز تسویه فاکتور</h3>' +
+          '<div style="margin-bottom:8px;">' + body + '</div>' +
           '<div class="sub" style="display:block;line-height:1.7;margin-top:10px;">این مسیر بر اساس داده‌ها و قواعد تخصیص فعلی محاسبه شده است.<br>با ویرایش یا حذف اسناد و تراکنش‌های گذشته، یا ثبت سندی با تاریخ گذشته،<br>ممکن است تغییر کند؛ ثبت فاکتور جدید با تاریخ آینده آن را تغییر نمی‌دهد.</div>' +
-          '</details>';
+          '</div>';
       })()}
-
-      <!-- SECONDARY: visit link -->
-      <details class="tx-details">
-        <summary>ارتباط با ویزیت (اختیاری)</summary>
-        <div class="card" style="margin-top:10px;margin-bottom:8px;">
+        <h3 class="sub-title">ارتباط با ویزیت (اختیاری)</h3>
+        <div class="card" style="margin-bottom:8px;">
           <div class="label">ویزیت مرتبط با این فاکتور</div>
           <div style="font-size:.88rem;margin-top:6px;line-height:1.7;">
             ${inv.visitId
@@ -267,6 +510,19 @@
       </details>
 
       ${hist}
+
+      <!-- PRIVATE: profit stays out of the customer-facing details -->
+      <details class="tx-details">
+        <summary>سود این فاکتور (فقط برای شما)</summary>
+        <div class="cards" style="margin-top:10px;margin-bottom:8px;">
+          <div class="card wide"><div class="label">سود اقلام این فاکتور</div><div class="value">${toman(invProfit)} ت</div></div>
+        </div>
+      </details>
+
+      <!-- DANGER ZONE -->
+      <div style="margin-top:24px;margin-bottom:16px;padding-top:16px;border-top:1px solid var(--vg-color-divider);">
+        <button type="button" class="btn danger" style="width:100%;" data-inv-action="del">حذف فاکتور</button>
+      </div>
     </div>`;
 
     // Action buttons (delegated)
@@ -308,6 +564,12 @@
               return;
             }
             openEditInvoice(inv.id, inv.customerId);
+          } else if (action === 'open-alloc') {
+            const sec = (rootEl || root).querySelector('#inv-alloc-section');
+            if (!sec) { showToast('ریز تسویه در دسترس نیست'); return; }
+            const more = sec.closest('details');
+            if (more) more.open = true;
+            sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
           } else if (action === 'link-visit') {
             (async function () {
               const sel = document.getElementById('inv-link-visit');

@@ -37,7 +37,7 @@
     });
 
     if (supFilter === 'debt') rows = rows.filter(x => x.t.balance > 0);
-    else if (supFilter === 'settled') rows = rows.filter(x => x.t.balance === 0);
+    else if (supFilter === 'settled') rows = rows.filter(x => Math.abs(x.t.balance) < 0.5);
     else if (supFilter === 'credit') rows = rows.filter(x => x.t.balance < 0);
 
     if (supSort === 'debtDesc') rows.sort((a,b) => b.t.balance - a.t.balance);

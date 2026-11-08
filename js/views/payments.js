@@ -50,7 +50,9 @@
           date: p.date || '',
           amount: p.amount || 0,
           method: 'supplier',
-          methodLabel: 'پرداخت به تامین‌کننده',
+          methodLabel: p.method === 'check'
+            ? ('چک به تامین‌کننده · ' + (p.status === 'cleared' ? 'پرداخت‌شده' : (p.status === 'bounced' ? 'برگشتی' : 'در جریان')))
+            : 'پرداخت نقدی به تامین‌کننده',
           partyName: s.name || '—',
           partyId: s.id,
           invoiceId: null,

@@ -8,6 +8,7 @@
   let chkQuery = '';
   let chkFilter = 'all'; // all | pending | cleared | dueSoon | overdue
   let chkSort = 'dueAsc'; // dueAsc | dueDesc | amountDesc | newest
+  let chkSide = 'customer'; // customer (دریافتی از مشتری) | supplier (پرداختی به تامین‌کننده)
 
   let searchHandler = null;
   let chipHandlers = [];
@@ -51,17 +52,79 @@
     return diff !== null && diff < 0;
   }
 
+  /* چک‌های پرداختی به تامین‌کننده — فقط‌خواندنی؛ تغییر وضعیت/ویرایش در صفحهٔ همان تامین‌کننده انجام می‌شود
+     (با تأیید و بدون چرخهٔ ناخواسته). منبع داده: supplierCheckEntries() در calc.js. */
+  const SUP_STATUS = {
+    pending: { label: 'در جریان', cls: 'accent-amber' },
+    cleared: { label: 'پرداخت‌شده', cls: 'accent-olive' },
+    bounced: { label: 'برگشتی', cls: 'accent-rust' }
+  };
+  function renderSupplierCheckList(listEl, sumEl) {
+    let rows = (typeof supplierCheckEntries === 'function' ? supplierCheckEntries() : []).map((e, i) => ({
+      e, i,
+      dueSoon: e.status === 'pending' && e.dueDiff !== null && e.dueDiff >= 0 && e.dueDiff <= 3,
+      overdue: e.status === 'pending' && e.dueDiff !== null && e.dueDiff < 0
+    }));
+    const total = rows.length;
+    const q = (chkQuery || '').trim().toLowerCase();
+    if (q) {
+      rows = rows.filter(r =>
+        (r.e.supplier.name || '').toLowerCase().includes(q) ||
+        String(r.e.payment.checkNumber || '').toLowerCase().includes(q) ||
+        String(r.e.face || '').includes(q)
+      );
+    }
+    if (chkFilter === 'pending' || chkFilter === 'cleared' || chkFilter === 'bounced') rows = rows.filter(r => r.e.status === chkFilter);
+    else if (chkFilter === 'dueSoon') rows = rows.filter(r => r.dueSoon);
+    else if (chkFilter === 'overdue') rows = rows.filter(r => r.overdue);
+
+    const dueOf = r => String(r.e.payment.dueDate || '');
+    if (chkSort === 'dueDesc') rows.sort((a, b) => dueOf(b).localeCompare(dueOf(a)));
+    else if (chkSort === 'amountDesc') rows.sort((a, b) => b.e.face - a.e.face);
+    else if (chkSort === 'newest') rows.sort((a, b) => String(b.e.payment.date || '').localeCompare(String(a.e.payment.date || '')) || (b.i - a.i));
+    else rows.sort((a, b) => dueOf(a).localeCompare(dueOf(b)));
+
+    const sum = list => list.reduce((s, r) => s + r.e.face, 0);
+    sumEl.innerHTML = `
+      <div class="card"><div class="label">تعداد چک (فیلتر)</div><div class="value">${enToFaDigits(String(rows.length))}</div></div>
+      <div class="card"><div class="label">جمع مبالغ</div><div class="value">${toman(sum(rows))} ت</div></div>
+      <div class="card wide"><div class="label">جمع در جریان (در فیلتر فعلی)</div><div class="value accent-amber">${toman(sum(rows.filter(r => r.e.status === 'pending')))} ت</div></div>
+    `;
+    if (!rows.length) {
+      listEl.innerHTML = `<div class="empty">${total ? 'موردی پیدا نشد' : 'هنوز چکی به تامین‌کننده‌ای پرداخت نشده.'}</div>`;
+      return;
+    }
+    listEl.innerHTML = rows.map(r => {
+      const e = r.e, p = e.payment, st = SUP_STATUS[e.status];
+      const warn = r.overdue ? 'سررسید گذشته' : (r.dueSoon ? 'سررسید نزدیک' : '');
+      const dueCls = (r.dueSoon || r.overdue) ? 'accent-rust' : '';
+      return `<a class="ledger-row tx-row" href="#/supplier?id=${encodeURIComponent(e.supplier.id)}" style="text-decoration:none;color:inherit;align-items:flex-start;">
+        <span class="name" style="flex:1;min-width:0;">
+          <span class="tx-row-title">${esc(e.supplier.name || '—')}</span>
+          <span class="sub">${p.checkNumber ? 'ش ' + esc(p.checkNumber) + ' · ' : ''}سررسید <span class="${dueCls}">${faDate(p.dueDate)}</span></span>
+          ${warn ? '<span class="sub accent-rust">' + warn + '</span>' : ''}
+        </span>
+        <span class="filler"></span>
+        <span class="amount tx-row-amount">
+          <span class="tx-row-total">${toman(e.face)} ت</span>
+          <span class="tx-row-meta ${st.cls}">${st.label}</span>
+        </span>
+      </a>`;
+    }).join('');
+  }
+
   function renderCheckListOnly() {
     const listEl = document.getElementById('check-list');
     const sumEl = document.getElementById('check-summary');
     if (!listEl || !sumEl) return;
+    if (chkSide === 'supplier') { renderSupplierCheckList(listEl, sumEl); return; }
 
-    let rows = (data.checks || []).slice().map(ch => {
+    let rows = (data.checks || []).slice().map((ch, idx) => {
       const cust = data.customers.find(c => c.id === ch.customerId);
       const inv = ch.invoiceId ? data.invoices.find(i => i.id === ch.invoiceId) : null;
       const st = checkStatusLabel(ch);
       return {
-        ch, cust, inv, st,
+        ch, cust, inv, st, idx,
         dueSoon: isDueSoon(ch),
         overdue: isOverdue(ch),
         partyName: cust ? cust.name : '—',
@@ -85,7 +148,8 @@
 
     if (chkSort === 'dueDesc') rows.sort((a,b) => (b.ch.dueDate || '').localeCompare(a.ch.dueDate || ''));
     else if (chkSort === 'amountDesc') rows.sort((a,b) => (b.ch.amount || 0) - (a.ch.amount || 0));
-    else if (chkSort === 'newest') rows.sort((a,b) => String(b.ch.id).localeCompare(String(a.ch.id)));
+    // «جدیدترین ثبت» = ترتیب واقعی ثبت در data.checks (نه مقایسهٔ رشتهٔ id که برای ثبت‌های هم‌میلی‌ثانیه تصادفی بود)
+    else if (chkSort === 'newest') rows.sort((a,b) => b.idx - a.idx);
     else rows.sort((a,b) => (a.ch.dueDate || '').localeCompare(b.ch.dueDate || ''));
 
     const totalAll = rows.reduce((s,r) => s + (r.ch.amount || 0), 0);
@@ -149,12 +213,21 @@
     const chip = function (id, label) {
       return `<button type="button" class="chip ${chkFilter === id ? 'active' : ''}" data-cf="${id}">${label}</button>`;
     };
+    const isSup = chkSide === 'supplier';
+    const sideChip = function (id, label) {
+      return `<button type="button" class="chip ${chkSide === id ? 'active' : ''}" data-side="${id}">${label}</button>`;
+    };
     root.innerHTML = `
-      <div class="field"><input id="check-search" placeholder="جستجوی مشتری، شماره چک، مبلغ..." value="${esc(chkQuery)}" autocomplete="off"></div>
+      <div class="chip-row" id="check-sides">
+        ${sideChip('customer', 'دریافتی از مشتری')}
+        ${sideChip('supplier', 'پرداختی به تامین‌کننده')}
+      </div>
+      <div class="field"><input id="check-search" placeholder="${isSup ? 'جستجوی تامین‌کننده، شماره چک، مبلغ...' : 'جستجوی مشتری، شماره چک، مبلغ...'}" value="${esc(chkQuery)}" autocomplete="off"></div>
       <div class="chip-row" id="check-chips">
         ${chip('all','همه')}
         ${chip('pending','در جریان')}
-        ${chip('cleared','وصول‌شده')}
+        ${chip('cleared', isSup ? 'پرداخت‌شده' : 'وصول‌شده')}
+        ${isSup ? chip('bounced','برگشتی') : ''}
         ${chip('dueSoon','سررسید نزدیک')}
         ${chip('overdue','چک سررسیدگذشته')}
       </div>
@@ -168,9 +241,22 @@
         </select>
       </div>
       <div id="check-summary" class="cards" style="margin-bottom:12px;"></div>
-      <p class="tx-hint">برای تغییر وضعیت وصول، روی دکمه وضعیت هر چک بزنید.</p>
+      <p class="tx-hint">${isSup ? 'برای تغییر وضعیت یا ویرایش چک، روی ردیف بزنید تا صفحهٔ همان تامین‌کننده باز شود.' : 'برای تغییر وضعیت وصول، روی دکمه وضعیت هر چک بزنید.'}</p>
       <div id="check-list" class="tx-list"></div>
     `;
+
+    document.querySelectorAll('#check-sides [data-side]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const next = btn.getAttribute('data-side');
+        if (next === chkSide) return;
+        chkSide = next;
+        chkFilter = 'all';
+        chkQuery = '';
+        const fabEl = document.getElementById('fab');
+        if (fabEl) fabEl.style.display = chkSide === 'customer' ? 'block' : 'none';   // «+ ثبت چک» فقط برای چک مشتری
+        drawChecksPage(root);
+      });
+    });
 
     const searchEl = document.getElementById('check-search');
     searchHandler = function (e) {
@@ -244,7 +330,11 @@
     if (nav) nav.style.display = '';
 
     chkQuery = '';
-    var validChkFilters = ['all', 'pending', 'cleared', 'dueSoon', 'overdue'];
+    chkSide = (params && params.side === 'supplier') ? 'supplier' : 'customer';
+    if (fab) fab.style.display = chkSide === 'customer' ? 'block' : 'none';
+    var validChkFilters = chkSide === 'supplier'
+      ? ['all', 'pending', 'cleared', 'bounced', 'dueSoon', 'overdue']
+      : ['all', 'pending', 'cleared', 'dueSoon', 'overdue'];
     var incomingFilter = params && params.filter;
     chkFilter = (incomingFilter && validChkFilters.indexOf(incomingFilter) !== -1)
       ? incomingFilter
