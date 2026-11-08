@@ -1028,8 +1028,18 @@ function isBackRoute(path){
 function routeBackTarget(path, params){
   params = params || {};
   switch(path){
-    case '/customer':
+    case '/customer': {
+      /* Opened from an invoice (fromInv): Back returns to that invoice, or to the
+         invoice list if it no longer exists. Otherwise the existing behaviour. */
+      if(params.fromInv != null && params.fromInv !== ''){
+        try{
+          const invs = (typeof data !== 'undefined' && Array.isArray(data.invoices)) ? data.invoices : [];
+          const exists = invs.some(function(x){ return String(x.id) === String(params.fromInv); });
+          return exists ? {path:'/invoice', params:{id:String(params.fromInv)}} : {path:'/invoices'};
+        }catch(_e){ return {path:'/invoices'}; }
+      }
       return {path:'/customers'};
+    }
     case '/invoice': {
       /* If the invoice belongs to a customer, return to that customer rather
          than blindly returning to the invoice list. Otherwise use the list. */

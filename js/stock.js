@@ -25,14 +25,14 @@ function layerById(layerId){
 }
 
 function layersForPurchase(purchaseId, productId, itemId){
-  return ensureInventoryLayers().filter(l=>{
+  const all = ensureInventoryLayers().filter(l=>{
     if(l.purchaseId!==purchaseId) return false;
     if(productId && l.productId!==productId) return false;
-    if(itemId!==undefined && itemId!==null && itemId!==''){
-      if(l.itemId && l.itemId!==itemId) return false;
-    }
     return true;
   });
+  if(itemId===undefined || itemId===null || itemId==='') return all;
+  const hasItemScoped = all.some(l=>l.itemId != null && l.itemId !== '');
+  return all.filter(l=>l.itemId === itemId || (!hasItemScoped && (l.itemId == null || l.itemId === '')));
 }
 
 /** Create one inventory layer (purchase or manual/orphan). */
@@ -291,34 +291,12 @@ function adjustPurchaseLayerQty(purchaseId, productId, newQty, itemId){
   return { ok:true, layer, delta };
 }
 
-/** Void purchase layers. Historical allocations remain; not consumable. */
-function voidPurchaseLayers(purchaseId){
-  const layers = ensureInventoryLayers().filter(l=>l.purchaseId===purchaseId);
-  const byProduct = {};
-  layers.forEach(layer=>{
-    const rem = layer.qtyRemaining||0;
-    if(rem>0){
-      byProduct[layer.productId] = (byProduct[layer.productId]||0) + rem;
-    }
-    layer.status = 'voided';
-  });
-  Object.keys(byProduct).forEach(pid=>{
-    const prod = data.products.find(x=>x.id===pid);
-    if(prod){
-      prod.stockQty = (prod.stockQty||0) - byProduct[pid];
-      prod.stockLog = prod.stockLog||[];
-      prod.stockLog.push({id:uid(), date:todayISO(), type:'out', qty:-byProduct[pid], note:'باطل\u200cسازی خرید', purchaseId});
-    }
-  });
-  return { ok:true, layers };
-}
-
 /** HARD DELETE when nothing consumed. */
 function hardDeletePurchaseLayers(purchaseId){
   const layers = ensureInventoryLayers().filter(l=>l.purchaseId===purchaseId);
   for(const layer of layers){
     const consumed = (layer.qtyOriginal||0) - (layer.qtyRemaining||0);
-    if(consumed>0) return { ok:false, error:'خرید مصرف شده؛ از void استفاده کنید', consumed };
+    if(consumed>0) return { ok:false, error:'خرید مصرف شده و قابل حذف نیست', consumed };
   }
   layers.forEach(layer=>{
     const rem = layer.qtyRemaining||0;
@@ -331,24 +309,6 @@ function hardDeletePurchaseLayers(purchaseId){
   });
   data.inventoryLayers = ensureInventoryLayers().filter(l=>l.purchaseId!==purchaseId);
   return { ok:true };
-}
-
-/** Delete or void purchase — production API for future UI. */
-function deleteOrVoidPurchase(purchaseId){
-  const layers = ensureInventoryLayers().filter(l=>l.purchaseId===purchaseId);
-  const anyConsumed = layers.some(l => ((l.qtyOriginal||0)-(l.qtyRemaining||0))>0);
-  if(anyConsumed){
-    const r = voidPurchaseLayers(purchaseId);
-    return { ok:r.ok, mode:'void' };
-  }
-  const r = hardDeletePurchaseLayers(purchaseId);
-  if(!r.ok) return r;
-  for(const s of (data.suppliers||[])){
-    if(!s.purchases) continue;
-    const idx = s.purchases.findIndex(p=>p.id===purchaseId);
-    if(idx>=0){ s.purchases.splice(idx,1); break; }
-  }
-  return { ok:true, mode:'hard-delete' };
 }
 
 // ---------- برگشت فروش = ورود کالا + sale-return layer(s) از costAllocations فاکتور اصلی ----------

@@ -725,6 +725,33 @@ function supplierTotals(sid){
   return { purchaseTotal, payTotal, returnTotal, openingBalance, balance: openingBalance + purchaseTotal - payTotal - returnTotal };
 }
 
+/* Read-only: every supplier check (supplier.payments[] with method 'check'), one shape for the supplier page,
+   /checks and the dashboard alert. status: pending | cleared | bounced. A bounced check keeps its face value in
+   faceAmount while amount is 0 (so supplierTotals counts it as unpaid). dueDiff: calendar days to due date
+   (negative = overdue, null = unknown) — same convention as checks.js dueDiffDays. */
+function supplierCheckDueDiff(p){
+  if(!p || !p.dueDate) return null;
+  const dueMs = new Date(String(p.dueDate).slice(0,10)+'T00:00:00').getTime();
+  if(!isFinite(dueMs)) return null;
+  const todayMs = new Date(todayISO()+'T00:00:00').getTime();
+  return Math.round((dueMs - todayMs) / 86400000);
+}
+function supplierCheckEntries(){
+  const out = [];
+  (data.suppliers||[]).forEach(s=>{
+    (s.payments||[]).forEach((p, index)=>{
+      if(!p || p.method!=='check') return;
+      out.push({
+        supplier: s, payment: p, index: index,
+        status: p.status==='cleared' ? 'cleared' : (p.status==='bounced' ? 'bounced' : 'pending'),
+        face: typeof p.faceAmount==='number' ? p.faceAmount : (p.amount||0),
+        dueDiff: supplierCheckDueDiff(p)
+      });
+    });
+  });
+  return out;
+}
+
 // قیمت خرید یک کالا به روش FIFO: میانگین وزنیِ لایه‌های باز (چیزی که واقعاً در انبار مانده و نوبت مصرفشه).
 // اگر کالا هیچ لایه‌ی بازی نداشته باشه (هنوز خریدی/ورودی ثبت نشده)، برمی‌گرده به فیلد دستی p.buy.
 function productFifoUnitCost(pid){

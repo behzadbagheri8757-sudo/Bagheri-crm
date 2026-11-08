@@ -3772,15 +3772,17 @@ function openAddSupplier(){
 
 
   /** G4: one-tap purchase-return reason (metadata only; no stock/FIFO impact). */
+// Shared with the supplier page, which displays the stored returnReason with these same labels.
+const PURCHASE_RETURN_REASONS = [
+  { value: 'defective', label: 'خرابی' },
+  { value: 'deliveryError', label: 'اشتباه در ارسال' },
+  { value: 'overstock', label: 'مازاد کالا' },
+  { value: 'changeMind', label: 'تغییر نظر' },
+  { value: 'complaint', label: 'شکایت' },
+  { value: 'other', label: 'سایر' },
+];
 function openPurchaseReturnReasonPicker(onPick){
-  const REASONS = [
-    { value: 'defective', label: 'خرابی' },
-    { value: 'deliveryError', label: 'اشتباه در ارسال' },
-    { value: 'overstock', label: 'مازاد کالا' },
-    { value: 'changeMind', label: 'تغییر نظر' },
-    { value: 'complaint', label: 'شکایت' },
-    { value: 'other', label: 'سایر' },
-  ];
+  const REASONS = PURCHASE_RETURN_REASONS;
   openSheet(
     '<h3>برگشت خرید</h3>' +
     '<div class="visit-card visit-card-enter">' +
