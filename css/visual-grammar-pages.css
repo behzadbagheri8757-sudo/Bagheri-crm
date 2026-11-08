@@ -36,7 +36,6 @@ main .empty{margin:14px 0;}
 .vg-route-payments main .section-title,
 .vg-route-visits main .section-title,
 .vg-route-reports main .section-title,
-.vg-route-suppliers main .section-title,
 .vg-route-checks main .section-title,
 .vg-route-inventory main .section-title,
 .vg-route-prospects main .section-title{
@@ -49,7 +48,6 @@ main .empty{margin:14px 0;}
 .vg-route-invoices #invoice-list,
 .vg-route-payments #payment-list,
 .vg-route-visits #visit-list,
-.vg-route-suppliers #supplier-list,
 .vg-route-checks #check-list,
 .vg-route-prospects #prospect-list{
   margin-top:14px;
@@ -61,7 +59,6 @@ main .empty{margin:14px 0;}
 .vg-route-invoices .tx-list .ledger-row,
 .vg-route-payments .tx-list .ledger-row,
 .vg-route-visits .tx-list .ledger-row,
-.vg-route-suppliers .tx-list .ledger-row,
 .vg-route-checks .tx-list .ledger-row,
 .vg-route-prospects .tx-list .ledger-row{
   background:transparent;
@@ -235,7 +232,6 @@ main .empty{margin:14px 0;}
 .vg-route-invoices .chip-row,
 .vg-route-payments .chip-row,
 .vg-route-visits .chip-row,
-.vg-route-suppliers .chip-row,
 .vg-route-checks .chip-row,
 .vg-route-prospects .chip-row{
   gap:var(--vg-space-related);
@@ -548,18 +544,6 @@ main .empty{margin:14px 0;}
   line-height:1.55;
 }
 
-.vg-route-suppliers .tx-list .tx-row{
-  min-height:56px;
-}
-
-.vg-route-suppliers .tx-list .tx-row-amount{
-  min-width:96px;
-}
-
-.vg-route-suppliers .tx-list .tx-row-total{
-  font-weight:800;
-}
-.vg-route-suppliers .tx-list .tx-row-title,
 .vg-route-products .tx-list .tx-row-title,
 .vg-route-invoices .tx-list .tx-row-title{
   font-weight:var(--vg-weight-title);
@@ -2771,3 +2755,108 @@ html[data-theme="dark"] #prospect-summary{ border:1px solid var(--vg-color-borde
   background:#34C58E;border:3px solid var(--vg-color-surface);box-sizing:border-box;
   box-shadow:0 2px 6px rgba(52,197,142,.45);
 }
+
+/* ======================================================================
+   Supplier detail page + purchase sheets (same visual grammar as Customer detail / Quick View)
+   identity → attention → metrics → actions → collapsed history → row sheets
+   ====================================================================== */
+#main.supplier-detail-view .sup-identity{padding:20px 18px;border-radius:var(--vg-radius-raised);box-shadow:none;margin-bottom:var(--vg-space-group);}
+.sup-identity-name{font-size:1.2rem;font-weight:var(--vg-weight-emphasis);line-height:1.45;overflow-wrap:anywhere;}
+.sup-balance{margin-top:16px;padding-top:16px;border-top:1px solid var(--vg-color-divider);}
+.sup-balance-value{font-size:1.3rem;font-weight:var(--vg-weight-value);overflow-wrap:anywhere;}
+.sup-meta{margin-top:12px;padding-top:4px;border-top:1px solid var(--vg-color-divider);}
+.sup-meta .cd-meta-row{padding:9px 0 0;gap:12px;}
+.sup-meta .cd-meta-k{flex:0 0 96px;}
+html[data-theme="dark"] #main.supplier-detail-view .sup-identity{border-color:var(--vg-color-border);box-shadow:0 0 0 1px var(--vg-color-border);}
+
+.sup-alert{margin:0 0 var(--vg-space-group);padding:9px 12px;border-radius:12px;border-inline-start:3px solid currentColor;font-size:.78rem;font-weight:var(--vg-weight-value);line-height:1.7;overflow-wrap:anywhere;}
+.sup-alert.is-danger{background:var(--vg-color-danger-soft);color:var(--vg-color-danger);}
+.sup-alert.is-warning{background:var(--vg-color-warning-soft);color:var(--vg-color-warning);}
+
+#main.supplier-detail-view .sup-metrics{margin-bottom:var(--vg-space-group);}
+.sup-actions{display:grid;grid-template-columns:1.4fr 1fr;gap:8px;}
+.sup-actions .btn{min-height:46px;}
+.sup-actions-secondary{display:flex;justify-content:center;gap:20px;margin:2px 0 var(--vg-space-group);}
+.sup-link{min-height:44px;padding:0 6px;border:0;background:none;font:inherit;font-size:.8rem;font-weight:var(--vg-weight-title);color:var(--vg-color-primary);cursor:pointer;}
+
+#main.supplier-detail-view .sup-history{margin-bottom:var(--vg-space-group);}
+#main.supplier-detail-view .sup-history[open] > .customer-behavior-summary{margin-bottom:10px;}
+
+/* rows: the whole row is the tap target (opens a sheet) */
+.sup-row{min-height:56px;cursor:pointer;}
+.sup-row:focus-visible{outline:2px solid var(--vg-color-primary);outline-offset:-2px;}
+.sup-row .tx-row-title{font-weight:var(--vg-weight-title);overflow-wrap:anywhere;}
+.sup-row .tx-row-amount{display:grid;grid-template-columns:auto auto;align-items:center;justify-content:end;column-gap:8px;row-gap:3px;min-width:96px;}
+.sup-row .tx-row-total{grid-column:1;font-weight:var(--vg-weight-emphasis);}
+.sup-row .sup-badge{grid-column:1;justify-self:end;}
+.sup-chev{grid-column:2;grid-row:1 / span 2;width:7px;height:7px;border-left:2px solid var(--vg-color-text-muted);border-bottom:2px solid var(--vg-color-text-muted);transform:rotate(45deg);opacity:.6;}
+
+.sup-badge,.sup-chip{display:inline-block;padding:2px 9px;border-radius:var(--vg-radius-pill);font-size:.64rem;line-height:1.6;white-space:nowrap;}
+.sup-badge{font-weight:var(--vg-weight-value);}
+.sup-badge.is-amber{background:var(--vg-color-warning-soft);color:var(--vg-color-warning);}
+.sup-badge.is-olive{background:var(--vg-color-success-soft);color:var(--vg-color-success);}
+.sup-badge.is-rust{background:var(--vg-color-danger-soft);color:var(--vg-color-danger);}
+.sup-chip{background:var(--vg-color-neutral-soft);color:var(--vg-color-text-secondary);font-weight:var(--vg-weight-label);}
+
+/* sheets: header (supplier · date) → title → grouped boxes → totals → actions */
+.sup-sheet-head{padding-bottom:4px;}
+.sup-sheet-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+.sup-sheet-supplier{font-size:.8rem;font-weight:var(--vg-weight-title);color:var(--vg-color-text-muted);overflow-wrap:anywhere;}
+.sup-sheet-date{font-size:.76rem;color:var(--vg-color-text-muted);white-space:nowrap;}
+.sup-sheet-title{margin:6px 0 0;font-size:1.15rem;font-weight:var(--vg-weight-emphasis);line-height:1.5;overflow-wrap:anywhere;}
+.sup-sheet-note{margin-top:8px;font-size:.76rem;line-height:1.7;color:var(--vg-color-text-muted);overflow-wrap:anywhere;}
+.sup-group,.sup-totals{margin-top:12px;padding:2px 14px;border-radius:14px;background:var(--vg-color-surface-soft);}
+.sup-group-title{padding:10px 0 2px;font-size:.68rem;font-weight:700;color:var(--vg-color-text-muted);}
+.sup-line,.sup-kv-row,.sup-total-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 0;}
+.sup-line + .sup-line,.sup-kv-row + .sup-kv-row,.sup-total-row + .sup-total-row{border-top:1px solid var(--vg-color-divider);}
+.sup-line-main{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.sup-line-name{font-size:.86rem;font-weight:var(--vg-weight-value);color:var(--vg-color-text);overflow-wrap:anywhere;}
+.sup-line-meta,.sup-kv-k{font-size:.7rem;line-height:1.6;color:var(--vg-color-text-muted);overflow-wrap:anywhere;}
+.sup-line-amount,.sup-kv-v{flex:none;font-size:.84rem;font-weight:var(--vg-weight-value);color:var(--vg-color-text);font-variant-numeric:tabular-nums;text-align:end;}
+.sup-kv-v{flex:0 1 auto;font-weight:var(--vg-weight-title);overflow-wrap:anywhere;}
+.sup-kv-warn{color:var(--vg-color-danger);font-weight:var(--vg-weight-label);}
+.sup-total-row{align-items:baseline;font-size:.82rem;color:var(--vg-color-text-secondary);font-variant-numeric:tabular-nums;}
+.sup-total-row.is-final{font-size:1rem;font-weight:var(--vg-weight-emphasis);color:var(--vg-color-text);}
+.sup-sheet-actions{display:grid;gap:8px;margin-top:16px;}
+.sup-act{width:100%;min-height:46px;}
+.sup-edit-note{padding:0 0 8px;text-align:right;font-size:.74rem;}
+
+/* purchase form — reuses the invoice shell (.inv-sheet-v2 header/body/total chip/sections/items card) */
+.pf-sheet .pf-items-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.pf-link{min-height:44px;padding:0 2px;border:0;background:none;font:inherit;font-size:.76rem;font-weight:var(--vg-weight-title);color:var(--vg-color-primary);cursor:pointer;}
+.pf-line{padding:12px 14px 10px;}
+.pf-line + .pf-line{border-top:1px solid var(--vg-color-divider);}
+.pf-line-top{display:flex;align-items:center;gap:8px;}
+.pf-select,.pf-field input,.pf-amount input{height:44px;min-width:0;padding:0 12px;border:1px solid var(--vg-color-border);border-radius:12px;background:var(--vg-color-surface);font-size:15px;color:var(--vg-color-text);}
+.pf-select{flex:1;}
+.pf-del{flex:none;width:44px;height:44px;border:0;border-radius:50%;background:var(--vg-color-neutral-soft);color:var(--vg-color-text-muted);font-size:1rem;cursor:pointer;}
+.pf-line-fields{display:grid;grid-template-columns:1fr 1.3fr;gap:10px;margin-top:10px;}
+.pf-field{display:flex;flex-direction:column;gap:4px;min-width:0;}
+.pf-field span{font-size:.66rem;color:var(--vg-color-text-muted);}
+.pf-line-total{grid-column:1 / -1;display:flex;align-items:baseline;justify-content:space-between;font-size:.72rem;color:var(--vg-color-text-muted);}
+.pf-line-total strong{font-size:.9rem;color:var(--vg-color-text);font-variant-numeric:tabular-nums;}
+.pf-line-hint{margin-top:6px;font-size:.68rem;color:var(--vg-color-text-muted);}
+.pf-amount{display:flex;flex-direction:column;gap:6px;padding:14px;}
+.pf-amount label{font-size:.76rem;color:var(--vg-color-text-secondary);}
+.pf-amount small{font-size:.68rem;line-height:1.6;color:var(--vg-color-text-muted);}
+.pf-row-input{flex:1;min-width:0;height:44px;padding:0 8px;border:0;background:transparent;text-align:start;font-size:15px;color:var(--vg-color-text);}
+.pf-sheet .inv-items-card [hidden]{display:none;}
+.pf-sheet .pf-summary .sup-totals{margin-top:0;}
+
+
+/* BAGHERI v105 — supplier purchase form uses the invoice row grammar. */
+.pf-sheet [hidden]{display:none!important;}
+.pf-sheet .inv-line-del{
+  color:var(--vg-color-danger)!important;
+  background:var(--vg-color-danger-soft)!important;
+}
+.pf-sheet .inv-line-del:active{color:var(--vg-color-danger)!important;}
+.pf-sheet .prod-drop{z-index:8;}
+.pf-sheet .prod-drop-panel{max-height:min(48vh,360px);overflow:hidden;}
+.pf-sheet .prod-drop-list{max-height:calc(min(48vh,360px) - 58px);overflow:auto;}
+.pf-sheet .inv-line-collapsed{cursor:pointer;}
+.pf-sheet .inv-line-view-active .row-product-search{width:100%;text-align:right;}
+
+.pf-sheet .inv-line-main{display:flex;flex-wrap:wrap;align-items:center;}
+.pf-sheet .prod-drop{position:relative;inset:auto;flex:0 0 100%;width:100%;max-height:none;}
+.pf-sheet .prod-drop-panel{width:100%;}
